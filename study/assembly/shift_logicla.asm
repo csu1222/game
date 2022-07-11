@@ -59,5 +59,5 @@ CMAIN:
     xor al, al
     PRINT_HEX 1, al
           
-    xor rax, rax
+    xor rax, rax    ; 그러므로 이 코드는 이 프로그램이 아무문제 없이 끝냈다면 a 레지스터가 0 이다 라는 뜻
     ret
