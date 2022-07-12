@@ -14,13 +14,19 @@ CMAIN:
     
     ; 스택의 사용법은 데이터를 넣을때는 push 뺄 때는 pop
     
+    ;push rax
+    ;push rbx       로 먼저 사용하던 레지스터 값을 저장 해놓을 수있습니다. 함수를 다 호출 하고 난 다음 다시 pop하면 기존 값이 복원됩니다.
+    
     push 3
     push 2
     call MAX        ; 여기 call을 할때 스택에 다시 여기로 돌아오기위한 rip (Instuction Pointer)를 저장합니다.
     PRINT_DEC 8, rax
     NEWLINE
-    pop rax
-    pop rax     
+    pop rax         ; pop을 두번 해주는 이유는 프로그램이 종료하고나서 push한 스택들이 그대로 있으면 메모리 주소에 혼란이 오기때문입니다.
+    pop rax         ; 이렇게 pop을 push한 횟수만큼 해주거나 대신 add rsp, 16 으로 push한 데이터 크기수 만큼 rsp에 더해줍니다.
+    
+    ;pop rbx        기존 값을 복원했습니다. 스택은 후입선출이므로 rbx부터 pop 합니다.
+    ;pop rax
     
     xor rax, rax
     ret
