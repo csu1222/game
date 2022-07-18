@@ -19,7 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="11_Exercise_3_rockpapersisc.cpp" />
+    <ClCompile Include="12_Exercise_3-1_RPS_ENUM.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
