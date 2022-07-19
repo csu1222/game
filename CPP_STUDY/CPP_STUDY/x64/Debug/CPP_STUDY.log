@@ -1,3 +1,2 @@
-﻿  12_Exercise_3-1_RPS_ENUM.cpp
-C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\12_Exercise_3-1_RPS_ENUM.cpp(45,12): warning C4244: '인수': 'time_t'에서 'unsigned int'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+﻿  13_function(1).cpp
   CPP_STUDY.vcxproj -> C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\x64\Debug\CPP_STUDY.exe
