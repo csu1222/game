@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="27_multi_array.cpp">
+    <ClCompile Include="28_pointer_finish.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>
