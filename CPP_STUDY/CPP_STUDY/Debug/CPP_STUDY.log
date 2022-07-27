@@ -1,4 +1,2 @@
-﻿  28_pointer_finish.cpp
-C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\28_pointer_finish.cpp(11): warning C4172: 지역 변수 또는 임시: a의 주소를 반환하고 있습니다.
-C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\28_pointer_finish.cpp(17): warning C4172: 지역 변수 또는 임시: a의 주소를 반환하고 있습니다.
+﻿  29_TextRPG_with_pointer.cpp
   CPP_STUDY.vcxproj -> C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\Debug\CPP_STUDY.exe
