@@ -19,7 +19,11 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="30_pointer_Exercise.cpp" />
+    <ClCompile Include="32_file_split_management.cpp" />
+    <ClCompile Include="32_test_1.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="32_test_1.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
