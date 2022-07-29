@@ -1,2 +1,7 @@
-﻿  33_Opening_OOP.cpp
-  CPP_STUDY.vcxproj -> C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\Debug\CPP_STUDY.exe
+﻿  34_OOP_constructor_and_destructor.cpp
+C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\34_OOP_constructor_and_destructor.cpp(187,8): error C2679: 이항 '=': 오른쪽 피연산자로 'int' 형식을 사용하는 연산자가 없거나 허용되는 변환이 없습니다.
+C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\34_OOP_constructor_and_destructor.cpp(126,1): message : 'Knight &Knight::operator =(const Knight &)'일 수 있습니다.
+C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\34_OOP_constructor_and_destructor.cpp(187,8): message : 인수 목록 '(Knight, int)'을(를) 일치시키는 동안
+C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\34_OOP_constructor_and_destructor.cpp(190,15): error C2664: 'void HelloKnight(Knight)': 인수 1을(를) 'int'에서 'Knight'(으)로 변환할 수 없습니다.
+C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\34_OOP_constructor_and_destructor.cpp(190,15): message : class 'Knight'의 생성자가 'explicit'으로 선언되었습니다.
+C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\34_OOP_constructor_and_destructor.cpp(142,6): message : 'HelloKnight' 선언을 참조하십시오.

@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="33_Opening_OOP.cpp">
+    <ClCompile Include="34_OOP_constructor_and_destructor.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>
