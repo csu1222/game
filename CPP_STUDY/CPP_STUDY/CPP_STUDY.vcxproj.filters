@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="34_OOP_constructor_and_destructor.cpp">
+    <ClCompile Include="35_OOP_Inheritance.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>
