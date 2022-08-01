@@ -74,7 +74,7 @@ public:
 	Inventory _inventory;
 
 	// 문법 설명용
-	int* _hpPtr;  // 포인터의 경우 초기화 없이 선언 할 수 있었습니다 (nullptr)
+	int* _hpPtr = &_hp;  // 포인터의 경우 초기화 없이 선언 할 수 있었습니다 (nullptr)
 	int& _hpRef;  // 참조는 포인터와 비슷한 개념이지만 선언할때 초기화가 되어야 했습니다.
 	const int _hpConst;  // const의경우 선언할 당시에 초기화 하지않으면 외부에서 값을 변경 할 수 없으니 초기화가 필요합니다.
 };
