@@ -1,2 +1,3 @@
-﻿  39_Operator_Overloading.cpp
+﻿  40_OOP_closing.cpp
+C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\40_OOP_closing.cpp(32,12): warning C4101: 'tc' :참조되지 않은 지역 변수입니다.
   CPP_STUDY.vcxproj -> C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\Debug\CPP_STUDY.exe
