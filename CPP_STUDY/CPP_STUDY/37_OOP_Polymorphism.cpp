@@ -1,7 +1,7 @@
 #include <iostream>
 using namespace std;
 
-// 오늘의 주제 : 은닉성(Data hiding)
+// 오늘의 주제 : 다형성(Polymorphism)
 
 // 객체지향 (OOP Object Oriented Programming)
 // - 상속성   
