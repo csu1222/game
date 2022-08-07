@@ -34,6 +34,11 @@ include ""? <>? : Áö±Ý±îÁö Á¤Ã¼´Â ¸ð¸£Áö¸¸ ¾Ï½ÃÀûÀ¸·Î »ç¿ëÇØ ¿Ô´ø #include¿¡ ´ëÇ
 using namespace : ¸ð¸£Áö¸¸ ÀÏºÎ·¯ ¹«½ÃÇÏ°í ±×³É ¾²´ø ÄÚµå 2 using namespace std;ÀÇ ´ëÇØ, ¾ÕÀ¸·Î´Â ³²ÀÌ ¸¸µç ¿©·¯ ¶óÀÌºê·¯¸®¸¦ °¡Á®´Ù ¾²°Ô µÉ ÅÙµ¥ ÀÚ½ÅÀÇ ÄÚµå¿¡¼­ »ç¿ëÇÑ Å¬·¡½º ÀÌ¸§°ú ¿ì¿¬È÷ ³²ÀÇ ¶óÀÌºê·¯¸® ³»ÀÇ Å¬·¡½º ÀÌ¸§ÀÌ ÈÄ¥ ¼ö ÀÖ½À´Ï´Ù. ±×·¯¸é ÄÄÆÄÀÏ·¯´Â ÀÌ¸§ÀÌ ¶È°°Àº Å¬·¡½º°¡ ¿©·¯¹ø È£ÃâµÇ¾îÀÖÀ¸´Ï Á¦´ë·Î ÀÛµ¿ÇÏÁö ¸øÇÒ°ÍÀÔ´Ï´Ù. ±×·¡¼­ ÀÌ Å¬·¡½º°¡ ¾îµð¿¡¼­ ¿Â°ÍÀÎÁö ¾Õ¿¡ ÀÌ¸§Ç¥(namespace)¸¦ ºÙÀÌ´Â °ÍÀÔ´Ï´Ù. ÀÎÅ¬·çµåÇÑ Çì´õÆÄÀÏÀÇ Å¬·¡½º¸¦ È£ÃâÇÏµí [¶óÀÌºê·¯¸® ÀÌ¸§] :: [Å¬·¡½ºÀÌ¸§] ÀÌ·¸°Ô È£ÃâÇÏ°Ô µË´Ï´Ù. ÀÌ±ÛÀÇ ÁÖÁ¦ÀÎ using namespace´Â ¸í½ÃÀûÀ¸·Î ÀÌ¸§Ç¥¸¦ ºÙÈ÷Áö ¾Ê¾Æµµ ¾Ë¾Æµè°Ô²û ÇØÁÖ´Â ÄÚµåÀÔ´Ï´Ù. Áï, using namespace std;·Î ¿©ÅÂ²¯ cout ÇÔ¼ö¸¦ »ç¿ëÇß´ø°ÍÀÌ »ç½ÇÀº std :: cout À¸·Î ¸Å¹ø »ç¿ë Çß¾î¾ß ÇÏ´Â°ÍÀÔ´Ï´Ù.
 */
 
+// Àü¹æ¼±¾ð º¸Ãæ
+/*
+
+*/
+
 
 int main()
 {

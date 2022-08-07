@@ -17,40 +17,22 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="46_TextRPG_OOP.cpp">
+    <ClCompile Include="47_Player.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
-    <ClCompile Include="46_Game.cpp">
-      <Filter>소스 파일\Game</Filter>
+    <ClCompile Include="47_Foward_Declaration.cpp">
+      <Filter>소스 파일</Filter>
     </ClCompile>
-    <ClCompile Include="46_Player.cpp">
-      <Filter>소스 파일\Creature</Filter>
-    </ClCompile>
-    <ClCompile Include="46_Creature.cpp">
-      <Filter>소스 파일\Creature</Filter>
-    </ClCompile>
-    <ClCompile Include="46_Field.cpp">
-      <Filter>소스 파일\Game</Filter>
-    </ClCompile>
-    <ClCompile Include="46_Monster.cpp">
-      <Filter>소스 파일\Creature</Filter>
+    <ClCompile Include="47_Monster.cpp">
+      <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="46_Game.h">
-      <Filter>소스 파일\Game</Filter>
+    <ClInclude Include="47_Monster.h">
+      <Filter>소스 파일</Filter>
     </ClInclude>
-    <ClInclude Include="46_Player.h">
-      <Filter>소스 파일\Creature</Filter>
-    </ClInclude>
-    <ClInclude Include="46_Creature.h">
-      <Filter>소스 파일\Creature</Filter>
-    </ClInclude>
-    <ClInclude Include="46_Field.h">
-      <Filter>소스 파일\Game</Filter>
-    </ClInclude>
-    <ClInclude Include="46_Monster.h">
-      <Filter>소스 파일\Creature</Filter>
+    <ClInclude Include="47_Player.h">
+      <Filter>소스 파일</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
