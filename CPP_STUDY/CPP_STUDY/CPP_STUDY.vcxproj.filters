@@ -5,18 +5,52 @@
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
       <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
     </Filter>
-    <Filter Include="헤더 파일">
-      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
-      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
-    </Filter>
     <Filter Include="리소스 파일">
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="소스 파일\Game">
+      <UniqueIdentifier>{ae339bcd-91c6-457a-846a-218b734e285b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="소스 파일\Creature">
+      <UniqueIdentifier>{94582d8c-51c4-4fb7-9656-4a233f2f1060}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="45_Casting.cpp">
+    <ClCompile Include="46_TextRPG_OOP.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
+    <ClCompile Include="46_Game.cpp">
+      <Filter>소스 파일\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="46_Player.cpp">
+      <Filter>소스 파일\Creature</Filter>
+    </ClCompile>
+    <ClCompile Include="46_Creature.cpp">
+      <Filter>소스 파일\Creature</Filter>
+    </ClCompile>
+    <ClCompile Include="46_Field.cpp">
+      <Filter>소스 파일\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="46_Monster.cpp">
+      <Filter>소스 파일\Creature</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="46_Game.h">
+      <Filter>소스 파일\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="46_Player.h">
+      <Filter>소스 파일\Creature</Filter>
+    </ClInclude>
+    <ClInclude Include="46_Creature.h">
+      <Filter>소스 파일\Creature</Filter>
+    </ClInclude>
+    <ClInclude Include="46_Field.h">
+      <Filter>소스 파일\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="46_Monster.h">
+      <Filter>소스 파일\Creature</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

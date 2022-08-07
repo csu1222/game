@@ -19,7 +19,19 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="45_Casting.cpp" />
+    <ClCompile Include="46_TextRPG_OOP.cpp" />
+    <ClCompile Include="46_Creature.cpp" />
+    <ClCompile Include="46_Game.cpp" />
+    <ClCompile Include="46_Player.cpp" />
+    <ClCompile Include="46_Field.cpp" />
+    <ClCompile Include="46_Monster.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="46_Creature.h" />
+    <ClInclude Include="46_Game.h" />
+    <ClInclude Include="46_Player.h" />
+    <ClInclude Include="46_Field.h" />
+    <ClInclude Include="46_Monster.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>

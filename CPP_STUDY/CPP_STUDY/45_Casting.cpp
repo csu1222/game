@@ -12,6 +12,7 @@ using namespace std;
 1 - static_cast : 타입 원칙에 비춰볼 때 상식적인 캐스팅만 허용해준다
 	1. int <-> float
 	2. Player* -> Knight* (다운캐스팅)  단, 안정성 보장 못함 (프로그래머 스스로 부모 자식간 캐스팅이 안전하다 확신한 후에 사용)
+					(클래스의 멤버 변수에 타입 값이 있어서 조건문으로 원본이 뭔지 체크 후 사용 할 수도 있습니다.)
 
 2 - dynamic_cast : 상속 관계에서의 안전한 형 변환
 	RTTI(RunTime Type Information)활용
