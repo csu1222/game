@@ -9,15 +9,8 @@ enum CreatureType
 class Creature
 {
 public:
-	Creature(int creatureType) : _creatureType(creatureType), _hp(0), _attack(0), _defence(0)
-	{
-
-	}
-
-	virtual ~Creature()
-	{
-
-	}
+	Creature(int cretureType);
+	virtual ~Creature();
 
 	virtual void PrintInfo() = 0;
 
@@ -26,7 +19,7 @@ public:
 	bool IsDead() { return _hp <= 0; }
 
 public:
-	int _creatureType;
+	int _cretureType;
 	int _hp;
 	int _attack;
 	int _defence;

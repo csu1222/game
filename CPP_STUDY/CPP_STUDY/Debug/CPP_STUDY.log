@@ -1,4 +1,8 @@
-﻿  Field.cpp
+﻿  Creature.cpp
+  Field.cpp
+  Game.cpp
   Monster.cpp
+  Player.cpp
+  main.cpp
   코드를 생성하고 있습니다...
   CPP_STUDY.vcxproj -> C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\Debug\CPP_STUDY.exe

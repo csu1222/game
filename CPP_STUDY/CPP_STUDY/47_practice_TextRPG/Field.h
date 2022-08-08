@@ -9,10 +9,12 @@ public:
 	~Field();
 
 	void Update(Player* player);
-	void CreateMonster();
-	void StartBattle(Player* player);
 
+	void CreateMonster();
+
+	void StartBatle(Player* player);
 public:
 	Monster* _monster;
+
 };
 

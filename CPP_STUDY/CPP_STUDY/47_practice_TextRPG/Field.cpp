@@ -1,12 +1,11 @@
-#include <iostream>
 #include "Field.h"
-#include "Game.h"
 #include "Monster.h"
 #include "Player.h"
+#include <stdlib.h>
 
 Field::Field() : _monster(nullptr)
 {
-	
+
 }
 
 Field::~Field()
@@ -19,29 +18,28 @@ void Field::Update(Player* player)
 {
 	if (_monster == nullptr)
 		CreateMonster();
-
-	StartBattle(player);
+	StartBatle(player);
 }
 
 void Field::CreateMonster()
 {
-	int randValue = 1 + (rand() % 3);
+	int randValue = 1 + rand() % 3;
 
-	if (randValue == MT_SLIME)
+	switch (randValue)
 	{
+	case MT_SLIME:
 		_monster = new Slime();
-	}
-	else if (randValue == MT_ORC)
-	{
+		break;
+	case MT_ORC:
 		_monster = new Orc();
-	}
-	else if (randValue == MT_SKELETON)
-	{
+		break;
+	case MT_SKELETON:
 		_monster = new Skeleton();
+		break;
 	}
 }
 
-void Field::StartBattle(Player* player)
+void Field::StartBatle(Player* player)
 {
 	while (true)
 	{
@@ -65,6 +63,5 @@ void Field::StartBattle(Player* player)
 			player->PrintInfo();
 			break;
 		}
-
 	}
 }
