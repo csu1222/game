@@ -1,8 +1,4 @@
-﻿  46_Creature.cpp
-  46_Field.cpp
-  46_Game.cpp
-  46_Monster.cpp
-  46_Player.cpp
-  46_TextRPG_OOP.cpp
+﻿  Field.cpp
+  Monster.cpp
   코드를 생성하고 있습니다...
   CPP_STUDY.vcxproj -> C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\Debug\CPP_STUDY.exe

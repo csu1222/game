@@ -37,7 +37,6 @@ public:
 		_attack = 10;
 		_defence = 5;
 	}
-
 };
 
 class Archer : public Player

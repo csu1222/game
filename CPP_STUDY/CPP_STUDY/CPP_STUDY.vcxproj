@@ -19,13 +19,19 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="47_Foward_Declaration.cpp" />
-    <ClCompile Include="47_Monster.cpp" />
-    <ClCompile Include="47_Player.cpp" />
+    <ClCompile Include="47_practice_TextRPG\Creature.cpp" />
+    <ClCompile Include="47_practice_TextRPG\Field.cpp" />
+    <ClCompile Include="47_practice_TextRPG\Game.cpp" />
+    <ClCompile Include="47_practice_TextRPG\Monster.cpp" />
+    <ClCompile Include="47_practice_TextRPG\Player.cpp" />
+    <ClCompile Include="47_practice_TextRPG\practice.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="47_Monster.h" />
-    <ClInclude Include="47_Player.h" />
+    <ClInclude Include="47_practice_TextRPG\Creature.h" />
+    <ClInclude Include="47_practice_TextRPG\Field.h" />
+    <ClInclude Include="47_practice_TextRPG\Game.h" />
+    <ClInclude Include="47_practice_TextRPG\Monster.h" />
+    <ClInclude Include="47_practice_TextRPG\Player.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
