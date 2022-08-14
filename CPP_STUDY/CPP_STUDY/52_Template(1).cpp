@@ -47,6 +47,23 @@ using namespace std;
 
 	그리고 템플릿의 기본 문법은 template<typename T> 이긴 한데
 	c++에서 지원하는 문법으로 templaye<class T> 도 위 타입네임과 같은 의미라고 합니다.
+
+	템플릿을 매개변수의 타입으로만 사용하는것은아닙니다.
+	만약에, 인자 두개를 받아서 두 값을 합하고 합한 값을 반환하는 함수가 있을때 
+	인자 두개의 타입뿐만아니라 반환되는 부분도 템플릿을 이용할 수 있습니다.
+
+	또한가지 그러면 한 함수내에서 여러 타입의 매개변수를 사용할때는 템플릿을 사용하지 못하는건가?
+	그럴땐 사용하는 타입 갯수만큼 typename을 만들어주면 되겠습니다
+	template<typename T1, typename T2>
+	[함수]
+
+	그러면 혹시 여태껏 열심히 배운 커스텀 클래스도 템플릿으로 쉽게 다룰 수 있을까요?
+	예시를 들때면 항상나오던 Knight클래스를 예로 들어보겠습니다.
+	멤버변수로 _hp = 100; 을 들고있는 Knight를 Print(T a) { cout << a << endl;} 함수로 출력해보려고 합니다.
+	일단 빨간줄로 에러라고 안뜨길레 빌드 까지 해보니 이번에는 에러가 떳습니다.
+	그 이유는 템플릿으로 알아서 함수를 만들어 준다고 해도 빌드에서 에러가 없을때 가능한것입니다. 
+	클래스는 << 라는 연산자가 호환되지 않기 때문에 에러가 났습니다.
+	그래서 << 를 연산자 오버로딩 하면 되겠습니다.
 	
 */
 
@@ -58,13 +75,56 @@ void Print(T a)	//인자의 타입대신 템플릿을 넣어줍니다.
 	cout << a << endl;
 }
 
+template<typename T1, typename T2>
+void Print(T1 a, T2 b)
+{
+	cout << a << " " << b << endl;
+}
+
+template<typename T>
+T Add(T a, T b)
+{
+	return a + b;
+}
+
+// 커스텀 클래스
+class Knight
+{
+public:
+	// ...
+public:
+	int _hp = 100;
+};
+
+// << 연산자 오버로딩(전역함수 버전)
+ostream& operator<< (ostream& os, Knight& k)
+{
+	os << k._hp;
+	return os;
+}
+
 int main()
 {
-
-	Print(50);
+	// 템플릿 : 인자 하나
+	Print<int>(50);
 	Print(50.0f);
 	Print(50.0);
 	Print("Hello World");
+
+
+	// 템플릿 : 인자들과 반환타입 1가지
+	int result = Add(3, 5);
+	float result2 = Add<float>(2.22f, 3.5f);
+
+
+	// 템플릿 : 타입이 다수 일때
+	Print(50, "Hello World");
+
+
+	// 커스텀 클래스를 연산자 오버로딩을 해서 템플릿으로 함수를 만들수 있게 
+	Knight k;
+	Print(k);
+
 
 	return 0;
 }
