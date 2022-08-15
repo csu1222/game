@@ -64,12 +64,23 @@ using namespace std;
 	그 이유는 템플릿으로 알아서 함수를 만들어 준다고 해도 빌드에서 에러가 없을때 가능한것입니다. 
 	클래스는 << 라는 연산자가 호환되지 않기 때문에 에러가 났습니다.
 	그래서 << 를 연산자 오버로딩 하면 되겠습니다.
+
+	cout << 에서 왼쪽항에 있는 cout을 F12로 따라가면 ostream타입의 객체라는 것을 알수 있습니다.
+	전역 연산자 함수 버전으로 반환 타입은 ostream& 으로 하고 매개변수로 (ostream& os, Knight& k) 를 받아줍니다.
+	구현부에 os(여기에 cout이 올겁니다.) << k._hp(Knight클래스의 체력만 뽑아서 출력합니다.) return 으로 os를 그대로 반환해줍니다.
 	
+	Knight의 _hp만 덩그러니 출력하는게 심심해서 얘만 특수 처리를 해보겠습니다. 그럴때 사용하는것이 
+	[템플릿 특수화]라는 문법입니다.
+	템플릿이라는 마법의 문법으로 그때 그때 맞는 함수를 찍어내는 걸 배웠습니다. 그러면 특별한 경우의 예외처리를 해서 
+	예를 들면 Knight를 사용하면 예외로 다른 형태의 함수를 만들어 내는것 입니다.
+	템플릿 특수화의 방법은 일단 템플릿이긴 템플릿이니 
+	template<>		// typename이 들어갈 공간을 비워둡니다.
+	void Print(Knight a) { cout << "Knight!!" endl; } 
+	이런식으로 Knigth가 인자로 올때의 예외적 함수 내용을 적어줍니다.
 */
 
 // 템플릿 사용 기본 문법
 template<typename T>
-
 void Print(T a)	//인자의 타입대신 템플릿을 넣어줍니다.
 {
 	cout << a << endl;
@@ -97,10 +108,18 @@ public:
 };
 
 // << 연산자 오버로딩(전역함수 버전)
-ostream& operator<< (ostream& os, Knight& k)
+ostream& operator<< (ostream& os, const Knight& k)
 {
 	os << k._hp;
 	return os;
+}
+
+// 템플릿 특수화
+template<>
+void Print(Knight a)
+{
+	cout << "Knight  !!!!!!!!!" << endl;
+	cout << a._hp << endl;
 }
 
 int main()
