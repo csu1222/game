@@ -17,7 +17,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="59_List(2).cpp">
+    <ClCompile Include="60_Deque.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>
