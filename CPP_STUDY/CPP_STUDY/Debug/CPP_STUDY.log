@@ -1,1 +1,2 @@
-﻿  CPP_STUDY.vcxproj -> C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\Debug\CPP_STUDY.exe
+﻿  68_Using.cpp
+C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\68_Using.cpp(39,1): error C2823: 형식 정의 템플릿이(가) 잘못되었습니다.
