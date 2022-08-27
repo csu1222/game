@@ -17,7 +17,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="65_Auto.cpp">
+    <ClCompile Include="67_Nullptr.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>
