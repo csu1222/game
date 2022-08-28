@@ -1,2 +1,4 @@
-﻿  68_Using.cpp
-C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\68_Using.cpp(39,1): error C2823: 형식 정의 템플릿이(가) 잘못되었습니다.
+﻿  70_Delete.cpp
+C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\70_Delete.cpp(66,6): error C2280: 'void Knight::operator =(const Knight &)': 삭제된 함수를 참조하려고 합니다.
+C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\70_Delete.cpp(53): message : 'Knight::operator =' 선언을 참조하십시오.
+C:\Users\seonguk\Documents\myProject\c++_gameprograming\CPP_STUDY\CPP_STUDY\70_Delete.cpp(53,7): message : 'void Knight::operator =(const Knight &)': 함수가 명시적으로 삭제되었습니다.
