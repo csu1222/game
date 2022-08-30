@@ -17,7 +17,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="71_Override_Final.cpp">
+    <ClCompile Include="72_rvalue.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>
