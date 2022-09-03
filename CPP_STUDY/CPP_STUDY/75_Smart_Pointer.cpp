@@ -72,7 +72,7 @@ using namespace std;
 		현재 count를 담당하는 _block은 nullptr이기때문에 new로 동적할당을해주면 RefCountBlock의 기본 데이터가 1이니깐 딱 맞습니다.
 		if 문으로 _ptr이 nullptr이 아니면 _block = new RefCountBlock(); 을 해줍니다.
 
-		그 다음 생성자는 복사 생성자 입니다.  두 rptr이 하나의 포인터를 가리킬때 사용됩니다. 인자로 const 자신 클래스 참조 타입을 받습니다.
+		그 다음 생성자는 복사 생성자 입니다.  두 rptr이 하나의 주소를 가리킬때 사용됩니다. 인자로 const 자신 클래스 참조 타입을 받습니다.
 		_ptr, _block을 인자로 받은 sptr의 _ptr, _block으로 초기화 해주고 if 문으로 현재 _ptr이 nullptr이 아닌지 체크 후 아니라면 
 		reference count를 ++ 시켜줍니다.
 
@@ -117,7 +117,7 @@ using namespace std;
 		그리고 shared_ptr에서 관리하던 RefCountBlock의 refCount외에 또 한가지weakCount를 관리하게 됩니다. refCount는 이 RefCountBlock 객체를 참조하는 
 		애가 몇 명인지를 체크하는 것이고, weakCount는 몇개의 weak_ptr이 RefCountBlock를 참조 하고 있는지를 카운트 합니다.
 		이 weakCount는 shared_ptr에서 순환 오류가 일어날 만한 데이터가 서로를 참조할때 refCount를 증가 시키지 않고 weakCount를 증가 시킵니다. 
-		그래서 shared_ptr이 소멸될 때 refCount가 0이 아니어서 메모리누수가 일어나지 않게 해줍니다. 
+		그래서 shared_ptr이 소멸될 때 refCount가 0이 아니어서 메모리누수가 일어나는 일을 방지 해줍니다.
 		weak_ptr이 등장하면 shared_ptr의 소멸자에서 _block(RefCountBlock를 참조하고 있는 shred_ptr의 멤버 변수)의 삭제를 미룹니다.
 		_block이 삭제되지 않아야 shared_ptr이 소멸된 후에도 weak_ptr이 자체적으로 lock()이라는 메소드로 자신이 속한 shared_ptr이 true인지 false인지를 
 		체크해서 true이면 shared_ptr이 아직 소멸하지 않았으니 shared_ptr을 반환하고 false이면 shared_ptr이 소멸한 것이니 weak_ptr도 소멸하면서 
