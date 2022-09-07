@@ -183,3 +183,136 @@ Engine.h에서 전방 선언은 해주었지만 실제 Device가 어떤 클래�
 이렇게가 Command Queue의 멤버 변수들 입니다. 이중 위의 세개가 중요한데
 _cmdAlloc, _cmdList는  _cmdQueue에 명령을 넣어주는 헬퍼들이라고 할 수 있습니다.
 _cmdAlloc은 명령을 넣어주기 위해 메모리를 할당하는 Allocator라고 할수 있고 _cmdList는 말그대로 명령 리스트라고 할수 있습니다.
+
+커맨드 큐 다음으로 _fence라는 이름이 붙은 변수들이 3개 있는데 이 펜스는 
+그래픽 카드가 하는 작업이 각각 연관이 없는 일이 수가 매우 많은걸 처리하는건데 그 중에 가끔 그래도 선행 작업이 끝나야 다음 작업을 할수 있는 
+명령이라면 이 펜스에서 잠깐 명령주는걸 멈춰봐라 하는 기능입니다. 
+그래픽 처리를 CPU가 명령을 적어서 GPU에 넘길때 커맨드 큐를 통해 넘기게 되는데 이 CPU와 GPU의 동기화를 위한 기능이 펜스입니다.
+CPU가 연산을 통해 어떤 그림을 그려야하는지를 GPU에게 넘겨주고 GPU는 그림을 그립니다. 
+만약 CPU가 연산을 GPU가 그림을 그리는 시간보다 빨라서 GPU가 그림을 다못그렸는데 다음 그림 도안을 넘겨주게 되면 의도하지 않던 그림이 그려질 것입니다.
+이 CPU의 그림도안을 잠시 멈춰두게 해주는것이 펜스 입니다.
+
+_cmdQueue, _fence, 다음으로 _swapChain, _descHeap이 멤버 변수로 옵니다. 커맨드 큐는 명령들을 모아서 주는 역할이기 때문에 
+스왑체인과 디스크립터 힙의 정보가 필요할때도 있기 때문에 변수로 받아 주고 있습니다. 
+
+이제 함수들을 만들어 줄 것인데 Init함수와 WaitSync함수를 만들어 주겠습니다. Init은 초기화 하기 위한 함수일것이고, 
+WaitSync는 _fence를 동작하기 위한 함수입니다.
+
+Init 함수부터 분석 해보면 인자로 device, swapChain, descHeap을 받아 주고 있습니다. 
+받은 swapChain과 descHeap으로 초기화 해주고 있고, D3D12_COMMAND_QUEUE_DESC queueDesc = {}; 라는 지역 변수도 만들어주었습니다. 
+	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+queueDesc객체의 Type과 Flags라는 멤버 변수에 어떤 값을 설정해주고 있습니다. 이 데이터를 기준으로 커맨드 큐의 멤버 변수들을 만들어 줄 것입니다.
+
+그 다음이 중요한데 인자로 받은 device의 멤버 함수CreateCommandQueue로 queueDesc 라는 형식으로 자신의 멤버 변수_cmdQueue에 
+커맨드 큐를 만들어 주고있습니다. _cmdQueue에 직접 new ~~~ 로 만들어 주고 있는것이 아니라 device의 함수를 이용해 간접적으로 만들어 주고 있는걸 알 수 있습니다.
+
+그리고 _cmdAlloc과 _cmdList도 비슷하게 device의 멤버 함수 CreateCommandAllocator, CreateCommandList로 초기화 해주고 있습니다.
+
+CreateCommandAllocator는 CreateCommandQueue와 인자가 비슷하지만 CreateCommandList는 인자가 좀 많습니다.
+	// GPU가 하나인 시스템에서는 0으로
+	// DIRECT or BUNDLE
+	// Allocator
+	// 초기 상태 (그리기 명령은 nullptr 지정)
+device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, _cmdAlloc.Get(), nullptr, IID_PPV_ARGS(&_cmdList));
+
+이런 식인데 모든 인자를 지금 전부 이해해야 하지는 않지만 세번째로 받는 인자가 바로 위에서 만든 _cmdAlloc입니다. 
+이 부분이 이전에 배운 std::vector와 비슷한데 벡터도 capacity로 메모리영역을 잡고 그 안에 데이터를 넣어줬습니다. 그리고 
+벡터를 clear를 하면 데이터는 날라가지만 이미 잡아 뒀던 capacity는 그대로였습니다. 
+커맨드 큐가 이 벡터와 비슷하게 동작합니다. 커맨드 큐의 담아 뒀던 명령들을 싹 날리고 다시 명령을 넣기도 할 텐데 그때도 메모리를 전부 날리는게 아니라 
+_cmdAlloc가 메모리를 관리 하고 있을것입니다.
+
+_cmdList는 open / close 상태가 있는데 
+open상태에서 list에 command를 넣다가 close 상태일때 제출하는 개념입니다.
+
+다음으로 _fence도 device의 멤버 함수인 CreateFence로 만들어 줍니다. _fenceEvent는 DirectX와 관련된 함수가 아닌 ::CreatEvent로 만들어 줍니다. 
+_fenceEvent는 신호등 같은 역할을 하는데 어떤 조건이 만족되면 파란불을 켜주고 어떤 조건이 되면 파란불이 꺼지고 합니다.
+
+CommandQueue 클래스의 소멸자를 만들어주고 소멸자에서 위의 _fenceEvent를 ::CloseHandle(_fenceEvent); 로 닫아 주겠습니다. 
+이건 new를 하면 결국 delete를 해주는 것처럼 닫아주는게 정석이라고 합니다.
+
+WaitSync 함수를 분석해보겠습니다. 
+일단 _fenceValue는 0부터 시작해서 WaitSync함수의 구현부 첫줄에서  _fenceValue++; 을 해줍니다. 
+다음으로 _cmdQueue에도 펜스 벨류를 건내주고 _fence에게도 펜스 벨류를 줘서 거기 까지 끝났으면 _fenceEvent를 실행 시켜달라고 하고 있습니다.
+
+그 실행된 _fenceEvent 라는것 이벤트의 open, close를 스위칭 해준다는 이야기 같고 , event가 open 될때 까지 
+::WaitForSingleObject(_fenceEvent, INFINITE);
+이부분까지 CPU가 진행을 하다가 _fenceEvent가 close 상태라면 잠시 멈춰있고 이후에 GPU가 _fence->SetEventOnCompletion까지 와서 밀려있던 작업을 끝냈으면
+_fenceEvent를 open으로 바꿔주어 CPU의 진행을 다시 재개 시킵니다.
+(저는 cpu든 gpu든 통합해서 코드를 한줄씩 읽을 수 있는걸로 착각해서 이해가 조금 걸렸습니다. 
+하지만 cpu의 진행과 gpu의 진행이 각각 이라면 이해가 갑니다.)
+
+멀티 쓰레드 에서 이벤트를 다뤄 봤으면 쉽게 이해갈 부분이라고 하는데 경험이 없어서 이해하는데 좀 걸렸습니다.
+
+하지만 이런 중간에 cpu를 놀리는 코드는 별로 좋지 못하다고 합니다. gpu가 일을 하는동안 cpu는 다른 작업 (몬스터 ai같은거) 라도 하고 있어야 
+컴퓨터의 모든 성능을 쓸수 있을 겁니다 . 첫 코드이다 보니 간단하게 만들기 위해 그런듯 합니다.
+
+다른 함수로 RenderBegin과 RenderEnd가 있는데 이 함수는 나중에 다른 클래스들을 만들고 나서 다시 배우는걸로 하겠습니다.
+
+GetCommandQueue라는 함수는 외부에서 커맨드 큐가 필요할때 사용하기위한 함수입니다.
+
+일단은 커맨드 큐는 여기까지 하고 
+
+
+
+다시 Engine.cpp로 돌아가 _cmdQueue를 초기화 시켜주겠습니다. _cmdQueue는 인자로 device와 swapChain, descHeap이 필요했습니다.
+이제 다음 클래스 SwapChain을 알아보겠습니다.
+
+### SwapChain
+
+SwapChain은 한국어로는 교환 사슬 이라고 합니다.
+
+[외주 과정]
+- 현재 게임세상에 있는 상황을 묘사하고 그 묘사한 상황을 어떤 공식으로 어떻게 계산할것인지 던져줌니다. 
+  그러면 GPU가 열심히 계산(외주)를 합니다. 결과물을 받아서 화면에 그려줍니다.
+
+그러면 [외주 결과물] 을 어떻게 받지?
+- 어떤 종이(Buffer)에 그려달라고 부탁해서 결과물을 받아 보는 방법을 해보겠습니다. 
+  그러면  특수한 종이를 만들어서 -> 처음에 상황 건내줄때 같이 건내주고 -> 결과물을 받을때 종이에 받는다 OK
+  -> 우리 화면에 특수한 종이(외주 결과물)을 출력한다.
+
+이러면 문제가 해결됐을까요? 
+게임은 특별한종이 하나를 출력한다고 끝나는 프로그램이 아닙니다. 매 초당 몇십장의 특별한 종이를 출렬해야합니다. 
+우리가 만든 특수 종이는 이미 외주 결과물을 출력하고 있는데 다음 장면은 어떻게 그릴까요? 
+이전 외주 결과물이 그려진 종이를 다시 GPU에게 건내고 그위에 다시 그려달라고 한다면 지금 프레임과 다음프레임이 살짝 섞이게 될것입니다.
+
+이러지 말고 그냥 처음에 특수 종이를 두개를 만들고 하나는 화면을 그리는 용도 하나는 외주를 맡기는 용도로 사용하면 되겠습니다.
+이것이 Double Bufferring!
+
+이렇게 버퍼를 교환하는 작업을 SwapChain이 해줍니다. 
+SwapChain이 꼭 두개의 버퍼만 작동하는건 아니고 두개면 충분하니까 두개로 예시를 든 겁니다.
+
+스왑 체인은 프라이빗 변수를 3개 가지고 있을건데 
+
+	ComPtr<IDXGISwapChain>	_swapChain;
+	ComPtr<ID3D12Resource>	_renderTargets[SWAP_CHAIN_BUFFER_COUNT];
+	uint32			_backBufferIndex = 0;
+
+이중 SWAP_CHAIN_BUFFER_COUNT 는 double bufferring으로 buffer를 두개 만 쓸것이니 2로 입력해도 되지만 매번 하드코딩으로 적는것보다 
+EnginePch.h에 enum{ SWAP_CHAIN_BUFFER_COUNT = 2, }; 로 상수화 시켜서 들고 있게 하였습니다.
+
+이제 늘 그랬듯이 초기화 함수 Init을 만들어 주겠습니다.
+스왑체인은 초기화할때 windowInfo, dxgi, commandQueue를 받아 줍니다.
+
+혹시라도 Init을 두번 했을까봐 _swapChain을 리셋 해줍니다.
+
+다음으로 
+DXGI_SWAP_CHAIN_DESC sd;
+이라는 DXGI라이브러리에서 정의한 스왑 체인에 대한 정보를 가진 구조체 sd를 생성합니다. 
+그 밑으로 sd구조체의 구성 요소들을 채워줍니다. 결국 버퍼에 그릴 화면이 클라이언트 화면의 크기에 맞출것이기 때문에 windowInfo의 너비 높이등을 참고하고 있습니다.
+
+구성 요소 들을 쭉 보다 보면 BufferCount에 아까 사용했던 SWAP_CHAIN_BUFFER_COUNT( 2 라는 의미 ) 를 사용하고 있습니다.
+
+또 특이한점은 Device가 그래픽스에서 중요하고 CommandQueue도 Device로 생성해주었었는데 
+SwapChain은 DXGI에서 생성을 해주고 있습니다. DXGI가 화면 출력에 관한 기능들이 있다고 했는데 
+스왑 체인도 꼭 그래픽스를 활용할때만 사용하는 기술이 아니다 보니깐 dxgi안에 들어가 있는걸 알 수 있습니다.
+
+스왑 체인을 하면서 후면 버퍼에 그릴 정보인 cmdQueue와 위에서 필요한 정보들을 정리한 sd의 주소 , 이 스왑 체인을 생성할 _swapCain의 주소를 건내줘서 
+생성합니다.
+
+스왑 체인을 생성하면서 같이 버퍼가 만들어지는데 전면 버퍼 후면 버퍼 둘을 _swapChain의 GetBuffer를 통해 _renderTarget에 저장 해줍니다.	
+
+다음 _backBufferIndex는 이름대로 후면 버퍼로 무슨 버퍼가 와 있는지 _renderTargets의 인덱스로 표시 해주고 있습니다. 
+체인스왑이 일어나면서 0, 1, 0 ,1 로 번갈아 표시 될 것입니다.
+
+
