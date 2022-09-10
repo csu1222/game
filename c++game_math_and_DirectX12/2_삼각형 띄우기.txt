@@ -1,0 +1,126 @@
+	
+
+	삼각형 띄우기
+
+
+
+--------------복습-------------------------------
+오늘의 주제인 삼각형 띄우기를 시작하기 전에 이전에 했던 장치 초기화를 복습해보겠습니다.
+
+엔진을 만들때 엔진의 부품들로 Device, CommandQueue, SwpaChain, DescriptorHeap이라는 네가지 부품들로 만들었습니다. 
+
+이렇게 부품을 쪼개서 만드는 방법과 그냥 Engine클래스 하나에 모든 코드를 작성하는 방법도 있을것입니다.
+
+각 기능들을 부품(클래스)로 때어내면서의 장점은 가독성이 좋아지고, 때어낸 각 부품들이 하는 역할에 대해서도 다시 한번 생각할 수 있습니다.
+
+
+각 부품들의 하는 역할에 대해 요약을 해보면
+
+	1. Device : GPU에게 접근하거나 리소스를 요청하거나 할때 담당하는 인력사무소 대표 같은 기능 
+		중요한 역할을 한다. 그만큼 다른 세 부품들을 초기화 할때 이 Device를 가져다 썼습니다.
+		(여담으로 DirectX9 이전 까지는 이 Device가 모든 역할을 다 했었습니다.)
+	
+	2. Command Queue : GPU에게 요청을 할때 매번 한 개 끝낼때마다 보내는게 아니라 명렬들을 한번에 쭉 보내기위한 리스트
+
+	3. Swap Chain : 더블 버퍼링과 관련된 부분이었습니다 .버퍼(그림을 그릴 특수 종이)를 두개를 가지고 있고 매 프레임마다 
+		전면 버퍼는 화면을 출력할 용도, 후면 버퍼는 다음 프레임을 그릴 용도로 사용한 다음 다음 프레임에서 전면 버퍼와 후면 버퍼를 스왑해서 다음 작업을 이어 나가는 기능
+		그 결과 한 버퍼를 활용할때 중간에 그림을 그리는 장면을 뒤에서 수행하면서 깜빡 깜빡 거리는 걸 방지 해줍니다.
+
+	4. Descriptor Heap : 이전 시간에서는 이 부품의 역할이 기안서라고 했는데 , 어떤 리소스를 서술(Descriptor)하는 기능입니다. 
+		Descriptor Heap의 내용물인 _rtvHeap의 rtv (Rander Target View)의 원본은 Swap Chain 이 가지고 있었습니다. _randerTargets[SWAP_CHAIN_TARGET_COUNT];
+		GPU에게 요청을 할때 이 원본을 바로 주는게 아닌 이 원본의 틀을 본따 그린 기안서, Descriptor Heap을 _rtvHandle로 주소를 보낸다고 했습니다.
+		예를 들면 집을 산다고 했을 때 집 자체(리소스)를 들고 가가지고 직접 파는게 아니라 집문서(view = Descriptor Heap)을 가지고 거래를 할것입니다. 
+		그 집문서에는 집의 주소, 원소유주, 집의 크기 같은 정보들이 있을겁니다.
+		DirectX12이전에는 view들이 각각 타입마다 따로 존재 했는데 DirectX12에서 Descriptor Heap이 이 view들을 배열같은 형태로 모아놓고 있었습니다.
+		우리가 만든 버전은 rtv가 두개 들어있습니다.
+
+그런데 이렇게 여러 부품들로 만들어서 관리하다보면 부품들 서로가 종속성이 있고 서로 얽혀서 기능한다는걸 알 수 있습니다. 
+
+가령 Command Queue에서 RanderBegin()이나 RanderEnd() 같은 경우에도 
+
+SwapChain의 GetCurrentBackBufferResource를 가져다가 쓰기도 하고 DescriptorHeap의 GetBackBufferView를 가져다 쓰기도 했습니다.
+
+이런걸 보다 보면 DescriptorHeap에 view들을 따로 빼서 관리하기보다는 그냥 리소스를 가지고 있는곳에 각각 view도 관리 하면 어떨까 하는 개선 사항도 생각이 나기도 합니다.
+
+그래서 SwapChain에서 View들을 관리하도록 하는걸 해보겠습니다. 
+
+DescriptorHeap에 있던 멤버 변수들 _rtvHeap, _rtvHeapSize, _rtvHandle을 SwapChain의 프라이빗 멤버 변수 관리하는 곳으로 복사하도록 하였습니다. 
+( 사실 _rtvHeapSize는 _rtvHeap에서 가져올수 있어서 생략해도 된다고 합니다. )
+
+SwapChain의 멤버 변수였던 _randerTargets와 이름이 다르니 이름을 비슷하게 _rtvBuffer로 바꿨습니다.
+
+가져온 변수들을 초기화 하던 Descriptor::Init 함수도 가져오고 이름을 SwapChain::CreateRTV라는 이름으로 바꿔주었습니다. SwapChain 헤더 파일에서는 private로 관리하겠습니다.
+
+_rtvHeapSize는 CreateRTV의 스택 메모리에서 그냥 임시로 생성하도록 int32 rtvHeapSize로 CreateRTV함수 내에서 선언 해줬습니다. 
+
+그리고 DescriptorHeap에서는 인자로 받은 SwapChain->GetRanderTarget(index).Get()을 지금은 SwapChain내부에 같이 있으니깐 바로 _rtrBuffer[]에 접근 할 수 있습니다.
+_rtvBuffe[i].Get()으로 바꿔주었습니다.
+
+벌써 부터 같이 관리하니 좀 더 간편해 진것 같습니다.
+
+이제 CreateRTV를 SwapChain의 Init함수에 넣어서 같이 초기화 해주도록 해줍니다. 
+
+그런데 다시 보니 CreateRTV는 device COMptr을 받는데, SwapChain은 _dgxi만 받아 주었습니다. 추가해주도록 합니다. 잊지말고 Engine.cpp에서도 추가해주고 
+
+이제 SwapChain::Init에서 SwapChain을 초기화 해주고 나서 CreateRTV로 view를 초기화 해주고 있습니다. 
+
+좀 더 각 기능들로 나눠 보기 쉽도록 SwapChain의 초기화 부분도 CreateRTV처럼 밖으로 꺼내주겠습니다.
+
+이렇게 Descriptor Heap의 기능을 SwapChain에게 전부 넘겼으니 DescriptorHeap클래스를 삭제 해주겠습니다. 이제 프로젝트를 다시 빌드 해주게 되면 우르르 에러들이 쏟아져 나오는데요
+DescriptorHeap이 아직 다른 클래스의 코드에 남아 있기 때문입니다. 에러 메세지를 타고 들어가 각각 지워주고 다시 빌드해서 다음 에러를 없애고 를 반복 하다보면 
+DescriptorHeap이 선언되고 매개변수로 받아지고 하는거 말고 _descHeap->GetBackBufferView()라는 이 기능이 에러로 남습니다. 
+
+이 BackBuffer의 View를 얻어 내는 함수를 SwapChain클래스에 만들어줘야 겠습니다.
+
+D3D12_CPU_DESCRIPTOR_HANDLE	GetBackRTV() { return _rtvHandle[_backBufferIndex]; }
+
+로 DescriptorHeap에서 Back Buffer의 Index에 접근하기 위해서는 Swapchain->_getBackBufferIndex();로 받아 와야 했던걸 같은 클래스 내에 있으니 
+직접 접근 할 수 있게 되었습니다.
+
+이제 외부에서 백버퍼 인덱스를 알아야 할 이유가 없어진것 같으니 Swapchain->_getBackBufferIndex()를 지워주겠습니다.
+
+그리고 GetCurrentBackBufferResource() 라는 함수 이름이 혼자 너무 긴 것 같으니 통일감을 위해 GetBackRTVBuffer()로 바꿔주었습니다.
+
+다 잘 처리 했다면 다시 빌드하면 에러메세지들이 없을 것입니다. 또 한번 체크로 Client프로젝트를 한번 실행 해보면 무사히 하늘색 창이 떳다면 OK입니다.
+
+
+이렇게 이전 강의를 복습하면서 처음으로 코드를 리펙토링, 정리를  해봤는데 여기서 또 알수 있는 점들이 있습니다. 
+
+우리 프로젝트에서는 EnginePch.cpp에서 Engine객체 GEngine을 전역 객체로 만들어서 사용했었습니다. 사실 이러면 우리 부품들이 각각 멤버 변수로 가지고 있거나, 매개 변수로 받아주거나 하지 않아도
+사용할때 GEngine->GetDevice() 같은 함수를 만들어서 직접 가져오면 됩니다. 
+
+반면 지금의 코드는 객체 지향적인 구조를 중요시 해서 꼬박꼬박 각 클래스마다 다른 클래스를 멤버 변수로 가지고 있고 매개변수도 각각 받아주고 있습니다.
+강사님께서는 이런건 사실 코드의 미학적 측면을 중요시하는 거라고 생각하셨습니다.
+
+실제 선호하는건 빨리빨리 구현하도록 전역 객체를 가져다 쓰는걸 주저하지 않으시답니다. 이런건 각 회사마다 다를것입니다. 각각 장단점이 있을 것입니다.
+
+전역 객체로 가져다 쓰는것은 코드의 종속성인 너무 강해진다는 단점도 있고 객체지향적 디자인을 중시하는것은 매번 코드 정리때마다 조금 귀찮다는 점이 있을 것 입니다.
+
+이제 Engine에서 멤버 객체들을 꺼내 쓸 준비로 Get시리즌 함수들을 준비하였습니다.
+
+public:
+	shared_ptr<class Device> GetDevice() { return	_device; }
+	shared_ptr<class CommandQueue> GetCmdQueue() { return _cmdQueue; }
+	shared_ptr<class SwapChain> GetSwapChain() { return	_swapChain; }
+
+그리고 나중에 빈번하게 활용하게될 CommandQueu의 _cmdList 도 Get함수를 만들어주겠습니다.
+
+	ComPtr<ID3D12GraphicsCommandList> GetCmdList() { return	_cmdList; }
+
+지금 만든 Get함수들은 사용할때마다 GEngin->GetDevice()->GetDevice(); 라는 과정을 거쳐야 원하는 COMptr _device에 접근 할 수 있습니다. 
+이런 불편함을 간소화 하게끔 #define하겠습니다. #define은 EnginePch에 해주겠습니다.
+
+#define DEVICE		GEngine->GetDivece()->GetDevice();
+#define CMD_LIST	GEngine->GetCmdQueue()->GetCmdList();
+
+이제 Device에 접근 하고 싶을 때 클래스가 인자로 받은 걸 사용해도 되지만 바로 DEVICE로 접근해도 가능하게 되었습니다. 
+다만, DEVICE가 의존하고 있는 Engine클래스와 Device, CommandQueue 클래스를 include 해줘야 합니다. Device, CommandQueue, SwapChain들을 자주 가져다 쓸걸로 예상되는데 그럴 때 마다 
+Engine,Device, CommandQueue, SwapChain를 include 해주는건 번거롭습니다.
+
+그래서 Engine클래스의 헤더에 전부 넣어서 관리하려고 합니다. 사실 이렇게 헤더 안에 다른 헤더를 include하는것은 피하는게 좋다고 했습니다. 중복 참조나 순환 참조이 문제 때문인데요
+
+
+
+
+
+
