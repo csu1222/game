@@ -119,6 +119,205 @@ Engine,Device, CommandQueue, SwapChain를 include 해주는건 번거롭습니�
 
 그래서 Engine클래스의 헤더에 전부 넣어서 관리하려고 합니다. 사실 이렇게 헤더 안에 다른 헤더를 include하는것은 피하는게 좋다고 했습니다. 중복 참조나 순환 참조이 문제 때문인데요
 
+중복 참조, 순환 참조는 .cpp 파일이 아닌 .h 파일에 다른 .h 파일을 전방선언하지 않고 include했을때  두 클래스가 서로를 참조 하게 될 수 도 있습니다.
+
+A ↔ B 형태로 서로 의존하게 되면 둘중 어떤게 먼저 정의되지 않고 서로가 필요해서 컴파일이 불가능 해집니다. 
+
+반면 다른 .cpp파일에 include하는 형태면 중간에 완충지대를 끼고 있을수 있습니다.
+
+A → B ← C 이런 형태로 
+
+헤더 파일에 헤더를 include하는건 이런 문제가 있지만 지금 Engine클래스는 조금 경우가 다릅니다. 
+
+이 부품들 자체가 코드 변경을 많이 할 것 같지가 않고, 애초에 Engine의 각 기능들을 때어 부품들을 만든 형태이기 때문에 
+
+원래 대로 Engine으로 합해도 괜찮을 것 입니다.
+
+부가 효과로 Engine.h에서 전방선언도 전부 때어내도 괜찮게 됩니다. 내용들을 다 알게 되었기 때문에
+
+여기까지가 지난 강의 복습이었습니다.
+-------------------------------------------------------------------------------------------------------------
+
+
+본격적으로 삼각형 그리기 수업인데 이 수업을 위해서 다시 몇몇 새로운 파일들을 생성 해야합니다. 
+(DirectX수업 자체가 여러 기능이 맞물려 돌아가는 것이다 보니 다음 수업에 배울 내용도 가져와야 오늘 수업이 제대로 굴러 갑니다.)
+(그러다 보니 매 강의마다 전부 이해하고 넘어가려는 것 보다 좀 더 거시적인 관점에서 봐야 하겠습니다.)
+
+
+## RootSinatue
+
+처음으로 만들 클래스는 RootSignature 라는 클래스 입니다.  이 클래스는 계약서 / 결재 같은 역할을 한다고 합니다. 
+
+> CPU가 외주를 GPU에게 맡기는데 CPU는 CPU만의 저장공간 RAM이 있고 GPU는 GPU만의 저장공간(이건 다음에 배울 내용입니다.)이 있을 것입니다.
+
+그런데 두 저장공간이 아예 다른 공간에 있습니다. RAM의 리소스를 계속 GPU에게 건내주면서 작업 하는것은 너무 멀어서 말이 안됩니다.
+
+GPU에게 작업을 시키려면 어떤 일을 해야하는지와 어떤 주체에게 해야하는지도 알려줘야 합니다.
+
+예를 들면 한국에서 베트남에게 어떤 외주를 맡기는데, A원석을 가공 해달라고 부탁을 합니다. 그러면 A원석도 베트남에 보내야 하고, A원석을 어떻게 가공할지도 보내야 합니다.
+
+어떻게 가공할지만 보내고 A원석은 한국에 두고 일을 시키는건 말이 안되죠 한국이 베트남의 어떤 저장공간을 빌려서 그곳에 A원석과 요구사항을 보내야 합니다.
+
+이렇게 보낼때 그냥 휙 보내면 안되겠습니다. 확실하게 서명(RootSignature)을 해야 합니다.
+
+내가 어떠한 레지스터, 어떠한 버퍼를 사용하겠다는 명시를 해줘야 겠습니다.  대충 이런 내용이란 걸 알고 있고 자세한 내용(GPU의 메모리)은 다음에 알아볼 것 입니다.
+
+
+일단 RootSignature는 Comptr<ID3D12RootSiganture> _signature;라는 Comptr을 들고 있을 것 입니다. 
+이 COMptr은 GPU쪽을 잘 몰라도 다룰 수 있게 해주는 포인터이고 이 포인터의 객체도 GPU쪽에 생깁니다. 
+
+RootSignature 클래스가 가질 함수는 Init과 _signature를 꺼낼 GetSignature 입니다.
+
+- Init 함수 입니다.
+
+> 처음으로는 signature의 descriptor 시그니쳐의 양식을 만들고 있습니다. 
+D3D12_ROOT_SIGNATURE_DESC sigDesc = CD3DX12_ROOT_SIGNATURE_DESC(D3D12_DEFAULT);
+
+만들때 CD3DX12 이런게 오면 우리가 따로 추가한 d3dx12.h 에서 가져온 것이었습니다. 그래서 따라 들어가 보면 받는 인자가 D3D12_DEFAULT인 부분은 
+
+정말 기본적인 signature descriptor를 만들어 주고 있는걸 알 수 있습니다.
+
+다만 그 밑줄에서 sigDesc.Flags 만 D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT  입력 조립기 단계로 설정 하였습니다.
+( 다음 시간에는 기본 설정 Siganture가 아닌 이런저런 옵션들을 살펴 볼 것입니다.)
+
+그 다음으로 Init 함수 스택에서 
+	ComPtr<ID3DBlob> blobSignature;
+	ComPtr<ID3DBlob> blobError;
+이런 변수를 만들고 기본 지원 함수 ::D3D12SerializeRootSignature 와 device->CreateSignature를 통해 _signature를 초기화 하였습니다.
+
+그래서 Init이 매개변수로 Device를 받아주겠습니다. 이렇게 대략 RootSignature를 만들었고 Engine 클래스에 추가 해주겠습니다. 
+
+
+## Mesh
+
+메시란
+폴리곤들이 모인 하나의 3차원 물체
+메시에 정보를 저장하기 위해서는 3가지 요소들이 필요하다
+
+Vertices: 3D 공간상의 좌표
+Edges: 각 vertex를 연결한 선
+Faces: 각 선들을 3개 이상 연결하여 만들어진 면
+
+우리가 하려고 하는일이 우리가 만든 윈도우창에 삼각형을 띄우는 것이었습니다. 그러려면 삼각형의 각 꼭지점(정점)부터 GPU에게 넘겨줘야 하는데 나중에는 삼각형 말고도 더욱 복잡한
+
+도형을 넘겨줄 것이기 때문에 지금 Mesh클래스를 만들어 주겠습니다. Mesh클래스가 가지고 있을 멤버 변수들은
+
+	ComPtr<ID3D12Resource>		_vertexBuffer;
+	D3D12_VERTEX_BUFFER_VIEW	_vertexBufferView = {};
+	uint32 				_vertexCount = 0;
+
+입니다. SwapChain에서 버퍼를 만들었던 Comptr로 _vertexBuffer를 만들었고 _vertexBufferView를 만들었습니다. 이 View는 DescriptorHeap에서 만든 rtvView 가 아니네요
+
+그래도 View라고하는 역할을 바뀌지 않습니다. 버퍼로 어떤 그림을 그릴지 묘사를 하고 이걸 GPU에게 보낼때 묘사한 버퍼를 대표하는 View를 보내는 겁니다.
+
+이어서 멤버 함수로는 
+
+	void Init(vector<Vertex>& vec);
+	void Render();
+
+를 만들었습니다. Init함수의 매개변수로 Vertex타입의 vector가 들어 갑니다. 여기서 Vertex를 처음 만나는데 메쉬를 만들기 위해서 정점들이 필요하고 이 정점들이 어떤 정보를 가지고 있어야 하는지 
+설명 해야겠죠
+
+Vertex를 EnginePch.h 에 정의 합니다.
+
+struct Vertex
+{
+	Vec3 pos;
+	Vec4 color;
+};
+
+Vec3와 Vec4 라는 타입의 변수로 이루어진 구조체 입니다. 여기서 Vec이라는 타입들이 생소한데 이건 처음에 환경 설정때 복사한 typedef중 하나입니다. 
+각 뒤에 붙은 숫자만큼의 FLOAT들이 모여 있는 구조체입니다.
+
+pos(Position)이 Float가 3개가 필요한이유는 x, y, z 좌표를 가져야 하기 때문이고, color는 red, green, blue, a(밝기?)를 가지고 있어야 하기 때문 입니다.
+
+삼각형의 정점인데 왜 색이라는 정보가 필요한가? -> 나중에 각 정점들의 색이 다를 때 절묘하게 색이 섞이는 실습을 하기 위해
+
+이제 멤버 함수들의 구현부를 만듭니다.
+
+Init은 정점의 벡터를 받고  첫줄에서 인자로 받은 벡터의 size로 _vertexCount를 초기화 하고 있습니다. _vertexCount는 나중에 Rander함수에서 사용됩니다.
+
+바로 다음에 _vertexCount * sizeof(Vertex); 로 _bufferSize도 스택메모리에 만들어 줍니다. 
+
+그 다음은 
+	D3D12_HEAP_PROPERTIES heapProperty = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+	D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+
+ Heap의 용도가 무었인지(heapProperty), 리소스의 도안(버퍼의 사이즈만큼의 리소스)를 만들었습니다. 이게 필요한 이유는 
+
+DEVICE->CreateCommittedResource(
+		&heapProperty,
+		D3D12_HEAP_FLAG_NONE,
+		&desc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&_vertexBuffer));
+
+이렇게 DEVICE->CreateCommitedResource를 이용해서 리소스 커밋합니다. 어디로 커밋하는가 하면, CPU에서 관리하던 정점들의 리소스(버퍼)가 GPU의 저장공간에 만들어집니다.
+그렇게 만들어진 리소스를 가리키는 Comptr인 _vertexBuffer
+
+ 하지만 지금 _vertexBuffer가 가리키는것은 RAM의 주소가 아니고 저~ 먼 GPU의 저장공간을 가리키고 있습니다. 이제 CPU가 가지고 있는 정점들의 데이터를 GPU영역에 있는 버퍼에 
+복사 해줘야 하는데  _vertexBuffer에 바로 복사 해줄 수 없습니다. 
+
+그러면 어떻게 하는냐?
+
+	// Copy the triangle data to the vertex buffer.
+	void* vertexDataBuffer = nullptr;
+	CD3DX12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
+	_vertexBuffer->Map(0, &readRange, &vertexDataBuffer);
+	::memcpy(vertexDataBuffer, &vec[0], bufferSize);
+	_vertexBuffer->Unmap(0, nullptr);
+
+이런 과정을 거쳐야 합니다. vertexDataBuffer라는 void포인터를 Map이라는 함수의 인자로 주고 이 Map이라는 함수는 CPU영역(RAM)과 GPU영역의 저장공간을 연결시켜주는 거라고 
+생각하면 되겠습니다.
+
+::memcpy로 vertexDateBuffer에 인자로 받은 정점들 vec의 0번쨰 인덱스의 주소부터, bufferSize만큼 긁어서 GPU 저장공간에 복사를 합니다. 
+
+이후 Unmap함수로 연결을 끊습니다.
+
+
+다음으로 _vertexBufferView를 초기화 해줍니다. 
+	// Initialize the vertex buffer view.
+	_vertexBufferView.BufferLocation = _vertexBuffer->GetGPUVirtualAddress();
+	_vertexBufferView.StrideInBytes = sizeof(Vertex); // 정점 1개 크기
+	_vertexBufferView.SizeInBytes = bufferSize; // 버퍼의 크기	
+
+차례대로 _vertexBuffer가 어디에 위치해 있는지, 정점 하나의 크기는 얼마인지, 버퍼 전체의 크기는 얼마인지를 넣습니다.
+
+이제 CPU단에서 어떤 vertex를 사용하고 싶다면 그 vertex를 본따 만든 _vertexView를 건내주게 되면 어떤 vertex를 말하는지 GPU가 알아 듣고 응답을 할 것입니다.
+
+ Mesh::Init는 이렇고 다음으로 Rander함수 입니다.
+
+
+메쉬의 Rander는 CMD_LIST를 활용합니다.
+ CommandQueue의 RanderBegin, RanderEnd를 다시 보면 
+RanderBegin이 처음에 초기화를 해주다 _cmdList에 백버퍼에 그릴 여러 명령들을 넣어 주고 있을때 지금 만드는 이 Mesh::Rander를 넣어주게 되면 다음 프레임에 원하는 삼각형이 그려질 것입니다.
+
+이 Mesh 뿐만 아니라 여러 화면들을 CommandQueue::RanderBegin과 CommandQueue::RanderEnd사이에 끼워 넣으면 될것 입니다. 
+
+원하는 만큼 끼워 넣고 나면 이제 CommandQueue::RanderEnd가 실행됩니다. RanderEnd에서 _cmdList를 close를 합니다. 그리고 이 리스트를 Execute를 하면 백버퍼에 그림이 그려지고 
+_swapChain->Present()로 현재 전면 버퍼를 출력하고 WaitSync(), 후 _swapChain->SwapIndex()로 다음 프레임을 위해 작업이 끝난 백버퍼와 다음 그림이 그려질 전면 버퍼를 뒤바꾸고 
+다음 렌더링을 대비 합니다.
+
+
+이제 Mesh::Rander() 는 이런 코드입니다.
+
+	CMD_LIST->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	CMD_LIST->IASetVertexBuffers(0, 1, &_vertexBufferView); // Slot: (0~15)
+	CMD_LIST->DrawInstanced(_vertexCount, 1, 0, 0);
+
+첫줄에서 CMD_LIST에다가 이 정점으로 만든 도형이 어떤 형식으로 되어 있는지를 설명해줍니다. 삼각형뿐만 아니라 여러 도형도 고를 수 있습니다.
+
+두번째 줄에서는 vertexBuffer를 세팅하는데 첫번째 인자의 0은 0번 슬롯을 말합니다. 세팅해줄때 슬롯을 0~15번을 고를 수 있는데 지금은 전부 0번으로 넣어 주겠습니다. 세번째 인자로 GPU영역에 있는 
+vertexBuffer를 묘사한 vertexBufferView를 주어서 이 리소스를 활용 할것이라고 설명 해주고 있습니다.
+
+세번째 줄에서 DrawInstance로 그려주는 작업이 이뤄집니다.
+
+이 코드들이 CMD_LIST로 들어간다는것은 즉, 이 함수가 바로 실행되는게아니고 CommandQueue::RanderEnd가 실행될때 _cmdList를 실행할때 예약을 해놓는 것입니다.
+
+
+
+
 
 
 
