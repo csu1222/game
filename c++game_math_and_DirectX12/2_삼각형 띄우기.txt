@@ -315,6 +315,147 @@ vertexBuffer를 묘사한 vertexBufferView를 주어서 이 리소스를 활용 
 
 이 코드들이 CMD_LIST로 들어간다는것은 즉, 이 함수가 바로 실행되는게아니고 CommandQueue::RanderEnd가 실행될때 _cmdList를 실행할때 예약을 해놓는 것입니다.
 
+이렇게 Mesh를 만들어봤습니다. 삼각형 그리기는 Shader까지 있어야 테스트를 해볼 수 있어어 Shader를 배워 보겠습니다.
+
+
+## Shader
+
+Shader는 멤버 변수로 Blob이라는 것들과, pipeline이라는 것들을 가지고 있습니다. 자세히 알아보진 않을거고 이런게 있구나 정도로 넘어 가겠습니다.
+
+함수는 public으로 Init함수, Update함수가 있고 private로 CreateShader, CreateVertexShader, CreatePixelShader가 있습니다. private함수들은 Init을 하는데 사용되는 함수들 같습니다.
+
+pipeline은 그래픽스 OT시간에 본적이 있습니다. 파이프 라인이라는 과정내에서 여러 쉐이더 작업들이 있습니다. 그 중 이번 강의에서는 기본적으로 중요하다고 생각되는 VertexShader, PixelShader를 
+
+가지고 이야기를 해보는 것 입니다. 
+(즉, 이 Shader라는 클래스가 곧 Graphics Pipeline이라는 이야기 같습니다.)
+
+Shader::Init을 살펴보려고 하니깐 인자로 어떤 경로를 받고 있습니다. 좀 더 살펴보면 CreateShader라는 private함수가 그 경로에 있는 파일을 읽어서 무언갈 하고 있습니다. 다른 private함수들도 이
+CreateShader를 사용해서 무언갈 하고 있습니다. 
+
+그래서 이 경로의 파일이란것이 없으면 이해 하기 힘들것 같으니 임의로 읽을 쉐이더 파일을 만들어보겠습니다.
+> visual studio의 추가 -> 새 항목 -> defalut.hlsli 라는 이름의 쉐이더 헤더 -> Game솔루션내에 Resource\Shader\ 폴더에 생성
+
+이 생성한 쉐이더 파일은 여태껏 써왔던 C++문법이 아니고 쉐이더 문법을 사용해야합니다. 
+
+struct VS_IN
+{
+    float3 pos : POSITION;
+    float4 color : COLOR;
+};
+
+struct VS_OUT
+{
+    float4 pos : SV_Position;
+    float4 color : COLOR;
+};
+
+VS_OUT VS_Main(VS_IN input)
+{
+    VS_OUT output = (VS_OUT)0;
+
+    output.pos = float4(input.pos, 1.f);
+    output.color = input.color;
+
+    return output;
+}
+
+float4 PS_Main(VS_OUT input) : SV_Target
+{
+    return input.color;
+}
+이런 문법인데 신기하게도 배우지 않았는데 어느정도 읽을수 있습니다. struct는 c++과 똑같고 float3, float4 같은 타입은 EnginPch.h 에 만들어 놨던 Vertex 타입과 같은 형태 입니다. 
+
+차이점은 C++에서는 이 float3 같은걸 typedef로 직접 만들어 썼지만 slhli에서는 기본 타입이라는 것입니다. 
+
+VS_IN, VS_OUT라는 구조체를 만들었고 밑의 두 코드뭉치 들이 함수같은 역할을 합니다. 
+
+그래서 이 쉐이더 파일이 무슨 일을 하느냐? -> 쉐이더는 일종의 [일감 기술서]입니다. 외주 인력들이 뭘 해야 하는지 기술하는데 이 쉐이더 파일도 전체 쉐이더작업중에 
+
+VS_MAIN으로 VertexShader작업에서 뭘 하고, PS_MAIN으로 PixelShader작업에서 뭘 하라고 기술 하고 있는겁니다.
+
+(이름은 마음대로 지어도 되고, 지금은 잘 알아 볼 수 있도록 지은겁니다.)
+첫 번째 함수 VS_MAIN은 
+VS_OUT VS_MAIN(VS_IN)라는 시그니쳐를 가지고 있는데 형태가 인풋을 받아주고 아웃풋을 반환 할것 처럼 생겼는데, 진짜로 그렇습니다. 
+
+즉 VS_MAIN함수는 인자로 float3, float4를 가진 구조체를 받고 float4, float4를 가진 구조체를 리턴해주는 기능을 하고 있습니다.
+
+지금 하려는 일이 그냥 삼각형을 띄우는 작업이기 때문에 VS_MAIN에서 엄청 복잡한 일을 하진 않을것이고 VS_OUT의 pos를 앞의 3 값은 float3이 VS_IN의 pos로 채우고 
+마지막 float를 1.f 그냥 1로 채우는 작업을 하고 있습니다.
+VS_OUT의 color는 아예 인풋의 color를 그대로 사용해서 다음 함수로 넘기고 있습니다.
+
+PS_MAIN은 더 간단해서 인자로 받은 VS_OUT의 color를 return해주는 역할입니다.
+
+Vertex Shader 단계는 정점 정보를 어떻게 바꿀지 하는 단계이고 Pixel Shader는 픽셀 색상을 어떻게 할지 정하는 단계였는데  사실상 아무것도 하지말라는 쉐이더 파일입니다.
+
+
+이제 Init 함수로 돌아가 보면 
+	CreateVertexShader(path, "VS_Main", "vs_5_0");
+	CreatePixelShader(path, "PS_Main", "ps_5_0");
+이 두 함수가 뭘 하는지 조금 보입니다. 인자의 경로를 따라가서 있는 쉐이더 파일에 있는 각 VS_MAIN, PS_MAIN함수를 받고 , 세번째 인자는 어떤 버전으로 할지를 고르는 것 입니다.
+
+CreateShader함수는 자세한 내용을 모르지만 디버그 모드때 쓸 comfileFlag라는 변수를 설정하고 그 외에는 if (FAILED(::D3DCompileFromFile( ~~~ 로 파일을 컴파일을 한 후 
+컴파일이 실패 했을 경우의 예외를 ::MessageBoxA(nullptr, "Shader Create Failed !", nullptr, MB_OK); 라고 메세지 박스를 사용하고 
+
+이걸 통과 했다면 받은 인자들중 shaderBtCode, blob으로 
+
+shaderByteCode = { blob->GetBufferPointer(), blob->GetBufferSize() };
+
+Shader가 변수로 들고 있던 blob을 채워주는 역할을 하고 있습니다. 결국 잘 실행된다면 이 한줄이 CreateShader가 하는 일입니다. 
+
+
+이론으로만 보는것보다 실제 동작하는걸 보면 좀 더 이해하기 쉬울수 있으니깐 간단한 실습을 해보겠습니다.
+
+Game클래스에서 Mesh객체와 Shader객체를 shared_ptr로 생성하였습니다.
+
+vertex를 벡터로 만든다고 했었고, 각 정점들의 좌표들과 색상을 이렇게 주었습니다.
+
+
+	vector<Vertex> vec(3);
+	vec[0].pos = Vec3(0.f, 0.5f, 0.5f);
+	vec[0].color = Vec4(1.f, 0.f, 0.f, 1.f);
+	vec[1].pos = Vec3(0.5f, -0.5f, 0.5f);
+	vec[1].color = Vec4(0.f, 1.0f, 0.f, 1.f);
+	vec[2].pos = Vec3(-0.5f, -0.5f, 0.5f);
+	vec[2].color = Vec4(0.f, 0.f, 1.f, 1.f);
+	mesh->Init(vec);
+
+mesh의 Init에서 리소스들을 GPU의 저장영역으로 보낸다음 CPU는 그 리소스(버퍼)를 묘사한 버퍼view를 가지고 있는다고 했습니다.
+
+다음으로 Shader도 Init을 해줄건데요 Shader는 쉐이더 파일이 있는 경로를 받았습니다. 현재 Game클래스에서 실행하고 있는데 이 Game클래스는 Client에 있습니다. 
+
+이 Client의 위치에서 상대 위치로 찾겠습니다.
+shader->Init(L"..\\Resources\\Shader\\default.hlsli");
+
+지금은 이렇게 직접 찾아가면서 하드 코딩을 했지만, 나중에는 Resource폴더에 쉐이더 파일같은걸 모아 둘테니 Resource폴더까지는 설정을 통해 관리하도록 하면 좋겠습니다.
+
+혹시 동기화가 안될수도 있으니 한번 GEngine->GetCmdQueue()->WaitSync();를 해줍니다.
+
+이제 Game::Update()에서 원래는 GEngin()->Rander()를 호출하면 그 안에서 CommandQueue의 RanderBegin과 RanderEnd사이에 그러 넣을걸 끼워넣도록 되어 있는데 
+
+지금은 테스트를 위해 직접 Update에 RanderBegin, RanderEnd를 가져오도록 하겠습니다.
+
+
+	GEngine->RenderBegin();
+
+	shader->Update();
+	mesh->Render();
+
+	GEngine->RenderEnd();
+
+shader->Update()는 CMD_LIST에 SetPipelineState라는 함수로 pipeline state를 설정해줍니다. 이 파이프라인 스테이트는 많은 정보를 가지고 있는데 심지어 
+
+RootSignature라는 외주의 계약서까지 들고 있습니다.
+
+어찌됐든 이렇게 테스트를 실행하면 알록달록한 삼각형을 띄울수 있습니다. 
+
+
+장치초기화 부터 이 강의 까지 따라오면서 대부분의 코드를 붙여넣고 처음보는 함수들을 대충 넘기고 하면서 이게 무슨 의미가 있을까 고민도 되고, 모르고 넘기는거에 찝찝함이 
+느껴지기도 합니다. 하지만 우리가 배우는 것은 이런 엔진을 만드는것이나 운영체제를 만들려고 하는것이 아닌 여러 고급 기법들을 통해 게임을 만들려고 하는것이기에 
+
+모두 알고 넘어가려고 하지 않아야합니다. 나중에 기본을 전부 할 수 있고 관심이 생긴다면 그 많은 분야중 이 운영체제나, DirectX, 엔진을 파고 들어서 더 많이 배울수는 있을겁니다.
+
+이 프로그램이란것 자체가 과거의 프로그래머들부터 쌓아온 지식들을 이어 받으면서 진행하고 있는것이기에 모든 코드를 알려면 매우 긴 시간이 필요할것입니다.
+
 
 
 
