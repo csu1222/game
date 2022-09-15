@@ -217,4 +217,102 @@ _cbvBuffer->Map으로 연결을해서 _mappedBuffer를 통해 데이터를 밀�
 
 다음으로 구현할 함수는 Clear인데요 아주 단순합니다. _currentIndex를 0으로 밀어줍니다.
 
+다음함수 PushData입니다. 
+처음으로 하는 작업은 assert(_currentIndex < _elementSize); 입니다. 의미는 _elementSize를 넉넉히 잡아놓긴 했지만 데이터를 너무 많이 푸시해서 잡아놓았던 메모리를 초과하게 되면 
+크래시를 내서 메모리를 보호하도록 하는 코드입니다.
 
+다음 코드가 중요한데요 바로 GPU RAM으로 리소스를 복사하는 부분입니다. 
+::memcpy(&_mappedBuffer[_currentIndex * _elementSize], buffer, size);
+_mappedBuffer GPU RAM쪽을 Map으로 열어놓은 곳을 가리키는 이 포인터를 통해 보낼 리소스인 buffer(인자로 받아줬습니다.) 
+이 코드는 즉시 실행이 될것입니다.
+
+다음으로 이어서 커맨드 큐를 사용해서 이렇게 현재 GPU RAM의 현재 인덱스의 주소를 만들어서 커맨드 리스트에 그 Root Constant Buffer View를 레지스터로 올리라는 명령을 담아놓습니다.
+	D3D12_GPU_VIRTUAL_ADDRESS address = GetGpuVirtualAddress(_currentIndex);
+	CMD_LIST->SetGraphicsRootConstantBufferView(rootParamIndex, address); // rootParamIndex: gpu레지스터에 어디에 view를 저장할지, address : gpu ram에 현재 리소스의 뷰를 건내줄지
+이 코드는 나중에 한번에 실행 될 것입니다. (커맨드 큐의 성질)
+함수가 끝나기전에 _currentIndex를  ++ 해줍니다.
+
+버퍼를 여러개를 만들어서 커맨드 큐의 문제점을 해결했습니다.
+
+
+
+## 실습 
+
+상수버퍼를 실습해보도록 하겠습니다. 프로그램 구조를 좋게 짜는건 아니지만 일단 간단하게 구현하는 것을 목표로 하였습니다.
+편하게 Engine클래스에 ConstantBuffer를 include하고, private변수로 shared_ptr<ConstantBuffer> _cb; 이렇게 만들었습니다. 혹시 외부에서 꺼내 쓸 일이 생길지도 모르니,
+shared_ptr<ConstantBuffer> GetConstantBuffer() { return _cb; }; 로 외부에서 꺼내 쓸수있는 public 함수를 만들어 주었습니다.
+_cb를 Engin.cpp 에서 초기화 해주도록 하겠습니다 우선 포인터인 _cb에 동적할당 _cb = make_shared<ConstantBuffer>() ;
+
+다음으로 ConstantBuffer::Init 함수로 초기화를 해주는데 받는 인자가 (uint32 size, uint32 count) 입니다. 
+첫번째 인자인 size는 버퍼로 줄 데이터의 크기를 말하는데 보통 상수 버퍼로 주는 데이터들은 어디로 움직여라 회전해라 등등의 용도가 많다고 합니다. 
+그런 용도의 구조체의 sizeof를 주면되는데 용도에 맞는 이름으로  sizeof(Transform)으로 주겠습니다. 
+Transform은 직접 만들어야하는데 EnginePch.h에 정의 해주겠습니다. 
+
+struct Transform
+{
+	Vec4 offset;
+};
+
+이렇게 간단히 float 4개짜리 크기의 구조체를 만들어 줬습니다. 이유는 이 강의 처음에 만들었던 default.hlsli 파일의 TEST_B0 이 float 4개 짜리 이기때문에 맞춰준겁니다.
+Transform이 float 4 라는 작은 크기의 데이터이지만 ConstantBuffer에서 알아서 256의 배수 바이트로 잡아줄겁니다.
+두번째 인자 count는 그냥 넉넉히 256으로 잡아주었습니다.
+
+한가지 해야할 일이 하나 더있습니다. 이전에 CommandQueue::RenderBegin에서 SetGraphicsRootsignature로 GPU 레지스터에 상수 버퍼 뷰를 건내줄것이라고 계약을 했던 코드 밑에다가
+지금 만든 객체 GEngine->GetConstantBuffer()->clear()를 해줘야 합니다. 매 렌더링이 시작될때 이 상수 버퍼를 처음부터 사용하기 위해서 입니다.
+
+이제 RootSignature로 서명 했고, ConstantBuffer 만들었고, Engine에 생성했고, 다음은 이제 실제 ConstantBuffer의 Init할때 들어갈 Trasform값을 넣어주겠습니다. 
+이 정보는 삼각형에 추가해줄 내용이므로 Mesh클래스에 만들어서 Mesh::Render 할때 에 사용될것입니다.
+Mesh의 private변수에 Transform _transform = {}; 그리고 public에 _transform 값을 밖에서 설정할수 있도록 SetTransForm(const Transform& t) { _transform = t; }을 만들어주고 
+Mesh::Render에서 verstexBuffer를 CMD_LIST에 주고 난 밑에 ConstantBuffer를 줄것입니다.
+저희가 default.hlsli에서 넘겨줄 ConstantBeffer가 0번과 1번 두개 였습니다. 
+	GEngine->GetCB()->PushData(0, &_transform, sizeof(_transform));
+	GEngine->GetCB()->PushData(1, &_transform, sizeof(_transform));
+각 0번은 삼각형의 좌표, 1번은 삼각형의 색상을 가리킵니다. 
+
+이제 삼각형그리기에서 실습을 했을때 처럼 Cllient프로젝트의 Game.cpp 에서 실습을 해보겠습니다. 
+mesh->Render() 하나를 해서 삼각형 하나를 그렸으니 이번에는 삼각형 두개를 각각의 값으로 해보겠습니다.
+
+	{
+		Transform t;
+		t.offset = Vec4{ 0.75f, 0.f, 0.f, 0.f };
+		mesh->SetTransform(t);
+
+		mesh->Render();
+	}
+	{
+		Transform t;
+		t.offset = Vec4{ 0.f , 0.75f, 0.f, 0.f };
+		mesh->SetTransform(t);
+
+		mesh->Render();
+	}
+ConstantBuffer를 넣어주기 위해 Transform t를 임시로 만들어 값들을 주었습니다. 이 값은 SetTransform에서 b0, b1레지스터에 담길것입니다. 
+즉 첫번째 삼각형은 오른쪽으로 0.75f, 빨간색이 0.75f 만큼 더해질것이고 
+두번째 삼각형은 위로 0.75f 녹색이 0.75f 만큼 더해 질 것이라고 예상할수 있습니다.
+이런 수치조종들은 정해져 있는것은 아니고 우리가 작성한 default.hlsli에서 VS_MAIN함수의 내용따라 설정이 된것이기 때문에 이 쉐이더 파일 하기 나름대로 설정할수 있을 것입니다.
+
+이제 실행하면 짜잔 삼각형이 두개!
+
+
+
+
+이번시간는 RootSignature로 GPU레지스터에 어느 API bind slot을 어떤 HLSL bind slot으로 사용하고, 그 내용은 어떤 타입(여기선 ConstantBuffer타입) 을 사용하겠다는 계약을 하는 방법과,
+ConstantBuffer를 사용하기위해 GPU RAM공간에 Buffer 공간을 확보하는 방법(elementSize나, currentIndex, count 들을 이용해 그 cbvBuffer를 만들어 GPU레지스터로 전달)
+넘기고 싶은 타입을 만들고 Mesh::Render에서 데이터를 넣는방법등 
+CommandQueue를 사용하기위해 생각보다 복잡한 과정들을 통해야 한다는걸 알았습니다. 장단점이 있듯 코딩하기는 복잡하지만, 그만큼 명령들을 한번에 몰아줄수 있어서 성능적으로는 
+향상점이 있겠습니다.
+
+이번 ConstantBuffer의 경우는 인자를 주는 방법중에서는 쉬운 축에 속한다고 합니다. CPU RAM의 리소스(버퍼)를 GPU RAM에 연결해서 복사하고, 그 버퍼를 묘사한 ConstantBufferView를 만들고
+RootSignature로 GPU 레지스터에 어느 레지스터를 어떤 타입으로 쓸건지 계약을하고 ConstantBufferView를 바로 주는것도 아니고 나중에 리소스 배리어 안에 있는 Render들과 함께 건내줘야합니다.
+그래도 RAM과 레지스터가 곧바로 데이터를 주고 받는부분은 쉬웠다고 할 수 있고 
+
+Root table의 경우는 table 마다 가리키는 정책들이 따로 있고 활성화 되면 그 정책들의 View를 가져와야 하는 구조를 가지고 있습니다. 
+이건 다음에 배울 내용입니다.
+문서의 팁중에 레지스터에 올릴 데이터가 너무 크지 않다면 table을 사용하지 말고 그냥 올리라는 내용도 있고 , 데이터가 자주 수정되는 View같은 경우는 레지스터의 앞쪽 번호로 배치하라는 팁도 있습니다.
+
+
+
+
+
+ 
+ 
