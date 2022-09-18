@@ -1,0 +1,282 @@
+
+	RootSignature
+
+이전 ConstantBuffer 시간에 결과물이 삼각형 두개를 띄우는 것이었는데 이번 시간의 결과물도 똑같은게 될겁니다. 
+
+결과물은 똑같지만 바뀌는 것은 RootSignature클래스에서 시그니쳐를 만들때 ConstantBuffer를 넣는 방법 즉, RootDescriptor자체를 넣는 방법으로 
+만들었습니다. 이게 아니라 이번에는 RootTable을 넣는 방식으로 수정해 볼것입니다. 
+
+굳이 RootTable로 수정해야 하느냐 하는 의문이 생길수 있습니다만 
+사실 꼭 해야만 하는 작업은 아닙니다. 하지만 우리가 RootSignature를 무한정 크게 넣을 수 있는것은 아닙니다. 
+레지스터의 용량은 한정되어있기 때문입니다.(64 DWORD가 한계라고 합니다.(DWORD 는 4바이트 * 64니까 256 바이트)
+
+그러면 언제나 이 용량 이하의 크기의 RootSignature만을 사용해야 한다는건데 이럴때 RootTable을 사용하면 용량의 한계를 어느정도 극복 할 수 있게 됩니다.
+
+그래서 상황에 따라서는 RootTable(Descriptor Table)을 사용하는 상황이 생길 수도 있으니깐 결과물에는 차이가 없지만 대응능력을 기르자는 의미에서 
+해보겠습니다. 
+
+# 복습
+이전시간의 RootSignature를 ConstantBuffer로 사용하는 방법을 되집어 보겠습니다. CommandQueue를 사용하는 방법이기때문에 즉시 실행되는 부분과 나중에 실행되는부분이 있었습니다.
+
+즉시 일어나는 일,
+우선 어떤 메쉬에 인자로 주고 싶은 리소스가 있을 것입니다. 이걸 ConstantBuffer 형태의 RootSignature를 사용해 GPU 레지스터와 계약을 하고 싶은겁니다. 
+GPU 레지스터에 ConstantBuffer 형태의 RootSignature를 원하는 파라미터 갯수로 계약을 하고 ConstantBuffer는 Engine객체의 Init때 같이 Init이 되는데 인자로 리소스의 사이즈와 , 리소스의 갯수를 
+넘겨줍니다. 그러면 ConstantBuffer::Init 그 리소스의 크기, 갯수를 참고해 GPU측 RAM에 BUffer를 만들어 놓습니다. 
+CPU 쪽에서 가지고 있는 인자 리소스를 Transform이라는 구조체를 만들어 값을 입력해 Mesh의 SetTransform으로 주었습니다. 
+
+나중에 일어나는 일, 
+Mesh가 받은 Transform 정보를 private변수로 저장해서 바로 Mesh::Render를 합니다. 이 Render 함수안에서 삼각형을 그리고 그 인자를 넘겨주는 ConstantBuffer->PushData가 CMD_LIST에 
+담겨서 나중에 CommandQueue->RenderEnd가 실행될때 한번에 실행 됩니다.
+#
+
+CommandQueue를 사용하면서 여러개의 명령이 덮어씌워지는걸 방지하기위해 RootSiganture가 파라미터를 배열로 여러개를 만드는 것이었습니다. 
+즉시 실행, 나중에 실행 이런 부분은 오늘 배울 Descriptor Table도 비슷하게 작동합니다.
+
+이번 시간에 할 일은 ConstantBuffer를 다섯개를 묶어서 GPU로 복사하고 RootSignature는 table이라는 걸 선포하는데 이 table이 유효해지면 b0부터 b4까지 5개의 레지스터에 방금 복사한 
+ConstantBuffer의View를 올리고 이걸 실행합니다.
+
+이중에 레지스터에 ConstantBufferView를 올리는 기능을하는 함수 두개 쌍둥이가 있는데 SetDescriptorHeaps, SetGraphicsRootDescriptorTable 이라는 함수들입니다.
+ConstantBuffer를 그냥 썼을 때는 인자로 GPU Adress를 주었는데 
+SetDescriptorHeaps 는 ppDescriptorHeaps를 달라고 하고 
+SetGraphicsRootDescriptorTable 는 GPU_DESCRIPTOR_HANDLE을 달라고 합니다.
+이전시간처럼 주소를 곧바로 주는게 아니고 다른 곳을 거쳐서 가야한다는 이야기고 리소스가 복사된 버퍼들이 있고 그 버퍼들의 View가 또 따로있고 이 View들의 뭉치(이게 DescriptorHeap이라고 했었습니다.)
+의 주소를 table이 활성화되면 레지스터에 올라가는 겁니다.
+
+SetDescriptorHeaps, SetGraphicsRootDescriptorTable 이 두 함수를 사용하는 용도는 
+CMD_LIST가 인지할수 있는 DescriptorHeap을 SetDescriptorHeaps 함수가 세팅을 해줄것이고, 그중에서 몇번째 주소를 활용해야하는지를 SetGraphicsRootDescriptorTable 함수가 연결해줄것입니다.
+
+이번 Desc.table을 활용하는 방법에서 Desc.Heap을 두개 만들건데 하나는 ConstantBuffer를 가리킬 ConstantBufferView, 또 하나는 ConstantBufferView를 복사한 Desc.Heap인데 용도는 레지스터에 
+제출하기위한 용도 이렇게 두개의 Desc.Heap을 만들것입니다.
+
+이 방식도 결국 DirectX12에서의 즉시실행, 나중에 실행 타이밍 이슈가 생긴다고 했었습니다. 즉시와 나중에를 나눠보면
+즉시 : ConstantBuffer, ConstantBufferView, 레지스터제출용 Desc.Heap 생성 까지는 즉시
+나중에 : 제출용 Desc.Heap을 레지스터에 올리는건 CMD_LIST의 작업이니까 나중에
+
+타이밍 이슈가 제출용 Desc.Heap에도 적용됩니다. 메쉬 렌더를 할때 마다 제출용 Desc.heap이 덮어씌워지지 않도록 이 Desc.Heap도 여러개를 만들어서 각 렌더의 데이터를 저장하고 있어야
+마지막 RenderEnd때 알맞는 인자를 전달해줄수 있을것입니다.
+
+또 두가지 주의할점이 있는데 공식문서를 보면 SetDescriptorHeaps는 매우 느리기 때문에 한 프레임당 한번만 사용하는걸 권장하고 그 DescriptorHeaps안에서 SetGraphicsRootTable로 사용할 
+Desc.Heap을 골라라 라고 되어있습니다.  
+그리고 SetDescriptorHeaps를 만들어 줄때는 Flag를 DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE로 만들어 줘야 한다고 합니다. 보통 디폴트 값은 이 Flag가 None으로 되어 있는데 
+Shader visible로 만들어 줘야 GPU 제출용으로 백퍼센트 GPU쪽 저장공간에 상주 한다고 합니다.(Flag가 None이라고 무조건 CPU쪽에 관리된다기 보다는 기기에 따라 다르다고 합니다.)
+
+
+이제 코드로 들어가보겠습니다.
+
+우선 RootSignature.cpp에서 Root Parameter로 만들었던 param[2] 을 param[0].InitAsConstantBufferView(레지스터 주소)로 만들었던 부분을 바꿔줘야합니다. 
+param[0].InitAsDescriptorTable(); 메소드를 사용하는데 이 메소드는 인자로 DescriptorRangeNum과 DescriptorRange를 받습니다. 
+직접 주소를 주지 않는이유는 DescriptorTable의 번호와 그 테이블을 따라가면 있을 DescriptorHeap의 크기가 필요하기 때문입니다.
+
+Range를 만들어주겠습니다. 
+	CD3DX12_DESCRIPTOR_RANGE ranges[] =
+	{
+		CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, CBV_REGISTER_COUNT, 0), // b0~b4
+	};
+CD3DX12_DESCRIPTOR_RANGE로 range를 채워주는데 인자는 순서대로 CBV타입으로 만들것이고, 만들 CBV의 숫자, 몇번 레지스터부터 사용하겠다는 숫자 입니다.
+CBV_REGISTER_COUNT는 그때 그때 하드코딩하기 보다는 EnginePch.h에서 관리 해주겠습니다.
+
+enum class CBV_REGISTER
+{
+	b0,
+	b1,
+	b2,
+	b3,
+	b4,
+
+	END
+};
+
+사용할 레지스터들을 채우고 난뒤에 끝에 END라거나 CONUNT라거나 MAXCOUNT라는 이넘을 하나 더 추가해주면 편리한점이 
+CBV_REGISTER::END를 꺼내면 값이 사용할 값들의 숫자와 같습니다. 이걸 이용해서 이전에 사용하던 enum에 CBV_REGISTER_COUNT를 정의 해주겠습니다.
+enum
+{
+	SWAP_CHAIN_BUFFER_COUNT = 2,	// 스왑체인만들때 사용했던 enum 입니다.
+	CBV_REGISTER_COUNT = CBV_REGISTER::END,
+};
+ranges를 이렇게 만들어 줬으면 param[0].InitAsDescriptorTable(_countof(ranges), ranges); 로 인자를 채워주겠습니다. 
+( 이 실습에서는 DescriptorTable을 하나만 사용하겠습니다. 그래서 param[1] 로 수정하였습니다. )
+이제 RootSignature는 ranges의 내용을 바꾸면 CBV 말고 다른 타입으로도 사용할수 있습니다. 
+
+다음으로 만들것은 CBV 입니다. 전에 만들었던 ConstantBuffer클래스에 CBV(DescriptorHeap)을 만들어 줄겁니다.
+	
+	ComPtr<ID3D12DescriptorHeap>		_cbvHeap;
+	D3D12_CPU_DESCRIPTOR_HANDLE		_cpuHandleBegin = {};
+	uint32					_handleIncrementSize = 0;
+지금 만든 _cbvHeap은 오늘 만들 두개의 DescriptorHeap중 ConstantBuffer를 가리킬 DescriptorHeap입니다. 
+이 _cbvHeap은 배열과 비슷해서 _cpuHandleBegin으로 맨처음 데이터를 가리키는 Handle을 하나 가져올수 있고 _handleIncrementSize로 몇번째 데이터에 접근할수 있는지 알수 있습니다.
+배열의 시작주소와 인덱스 같습니다.
+
+비슷한 걸 SwapChain에서도 했었는데 그때는 버퍼를 두개만 가지고 있기 때문에 전부 직접 가지고 있었고 
+이번 _cbvHeap은 View의 갯수가 많기 때문에 시작주소와 인덱스 처럼 작동하는 값을 가지고 있습니다.
+
+다음으로 private함수로 CreateView를 만들고, public 함수로 외부에서 _cbvHeap의 필요한 View에 접근 할 수 있도록 GetCpuHandle함수도 만들겠습니다.
+CreateView는 ConstantBuffer::Init의 구현부 내에서 CreateBuffer를 해준다음 호출하겠습니다.
+
+CreateView을 분석 해보겠습니다.
+
+일단 D3D12_DESCRIPTOR_HEAP_DESC 라는 struct로  cbvDesc라는 구조체를 만들었습니다.
+D3D12_DESCRIPTOR_HEAP_DESC cbvDesc = {}; 
+
+그리고 구조체의 각 값을 넣어주었습니다. 버퍼의 갯수인 _elementCount를 가지고 View의 수를 정하고, Flag는 None으로, CBV타입으로 만들것이라는 값들입니다.
+DEVICE를 이용해 private변수 _cbvHeap에 생성해주었습니다.
+	cbvDesc.NumDescriptors = _elementCount;
+	cbvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	cbvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	DEVICE->CreateDescriptorHeap(&cbvDesc, IID_PPV_ARGS(&_cbvHeap));
+
+_cpuHandleBegin, _handleIncrementSize 은 _cbvHeap을 사용해서 값을 얻어올수 있습니다. 
+
+	_cpuHandleBegin = _cbvHeap->GetCPUDescriptorHandleForHeapStart();
+	_handleIncrementSize = DEVICE->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+참고로 _handleIncrementSize를 가져올때 enum같은걸로 가져오지 않고 DEVICE를 이용해서 크기를 가져오는것은 각 GPU 사양마다 크기가 다르기 때문이라고 합니다.
+이 두 변수를 사용해서 _cbvHeap에서 원하는 View에 접근할 수 있는 함수인 GetCpuHandle을 만들 수 있습니다.
+
+D3D12_CPU_DESCRIPTOR_HANDLE ConstantBuffer::GetCpuHandle(uint32 index)
+{
+	return CD3DX12_CPU_DESCRIPTOR_HANDLE(_cpuHandleBegin, index * _handleIncrementSize);
+} 
+의미는 
+D3D12_CPU_DESCRIPTOR_HANDLE handle = _cpuHandleBegin;
+handle.ptr += index * _handleIncrementSize;
+return handle;
+과 같습니다. 
+이 cpuHandle은 CPU의 주소체계에서의 핸들이고 GPU에서는 GPU만의 주소체계가 있어서 GPU Handle이 따로 필요합니다.
+
+이 GetCpuHandle이  CreateView에 필요해서 중간에 잠깐 알아 보았습니다. 이제 _cbvHeap에다가 리소스를 가진 버퍼들의 View를 각 순서에 넣어줘야 겠습니다.
+CreaterView의 구현부 에서 _cbvHeap, _cpuHandleBegin, _handleIncrementSize를 만드는 것 까지 했었고 다음으로 
+_elementCount만큼 for문을 돌아 줄 겁니다. 
+
+	for (uint32 i = 0; i < _elementCount; ++i)
+	{
+		D3D12_CPU_DESCRIPTOR_HANDLE cbvHandle = GetCpuHandle(i);
+
+		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
+		cbvDesc.BufferLocation = _cbvBuffer->GetGPUVirtualAddress() + static_cast<uint64>(_elementSize) * i;
+		cbvDesc.SizeInBytes = _elementSize;   // CB size is required to be 256-byte aligned.
+
+		DEVICE->CreateConstantBufferView(&cbvDesc, cbvHandle);
+	}
+
+방금 만든 GetCpuHandle로 _cbvHeap의 i번째 Handle을 만듭니다. 
+ConstantBuffer클래스가 가지고 있던 _cbvBuffer와 _elementSize를 이용해서 _cbvDesc를 만듭니다. 
+이후 DEVICE로 cbvHandle의 위치에 cbvDesc를 만들어 주도록 합니다.
+
+이렇게 CBVHeap은 완성입니다.
+
+
+
+이제 두번째 DescriptorHeap을 만들면 됩니다. 이 Desc.Heap의 역할은 CBVHeap을 복사한 내용이고 Flag는 Shader Visible이고 레지스터에 전달할 용도의 Desc.Heap 입니다. 
+이 Descriptorheap은  TableDescriptorHeap이라는 용어로 만들어 보도록 하겠습니다.
+
+private 멤버 변수로 
+
+	ComPtr<ID3D12DescriptorHeap> 		_descHeap;
+	uint64					_handleSize = 0;
+	uint64					_groupSize = 0;
+	uint64					_groupCount = 0;
+
+	uint32					_currentGroupIndex = 0;
+
+이렇게 가지고 있습니다. 
+위에서 CreateCBV를 하듯이 TableDescriptorheap도 DescritorHeap의 ComPtr을 가지고 있습니다. 그런데 다른 변수들이 조금 다른데 
+_handleSize는 ConstantBuffer의 _handleIncrementSize와 비슷한 의미입니다. 각 핸들 별로 다음 view를 가리키기 위한 Index같은 겁니다.
+ _groupSize, _groupCount가 조금 다릅니다.
+
+group은 CBVHeap하나를 말합니다. 무슨 말이냐면 위에서 전체적인 그림을 설명할때 SetDescriptorHeaps로 지금 이 TableDescriptorHeap을 가리키고 또 
+SetGraphicsRootTable로 명령마다 사용할 CBVHeap을 선택해 레지스터에 올린다고 했습니다.
+CommandQueue를 사용하는이상 명령이 쌓일때마다 데이터가 덮어씌워지는 문제를 막기위해 TableDescriptorHeap도 여러개의 CBVHeap을 모아두는겁니다.
+
+_handleSize가 CBVHeap의 각 핸들의 크기를 나타내는 것이었고, CBVHeap의 각 핸들의 갯수를 곱하면 CBVHeap의 크기, _groupSize가 구해집니다.
+
+
+이제 구성 함수들을 살펴보겠습니다.
+처음은 Init함수 입니다 인자로 int32 를 받아주고 있습니다. 초기화때 _groupCount를 인자로 받은 count로 정해줄 것입니다. 
+빈 D3D12_DESCRIPTOR_HEAP_DESC desc = {}; 로 빈 desc를 만들어주고 옵션들을 정해줄건데
+이제 각 그룹마다 몇개의 레지스터를 사용하는지가 관건입니다. 지금 강의에서는 5개의 View를 사용하니깐 count에 5를 곱해줘야  desc.NumDescriptor를 알수 있습니다.
+이 CBV의 갯수는 아까 enum class와 enum을 통해 구해놨었습니다. 거기에 추가로 만들겟습니다.
+enum
+{
+	SWAP_CHAIN_BUFFER_COUNT = 2,
+	CBV_REGISTER_COUNT = CBV_REGISTER::END,
+	REGISTER_COUNT = CBV_REGISTER::END,  // TableDescriptorHeap::Init에서 쓸 열거형
+};
+count * REGISTER_COUNT로 이제 _descHeap이 총 몇개의 view를 가져야 하는지를 알수 있고 이렇게 총크기에서 _groupSize만큼씩 움직이면서 CBVHeap의 크기 만큼씩 움직이게 될겁니다.
+
+desc의 다음옵션은 Flag를 설정해줘야하는데요 이 Heap이 GPU쪽으로 위치하도록 SHADER_VISIBLE로 설정해줍니다. 이 플래그는 GPU쪽에 위치하기 위해서도 있지만 이후 쉐이더 단계에서 
+도 TableDescriptorHeap을 활용할수 있도록 열어주는 역할이기도 합니다.
+다음으로 desc.Type을 CBV로 설정해주었습니다.
+
+이렇게 만든 셋팅을 DEVICE->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&_descHeap)); 으로 멤버 변수 _descHeap에다가 생성해줍니다.
+다음으로 _handleSIze를 CBV타입의 크기로 설정해주고 _groupSize를 _handleSize와 REGISTER_CONT를 곱해서 설정해줍니다.
+
+다음 함수는 Clear 함수인데 기능은 _currentGroupIdex를 0으로 밀어주는 기능입니다. 이 기능은 ConstantBuffer에서도 사용해봤습니다 똑같은 의미입니다.
+_currentGroupIndex는 CMD_LIST의 Render가 진행될때마다 다음 Group을 가리키는 커서같은 역할입니다. 다음 프레임이 진행될때는 첫번째 Group으로 돌아오기위해 Clear가 필요합니다.
+
+다음 함수로 SetCBV입니다. 인자로 CPU Handle(srcHandle) 과 우리가 만든 CBV_REGISTER(reg) enum class를 받는데 
+구현부에서 목적지 핸들 destHandle을 GetGPUHandle(reg)로 만듭니다. 이러면 srcHandle과 destHandle이 생기는데 DEVICE를 통해서 srcHandle의 CBV를 destHandle로 복사합니다.
+
+이 과정중에 GetCPUHandle은 우리가 만들어 줘야합니다.
+GetCPUHandle을 오버로딩으로 인자가 두 종류로 만들어 줬습니다. 인자로 enum class를 줘도 되게끔 편리함을 위해 
+
+D3D12_CPU_DESCRIPTOR_HANDLE TableDescriptorHeap::GetCPUHandle(CBV_REGISTER reg)
+{
+	return GetCPUHandle(static_cast<uint32>(reg));
+}
+이렇게 만들어 줫고 uint32를 받는 GetCPUHandle에서 상세 구현을 하겠습니다. 일단 _descHeap의 시작 핸들을 handle이라는 변수에 꺼내오고있습니다.
+이 handle.ptr에 일단 _currentGroupIndex * _groupSize 만큼 크게 이동하고 다시 인자 reg * _handleSize 만큼을 이동했습니다. 
+몇번째 Group에 몇번째 reg 마치 몇동 몇호 를 찾아가는 것처럼 예를들어 두번째 그룹의 b1 레지스터를 찾아 가려면 한 그룹 만큼 이동하고 다시 한 레지스터만큼을 이동합니다.
+
+마지막 함수로 CommitTable함수가 있습니다. 역할은 _descHeap의 데이터를 GPU 레지스터로 올리는 작업을 합니다. 이 작업에 사용되는 함수가 SetGraphicsRootTable입니다.
+CommitTable함수 구현부 내에서 _descHeap의 시작 핸들을 만든다음 _currentGroupIndex * _groupSize로 현재 그룹 인덱스에 해당하는 그룹을 올립니다.
+그룹을 올렸다면 다음 CMD_LIST의 명령을 수행하기 위해 커서를 다음 그룹으로 옮겨야하니 _currentGroupIndex++; 를 해줍니다.
+
+이렇게 DescriptorTable방법으로 GPU 레지스터에 데이터를 올리는 방법은 이전 강의의 ConstantBufferView를 곧장 올리는 방법과 거의 비슷하지만 다른점은 
+CBV의 데이터를 TableDescriptorHeap에 각각 복사를 해놨다가 CommitTable을 했을때 레지스터로 데이터를 올린다는 점이었습니다.
+
+이제 테스트를 해보겠습니다. 
+TableDescritporHeap객체를 생성해줘야하는데 어디에 생성해야 효율적일지는 모르지만 일단 테스트를 위해 Engine에 만들겠습니다.
+Engine.h 에 TableDescriptorHeap을 include 해주고 shared_ptr<TableDescriptorHeap> _tableDescriptorHeap; 을 멤버 변수로 만듭니다. 
+외부에 꺼낼수도 있도록 GetTableDescriptorHeap함수도 만들었습니다. 
+이제 Engine.cpp로 가서 _tableDescriptorHeap = make_shared<TableDescriptorHeap>(); 으로 동적할당해줍니다. 이제 
+_tableDescriptorHeap->Init(256); 으로 _groupCount를 256개로 만들어주겠습니다.
+
+이렇게 Init까지 해주면 다 한것 같지만 아닙니다. 정신을 바짝 차려야하는게 처음에 그림을 설명할때 TableDescriptorHeap을 만들때 같이 사용하는 함수들이
+SetDescriptorHeaps 와 SetGraphicsRootTable을 사용한다고 했는데 CommitTable에서 SetGraphicsRootTable은 사용했지만 SetDescriptorHeaps는 아직 사용하지 않았습니다.
+SetDescriptorHeaps를 설명할 때도 이 함수는 매우 무거운 함수이기때문에 매 프레임마다 한번씩만 사용하는걸 권장한다고 했습니다.
+그래서 이 함수는TableDescriptorHeap 내에서 사용하는게 아닌 CommandQueue::RenderBegin에서 사용해야 하겠습니다.
+
+
+	ID3D12DescriptorHeap* descHeap = GEngine->GetTableDescHeap()->GetDescriptorHeap().Get();
+	_cmdList->SetDescriptorHeaps(1, &descHeap);
+이렇게 사용되는데 인자로 DescriptorHeapsNum, DescriptorHeaps포인터를 받습니다. ComPtr이 아니고 포인터를 받는이유는 다른게 아니고 그냥 이 함수가 그렇게 만들어 졌습니다.
+그리고 DescriptorHeapsNum으로 DescriptorHeaps를 여러개 만들수 있는데 이 부분도 처음의 설명에서 하나의 DescriptorHeaps를 크게 만들어 사용하는게 성능상 좋다고 했었습니다.
+
+이제 Mesh::Render부분을 잠깐 살펴보면 Game.cpp에서 Mesh의 _transform의 값을 주고 Mesh::Render에서 PushData를 하였습니다. 
+이 PushData에서 SetGraphicsRootConstantBufferView를 하고 있었는데 이건 RootDescriptor를 사용하는 방법이었고 지금 하고 있는것은 RootTable을 사용하는방법입니다.
+그러면 SetGraphicsRootConstantBufferView말고 무얼해야 하는가 하면 PushData에서 ::memcpy로 넣어준 데이터의 주소를 TableDescriptorHeap에 건내줘야 합니다.
+그러기 위해 PushData가 지금까지 반환타입이 void였는데 Handle을 반환하도록 고쳐주겠습니다. 
+이러면 Mesh::Render함수에서 ConstantBuffer::PushData는 바로 데이터를 Push하는게 아니라 Handle을 반환합니다. 이걸 지역변수 handle이라는 이름으로 받아주고 TableDescriptorHeap에다가 전달해줘야합니다.
+	{
+		D3D12_CPU_DESCRIPTOR_HANDLE handle = GEngine->GetCB()->PushData(0, &_transform, sizeof(_transform));
+		GEngine->GetTableDescHeap()->SetCBV(handle, CBV_REGISTER::b0);
+	} 
+	{
+		D3D12_CPU_DESCRIPTOR_HANDLE handle = GEngine->GetCB()->PushData(1, &_transform, sizeof(_transform));
+		GEngine->GetTableDescHeap()->SetCBV(handle, CBV_REGISTER::b1);
+	}
+	GEngine->GetTableDescriptorHeap()->TableCommit();
+이러면 b0, b1에 올릴 핸들을 TableDescriptorHeap에 전해주고 이 핸들을 이용해 DescriptorHeap에 내용을 채워넣습니다. 
+그룹 두개를 채워넣은 Desc.Heap을 마직막으로 레지스터에게 Commit해줍니다.
+
+b0는 좌표, b1은 색상인데 같은 데이터를 받게끔 해준것은 이전 삼각형 그리기와 동일 하니까 결과는 똑같아야 합니다.
+
+
+# 예외가 발생했습니다. 
+저의 경우 SetCBV에서 예외가 발생하였다고 떠서 왜그런지 추적해보니깐 handle인자 가 nullptr이었습니다. 이 handle은 다시 ConstantBuffer의 PushData에서 반환 받은 핸들인데
+PushData를 보니깐 같은 클래스의 GetCpuHandle로 핸들을 리턴하고 있어서 다시 살펴보니 _cpuHandleBegin이 nullptr이었습니다. 이게 문제였는데 
+_cpuHandleBegin은 또 _cbvHeap의 시작 핸들이었는데 이 _cbvHeap이 nullptr이었습니다. 이건 다른 변수에 종속된것도 아니고 CBV의 갯수를 설정한 만큼의 CBV를 가지고 있는 CBVHeap을 생성하는것이었습니다.
+제가 한 실수는 ConstantBuffer를 초기화 할때 CreateBuffer는 했는데 CreateView는 하지 않았었습니다. 그러니 _cbvHeap이 생성되지 않고, 그 시작주소인 _cpuHandleBegin도 nullptr이고, 그래서 PushData가 반환할 handle도 nullptr인것이었습니다.
+즉 buffer는 생성되고 map이 되고 또 memcpy까지 되는데 그 버퍼를 담을 cbvHeap이 없었고 DescriptorTable 방식은 cbvHeap들을 모아서 레지스터에 올리는 방식이다 보니깐 Buffer가 중간에 소실되었습니다.
+
+
