@@ -278,5 +278,8 @@ PushData를 보니깐 같은 클래스의 GetCpuHandle로 핸들을 리턴하고
 _cpuHandleBegin은 또 _cbvHeap의 시작 핸들이었는데 이 _cbvHeap이 nullptr이었습니다. 이건 다른 변수에 종속된것도 아니고 CBV의 갯수를 설정한 만큼의 CBV를 가지고 있는 CBVHeap을 생성하는것이었습니다.
 제가 한 실수는 ConstantBuffer를 초기화 할때 CreateBuffer는 했는데 CreateView는 하지 않았었습니다. 그러니 _cbvHeap이 생성되지 않고, 그 시작주소인 _cpuHandleBegin도 nullptr이고, 그래서 PushData가 반환할 handle도 nullptr인것이었습니다.
 즉 buffer는 생성되고 map이 되고 또 memcpy까지 되는데 그 버퍼를 담을 cbvHeap이 없었고 DescriptorTable 방식은 cbvHeap들을 모아서 레지스터에 올리는 방식이다 보니깐 Buffer가 중간에 소실되었습니다.
+#
+
+
 
 

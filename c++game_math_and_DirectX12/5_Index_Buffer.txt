@@ -1,0 +1,148 @@
+
+
+	5 . Index Buffer
+
+
+이전 시간까지 삼각형 두개를 그리는 작업을 하였고 
+이번시간에는 직사각형을 만드는 작업을 해 볼것입니다. 다음시간에 배울 텍스쳐 맵핑의 선수작업입니다.
+
+/* 	복습
+이전 두 강의에서 한것은 삼각형을 띄우는 일이었지만 그 내용은 유용한 것이 많았습니다. 
+
+Mesh 코드를 보면서 복기를 해보자면, 우리가 Mesh를 초기화하고 렌더링을 하면서 삼각형을 만들고 있었습니다. 
+그런데 분명 Mesh는 하나만 만들었는데 삼각형은 두개를 그렸습니다. 
+이게 무슨의미인지 예시를 들면 게임을 만드는데 모델러(메쉬를 전문적으로 다루는 직군)분 께서 실감나는 오크를 만들어 주셨습니다.  
+게임에서 오크가 딱 한마리만 있는건 별로 없는 일입니다. 이 게임에서는 오크를 1만 마리 만들려고 하는데 그러면 모델러 분이 만든 메쉬를 각각 1만개가 필요한게 아니라는게 핵심입니다.
+
+Mesh를 초기화 할 때 정점 정보들을 Mesh객체에 담아서 DEVICE->CreateCommittedResource를 하고 Map, memcpy, UnMap을 해서 GPU쪽으로 데이터를 복사해주는 건 많은 부하가 걸리기 때문에 
+한번씩만 해주는데 그 데이터를 Render할때 옆에서 꽂아주는 데이터를 가지고 여러마리를 생성한다던지 다른위치에 위치하고, 다른 방향을 보고, 크기가 다르다던지 하는 오크들을 생성할 수 있습니다.
+하지만 오크를 구성하는 기하 도형은 다 똑같기 때문에 공통적인 메쉬 정보를 이용한다는게 중요하다고 할 수 있습니다.
+
+그래픽스 OT때 처음 본 DirectX12 Graphics Pipeline이미지를 다시 보면 이전과 다르게 조금 형태가 보일 것 입니다. 
+지금까지 Vertex Shader, Pixel Shader등으로 간소한 파이프라인을 만들고, RootSignature를 서명하고 RootDescriptor 방법으로 ConstantBuffer데이터를 옆에서 꽂아 넣는다거나,
+RootDescriptorHeap 방법으로 꽂아 넣는다거나 하였습니다. 
+이 두가지 방법 말고 RootConstant라는 방법도 있는데 이건 RootDescriptor와 비슷하기 때문에 실습을 해봤다고 할 수 있겠습니다. 
+RootDescriptor, RootDescriptorHeap, RootConstant 이 세가지 방식이 Root Argument라는 형태로 쉐이더 과정에 인자로 들어간다고 이미지에 나와 있는데요
+Root Argument는 별 다른게 아니고 실습중에서 RootSignature로 결제 했던 그 레지스터에 실제 데이터를 올리는 것, 이전 시간을 예로 들면 전부 세팅된 Desc.Heaps를 
+CommitTable의 SetGraphicsRootDescriptorTable라는 함수로 레지스터에 view들을 올리는 것을 말합니다.
+이렇게 인자를 Pipeline과정에 꽂아 넣는 부분은 실습을 해봤다고 할 수 있고, 
+
+Pipeline 자체는 첫 단계인 Input Assembler르 어디서 한것인가를 다시 복습하면 Mesh객체가 vertex정보를 인자로 받고 Init을 하는 과정에서 인자의 데이터를 Vertex Buffer로 만듭니다. 
+그리고 그 VertexBuffer를 묘사한 VertexBufferView를 또 만들고 Mesh::Render에서 IA 시리즈 함수 (IA는 Input Assembler 같습니다.)의 이 정점 데이터는 삼각형이다, 그리고 이런 Buffer View를 사용 한다고
+전해주는 과정이 Input Assembler입니다. 이렇게 들어간 정점 데이터들은 우리가 만들었던 default.hlsli 파일의 계산대로 동작하게 될 것 입니다.
+
+*/
+
+여기 까지 복습을 하고 오늘의 주제인 Index Buffer도 Input Assembler 단계에서 Vertex Buffer와 함께 들어가는 정보입니다. 
+이 두 버퍼는 거의 항상 셋트로 사용된다고 봐야한답니다.
+
+오늘의 실습 결과물은 사각형을 만들겠다고 했었는데 그냥 정점데이터를 사각형으로 만들겠다는것이 아니라 삼각형두개를 이어 붙혀서 사각형을 만들것입니다.
+그러러면 각 삼각형의 두개의 정점이 곂쳐있으면 삼각형을 붙혀서 사각형이 될 것입니다.
+
+지금까지 배운 Vertex Buffer 만으로 사각형을 만들려면 삼각형두개가 필요하고 그러면 Vertex의 정점이 6개가 필요합니다.
+화면의 정중앙이 0, 0, 0 이라고 하면 
+첫 삼각형의 정점이 각 (세번째 정점은 z축인데 지금은 평면에서 작업을 하니깐 의미가 없습니다.)
+-0.5, 0.5, 0.5 
+0.5, 0.5, 0.5
+0.5, -0.5, 0.5
+두번째 삼각형의 정점이 
+0.5, -0.5, 0.5
+-0.5, -0.5, 0.5
+-0.5, 0.5, 0.5
+라고 설정하면 사각형이 될 것입니다.
+
+그리고 이전 실습에서는 메쉬를 두번 만들어서 다른 위치에 삼각형을 두번 만들었던걸 하나만 만들게끔 바꿔줘야 합니다. 
+Mesh::Render에서 b1에 데이터를 넣어주던 코드도 지우고 , Game클래스에서 Update에서 주는 인자도 하나만 사용하겠습니다. 
+실행 해보면 짠 사각형이 출력됩니다. 
+어? 이러면 오늘 주제인 IndexBuffer는 등장하지도 않았는데 목표를 달성했으니 끝인가? 그럴리가 없죠 
+
+이렇게 VertexBuffer만 사용하는 방법의 단점이 무엇인지 생각해보면
+상식적으로 생각해서 사각형을 그리기 위한 정점은 4개 인게 맞는것 같습니다. 하지만 우리 Mesh의 기본 구성이 삼각형으로 만들었기 때문에 사각형을 구현하기 위해서
+여섯개의 정점을 만들어야 합니다. 게다가 지금은 position, color 두가지 데이터만 가지고 있지만 더 많은 데이터를 가지고 있을수 있습니다. 
+즉, vertex는 생각보다 많은 공간을 차지합니다. 
+그런데다가 삼각형 으로 사각형을 만들려고 하니, 곂치게 만들어야 하는 정점들이 있습니다. 중복된 데이터를 사용하고 있는거죠
+지금이야 아주 단순한 사각형이라서 너무 민감하게 받아 들이는게 아닌가 하지만, 더 극한의 상황을 산정하고 코드를 짜야합니다. 
+예를 들어 아주 이쁜 오크를 만들려면 삼각형들을 아주 여러개 곂쳐서 만들어야 하는데 사각형의 예시보다 훨씬 많은 낭비를 해야하는 셈입니다.
+사각형만 해도 정점 4개면 충분할것을 정점 6개로 구현하고 있으니 50%만큼 데이터 량이 증가했다고 볼 수 있고 이 데이터를 GPU에다가 전달하는 과정이 매우 부하가 걸리는 작업인데
+더욱 아쉽습니다.
+
+이 문제를 해결하기 위해 VertexBuffer와 IndexBuffer를 함께 사용하고 있습니다. 
+원리는 간단한데 VertexBuffer는 정말 우리가 필요한 정점만 정의 해주게 될 것입니다. 이 정점 버퍼가 삼각형을 묘사하는게 아니라 그냥 정점 정보만 묘사하는겁니다.
+그리고 그 정점들이 어떻게 이어져 있는지는 IndexBuffer로 표현을 해주게 됩니다.
+
+즉, 사각형의 정점을 v0, v1, v2, v3라고 묘사하고 Index에서 v0, v1, v2 가 한 삼각형이고  v2, v3, v0가 한 삼각형이라고 묘사해주는 겁니다.
+Indices = { 0, 1, 2, 2, 3, 0 }; 
+이러면 최소한의 정점 데이터와 각 정점의 순서들 정점에 비해 아주 적은 용량이면 되는 Index로 성능을 끌어올릴수 있게 된겁니다.
+Index의 각 요소들은 그냥 정점들의 순서만 가지고 있으면 되니까 용량이 unsigned int 16, unsigned int 32 정도만 차지합니다. 정점 정보가 얼마나 큰 용량을 차지하는지 생각해보면
+엄청난 절약입니다.
+
+이제 코드로 들어가서 
+
+일단 Mesh의 코드를 고쳐야합니다. Mesh가 Vertex 정보뿐만 아니라 Index정보도 가지고 있어야합니다.
+그래서 멤버 변수로 IndexBuffer, IndexBufferView, IndexCount를 만듭니다.
+
+	ComPtr<ID3D12Resource>		_indexBuffer;
+	D3D12_INDEX_BUFFER_VIEW		_indexBufferView;
+	uint32 _indexCount = 0;
+
+다음으로 Init함수 에서 Index도 초기화 해줘야 겠습니다. 
+정리를 위해서 VertexBuffer 와 IndexBuffer를 관리하는걸 밖으로 빼주겠습니다.
+public:
+	void Init(const vector<Vertex>& vertexBuffer, const vector<uint32>& indexbuffer);
+private:
+	void CreateVertexBuffer(const vector<Vertex>& buffer);
+	void CreateIndexBuffer(const vector<uint32>& buffer);
+Init은 이제 정점 정보뿐만이 아니라 인덱스 정보도 받아줍니다. 인덱스 정보는 uint32로 넉넉하게 잡아주었습니다.
+
+기존의 Init은 그대로 이름만 CreateVertexBuffer로 바꾸면 되고 
+
+CreateIndexBuffer만 구현해주면 되겠습니다.
+이 CreateIndexBuffer도 Vertex와 거의 비슷합니다. 
+다른 점이라면 BufferSize가 sizeof(Vertex)가 아니라 unit32의 크기이고,  DEVICE->CreateCommittedResource 로 생성한 버퍼를 _indexBuffer에 받아줘야 하고,
+Mapping도 _indexBuffer로 하고 _indexBufferView의 BufferLocation도 _indexBuffer의 주소로 해야합니다.
+그리고 _indexBufferView를 설정할때 StrideInBytes 대신 Format을 DXGI_FORMAT_R32_UINT로 설정해주고 있습니다.
+
+다음으로는 Render하는 함수도 수정을 해줘야 하는데 
+Mesh::Render에서 처음에 InputAssembler 코드가 VertexBufferView만 받아주고 있는데 함수를 하나 더 작성해줍니다.
+ CMD_LIST->IASetIndexBuffer(&_indexBufferView); 
+
+이함수 다음으로 Root Argument를 받는 과정이 있고 
+CMD_LIST->DrawInstanced(_vertexCount, 1, 0, 0); 이 코드로 그림을 그려주는데 
+DrawInstanced라는 함수는 Vertex정보 만 받는 함수입니다. 
+지금 하려는 Vertex와 Index를 함께 받는 함수는 
+CMD_LIST->DrawIndexedInstanced(_indexCount, 1, 0, 0, 0);
+이함수 입니다. 뒤의 숫자 인자 세개는 나중에 Intancing이라는 단계에서 배울 내용입니다. 지금은 일단 넘어 가겠습니다.
+
+여기 까지 했으면 Engine은 다시 빌드를 해줍니다. 그리고 이제 Client쪽으로 가서 Game클래스를 보겠습니다.
+아까 정점 6개로 사각형을 구현 했던 부분을 정점 4개와 Index로 구현해보겠습니다.
+	vector<Vertex> vec(4);
+	vec[0].pos = Vec3(-0.5f, 0.5f, 0.5f);
+	vec[0].color = Vec4(1.f, 0.f, 0.f, 1.f);
+	vec[1].pos = Vec3(0.5f, 0.5f, 0.5f);
+	vec[1].color = Vec4(0.f, 1.f, 0.f, 1.f);
+	vec[2].pos = Vec3(0.5f, -0.5f, 0.5f);
+	vec[2].color = Vec4(0.f, 0.f, 1.f, 1.f);
+	vec[3].pos = Vec3(-0.5f, -0.5f, 0.5f);
+	vec[3].color = Vec4(0.f, 1.f, 0.f, 1.f);
+
+	vector<uint32> indexVec;
+	{
+		indexVec.push_back(0);
+		indexVec.push_back(1);
+		indexVec.push_back(2);
+	}
+	{
+		indexVec.push_back(0);
+		indexVec.push_back(2);
+		indexVec.push_back(3);
+	}
+
+Vertex Data를 담은 vec은 삼각형에서 정점하나가 추가된 셈입니다. 
+Index Data를 담은 indexVec은 unit32 타입 벡터이고  { } 로 각 삼각형들을 이루는 정점의 번호를 3개씩 push_back하였습니다. 
+하나의 삼각형을 그릴때 push_back하는 순서는 상관없이 삼각형이기만 하면 된다고 합니다.
+
+빌드후 실행하면 짜잔 사각형!
+
+
+
+ 
