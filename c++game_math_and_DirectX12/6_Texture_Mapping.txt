@@ -1,0 +1,155 @@
+
+
+		6 . Texture Mapping
+
+
+Texture라는 용어가 처음 등장했습니다. 그렇게 어려운 개념은 아니고 그냥 일반적으로 사용하은 2D이미지를 게임쪽에서는 텍스쳐라고 부르고 있습니다.
+png, jpg 같은 이미지 파일이라고 생각하면 됩니다. 정점으로 만든 폴리곤 위에 씌우는 용도입니다.
+
+지금까지의 몇몇 강의들로 알록달록한 삼각형들, 사각형을 만들었습니다. 그런데 실제 게임에서도 매우 복잡한 삼각형들의 집합들의 색을 수치로 일일히 지정해서 
+만들수는 없습니다. 그럴때 텍스쳐를 매핑한다 라는걸 사용합니다.
+
+텍스쳐를 매핑한다가 구체적으로 무었이냐. 바로 이전에 만든 사각형 메쉬에다가 인터넷에서 가져온 아무 이미지를 척! 갖다 붙히는 겁니다. 
+텍스쳐를 붙힐때 픽셀 하나하나에 텍스쳐의 어떤 부분이 매핑되야 하는지를 정하지는 않고, 정점 단위로 매핑을 합니다. 
+메쉬의 몇번 정점이 택스쳐의 어느 모서리로 오도록 하는걸 정해주게 되는겁니다.
+
+화면에서 정점들을 표현할때 사용되는 좌표계가 여러종류가 있습니다. 여태껏 사용한 좌표계는 우리가 만든 윈도우 창 가운데를 0,0으로 두고 -1 ~ 1 사이의 float를 이용해서 표현하는
+투영 좌표계를 사용했었습니다.
+
+DirectX 진영에서 사용하는 유기 좌표계의 경우 윈도우의 왼쪽 위 끝이 0, 0 좌표를 가지고 우측 위끝은 1, 0 좌측 아래 끝은 0, 1 우측 아래 끝은 1, 1 로 표현하는 좌표계입니다.
+
+정점 v0, v1, v2, v3로 표현한 사각형에게 각 정점에 텍스쳐에 대응하는 유기 좌표를 할당하게 되면 텍스쳐가 어느정점으로 가서 매핑되야하는지 알수 있게 됩니다.
+
+이렇게 메쉬에 텍스쳐를 매핑하게되면 우리가 직접 색상을 지정해주지 않아도 세밀하게 색상이 정해지는걸 보면 누군가가 이 일을 대신 하고 있다는걸 알 수 있는데,
+그래픽스 파이프라인이 과정에서 Input Assembler때 정점버퍼, 인덱스버퍼, 매핑할 텍스쳐에 대응하는 유기 좌표등을 건네주고 , 여러 쉐이더 과정들을 거치다
+Resterizer단계에서 픽셀마다 알맞은 색상데이터가 입혀지게 됩니다.
+
+# Rasterize? Resterize?
+그래픽스 파이프라인 이란 컴퓨터속 가상공간의 3D물체들을 2D 래스터 이미지로 표현하기 위한 단계적 방법을 의미합니다. 
+래스터는 컴퓨터에서 어떤 도형 혹은 이미지를 픽셀로 구성하고 이 점들의 모습을 조합, 일정한 간격으로 나열하여 화면에 표현하는것을 말합니다.
+#
+
+Resterizer 단계에 대해 좀 더 자세히 말하면, 받은 정점 데이터가 있을때 각 정점들을 이어서 이 삼각형에 포함되는 픽셀들을 찾아주는 역할을 Resterizer에서 해주고
+더불어서 각 정점들 사이의 색상을 보간(두 데이터의 평균 혹은 중간 값으로 처리하는방법)작업을 통해 픽셀의 알맞는 색상을 표현합니다.
+예를 들면 먼저 만들었던 삼각형에서 각 정점에 빨간색, 초록색, 파란색의 값을 주었는데 정점들의 사이의 거리를 계산해서 안을 채우는 픽셀들의 색상을 적절히 채워주는것입니다.
+이 Resterizer는 색상 값만 해당되는게 아니라 유기 좌표를 건내주었을 때도 좌표들의 거리따른 색상을 적절히 계산해주게 됩니다.
+
+이것이 오늘 할 실습의 간단한 설명이었구 이제 코드로 넘어가보겠습니다.
+
+### 코드 ## 
+
+# 사전 작업 DirectXTex 라이브러리
+우선 실습을 시작하기전에 할 작업이 있는데, 텍스쳐라는것이 png, jpg등 이미지 파일들이라고 하였는데 이런 텍스쳐를 불러오는 부분이 DirectX에 공식적으로 추가 되어있지 않습니다.
+이 부분을 따로 받아와야합니다.
+
+그래서 오늘 사용할것은 마이크로소프트에서 제공하는 DirectXTex를 사용할 것입니다. 
+외부 라이브러리를 가져오는 첫번째 실습도 겸할 건데 일단 구글에 DirectXTex를 검색하면 마이크로소프트의 깃허브가 나오는데 다운로드 zip으로 받겠습니다. 
+압축을 풀면 꽤 많은 용량인걸 알수 있는데 여러 버전 솔루션들이 있습니다. 그중 지금 제가 사용하는 Visual Studio 2022 윈도우 10 버전의 솔루션을 실행하였습니다.
+많은 소스코드들이 있는데 일단 Relese버전으로 한번 빌드를 하고, 다시 Debug버전으로 빌드를 해줍니다. 그러면 그 output이 어디에 있는지 속성의 출력 디렉토리를 확인하면 
+bin폴더에 2022 Win 10 이런 폴더 안에 있는걸 확인했습니다. 따라 들어가서 각 Debug 버전과 Relese버전이 있는데 Debug 폴더의 DirectXTex.lib파일을 햇갈리지 않게 DirectXTex_Debug.lib으로 
+이름을 바꾸어 백업해두고 , 같은 방식으로 Relese폴더의 DirectXTex.lib을 백업합니다. 이 두 파일말고 또 필요한 파일은 bin의 상위폴더인 DiretXTex폴더에 
+DirectXTex.h 와 DirectXTex.inl 파일입니다. 
+
+필요했던 파일들을 전부 우리 프로젝트로 가져와야합니다. 이 강의에서는 외부 라이브러리를 관리하기위해 프로젝트 폴더에서 Library->Lib->DirectXTex 폴더에는 DirectXTex_Debug.lib와 
+DirectXTex.lib를 관리하고 Library->include->DirectXTex 폴더에는 헤더와 inl 파일을 관리하였습니다.
+#
+
+이제 새로운 라이브러리를 가져왔으니 우리프로젝트에 알려줘야합니다. 
+Engine프로젝트의 Utils 필터의 EnginePch.h에서 우리가 사용할 라이브러리들을 모두 관리하고 있었는데요 적절한 위치에 include 해주었습니다
+
+#include <DirectXTex/DirectXTex.h>
+#include <DirectXTex/DirectXTex.inl>
+
+#ifdef _DEBUG
+#pragma comment(lib, "DirectXTex\\DirectXTex_debug.lib")
+#else
+#pragma comment(lib, "DirectXTex\\DirectXTex.lib")
+#endif
+
+하지만 지금은 경로를 설정해주지 않아서 빌드가 되지않습니다. Engine프로젝트의 속성으로 들어가서 VC++ 디렉터리->포함디렉터리->편집->$(SolutionDir)Library/include/를 추가 해서 
+경로를 잡아주었습니다.
+Client 프로젝트에도 경로를 추가해주겠습니다. Client는 포함디렉터리뿐만아니라 라이브러리 디렉터리도 경로를 추가해주었습니다. ($(SolutionDir)Library/Lib/ 으로)
+#
+
+
+경로설정이 끝났으면 이제 Texture클래스를 만들어주겠습니다. Resource필터에 위치 할거구요
+private 멤버 변수는 이렇게 들고 있습니다.
+
+private:
+	ScratchImage			 	_image;
+	ComPtr<ID3D12Resource>			_tex2D;
+
+	ComPtr<ID3D12DescriptorHeap>		_srvHeap;
+	D3D12_CPU_DESCRIPTOR_HANDLE		_srvHandle;
+
+처음보는 타입의 변수인 _image가 보이고 리소스 ComPtr _tex2D와 밑에는 View들을 관리할 _srvHeap, 그 주소를 가리킬 _srvHandle이 있습니다.
+ConstantBuffer의 DescriptorHeap과 Texture의 DescriptorHeap의 차이점이 있는데,
+ConstantBuffer를 사용할때 DescriptorHeap을 엄청 여러개를 만들어서 사용했었는데
+Texture는 소수의 View만 만들고 데이터를 변경하지않고 계속 사용한다는 점이 차이점입니다.
+
+다음으로 함수입니다. 
+public:
+	void Init(const wstring& path);
+
+	D3D12_CPU_DESCRIPTOR_HANDLE GetCpuHandle() { return _srvHandle; }
+
+public:
+	void CreateTexture(const wstring& path);
+	void CreateView();
+Init함수는 텍스쳐 파일의 경로를 받을것이고 내부에서 CreateTexture함수와 CreateView함수를 호출해서 초기화 해줄 겁니다. 그리고 만든 View의 핸들을 꺼내쓸 
+GetCpuHandle함수도 있습니다.
+
+Init 함수의 구현부는
+ CreateTexture(const wstring& path);
+ CreateView();
+로 간단해보입니다. 그러면 각 내부 함수들의 구현부를 다시보면
+인자로 받은 경로의 텍스쳐 파일의 확장자를 체크하고 있습니다. 텍스쳐파일은 확장자가 하나가 아니라 .dds, .tga, .png, .jpg, .jpeg, .bmp등 다양한 확장자가 있고 
+특정 확장자들은 처리하는 함수가 다르기 때문입니다. 
+확장자를 얻는 공식적인 방법이 C++17에서 추가되었는데 fs( File System ) 입니다. 문제는 C++17에서 추가된 기능이기때문에 기본적으로는 막혀있습니다.
+사용하는 방법은 프로젝트의 속성->C++ 탭 -> 언어 -> C++ 언어 표준 탭 -> C++ 17까지 사용 으로 기능을 사용할수있게됩니다.
+
+그리고 EnginePch.h에 include해줘야 합니다. 
+
+#include <filesystem>
+namespace fs = std::filesystem;
+
+파일시스템은 자주 활용하게 될 것이라 fs로 std::filesystem을 간편히 사용하도록 해줍니다.
+
+C++17을 사용하게 되면서 우리 코드에 에러가 한가지 생기게 됩니다. 
+C++17에 추가된 std::byte라는 기능과 우리 코드에서 사용하던 byte(윈도우에서 제공하는것)가 곂쳐서 생기는 에러인데요 우리 코드에서 using namespace std; 로 std를 생략 가능하게 해놔서 
+그냥 byte만 쳐도 std::byte라고 인식이 되는게 문제입니다. 
+이 에러를 해결하려면 using namespace std;를 지우고 코드들을 수정해서 앞에 std::를 하나씩 달아주는 방법과 
+아니면 무슨 기능인지는 모르지만 추가된 std::byte를 사용안한다고 선언해 놓는것입니다. 
+이 프로젝트에서는 std::byte를 사용안하는 방향으로 해 보겠습니다.
+
+EnginePch.h에 
+
+// std::byte 사용하지 않음
+#define _HAS_STD_BYTE 0
+
+를 추가해서 std::byte를 사용하지 않게 해주었습니다.
+
+EnginePch.h에 또 추가해줄 내용은 
+기존에 enum class로 관리하던 CBV_REGISTER가 있었는데 
+비슷하게 
+enum class SRV_REGISTER : uint8
+{
+	t0 = static_cast<uint8>(CBV_REGISTER::END),
+	t1,
+	t2,
+	t3,
+	t4,
+
+	END
+};
+를 만들어 주었습니다. 첫 레지스터인 t0는 CBV_REGISTER::END로 바로 이어서 값들이 오도록 세팅되어있고 이어서 
+
+enum
+{
+	SWAP_CHAIN_BUFFER_COUNT = 2,
+	CBV_REGISTER_COUNT = CBV_REGISTER::END,
+	SRV_REGISTER_COUNT = static_cast<uint8>(SRV_REGISTER::END) - CBV_REGISTER_COUNT,
+	REGISTER_COUNT = CBV_REGISTER_COUNT + SRV_REGISTER_COUNT,
+};
+이렇게 수정되었습니다.
+
