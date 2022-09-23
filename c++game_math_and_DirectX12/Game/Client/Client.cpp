@@ -10,6 +10,10 @@
 #define MAX_LOADSTRING 100
 
 // 전역 변수:
+
+// 전역 변수로 WindowInfo 구조체를 선언합니다.
+WindowInfo GWindowInfo;
+
 HINSTANCE hInst;                                // 현재 인스턴스입니다.
 WCHAR szTitle[MAX_LOADSTRING];                  // 제목 표시줄 텍스트입니다.
 WCHAR szWindowClass[MAX_LOADSTRING];            // 기본 창 클래스 이름입니다.
@@ -44,11 +48,20 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_CLIENT));
 
     MSG msg ;
+
+    
+    // 전역 WindowInfo 구조체의 값들을 넣어줍니다.
+    // hwnd는 밑의 InitInstance에서 넣어줍니다.
+    GWindowInfo.width = 800;
+    GWindowInfo.height = 600;
+    GWindowInfo.windowed = true;
+
     
     //Game* game = new Game();
     // 생 포인터 대신 스마트 포인터를 활용합니다.
     unique_ptr<Game> game = make_unique<Game>();
-    game->Init();
+   
+    game->Init(GWindowInfo);
 
     // 기본 메시지 루프입니다:
     while (true)
@@ -124,6 +137,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
+
+   GWindowInfo.hwnd = hWnd;
 
    return TRUE;
 }
