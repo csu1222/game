@@ -11,12 +11,17 @@
 #include "Texture.h"
 #include "DepthStencilBuffer.h"
 
+#include "Input.h"
+
 
 class Engine
 {
 public:
 	void Init(const WindowInfo& info);
 	void Render();
+
+public:
+	void Update();
 
 public:
 	shared_ptr<Device> GetDevice() { return	_device; }
@@ -26,6 +31,8 @@ public:
 	shared_ptr<ConstantBuffer> GetCB () { return _cb; }
 	shared_ptr<TableDescriptorHeap> GetTableDescHeap() { return _tableDescHeap; }
 	shared_ptr<DepthStencilBuffer> GetDepthStencilBuffer() { return _depthStencilBuffer; }
+
+	shared_ptr<Input> GetInput() { return _input; }
 
 public:
 	void RenderBegin();
@@ -40,19 +47,14 @@ private:
 	D3D12_VIEWPORT	_viewport = {};
 	D3D12_RECT		_scissorRect = {};
 
-	// 오늘의 주인공 4총사
-	shared_ptr<Device>		_device;
-	shared_ptr<CommandQueue>	_cmdQueue;
-	shared_ptr<SwapChain>		_swapChain;
-	shared_ptr<RootSignature>	_rootSignature;
+	shared_ptr<Device> _device = make_shared<Device>();
+	shared_ptr<CommandQueue> _cmdQueue = make_shared<CommandQueue>();
+	shared_ptr<SwapChain> _swapChain = make_shared<SwapChain>();
+	shared_ptr<RootSignature> _rootSignature = make_shared<RootSignature>();
+	shared_ptr<ConstantBuffer> _cb = make_shared<ConstantBuffer>();
+	shared_ptr<TableDescriptorHeap> _tableDescHeap = make_shared<TableDescriptorHeap>();
+	shared_ptr<DepthStencilBuffer> _depthStencilBuffer = make_shared<DepthStencilBuffer>();
 
-	// 상수버퍼
-	shared_ptr<ConstantBuffer>	_cb;
-
-	//  Descriptor Table 활용
-	shared_ptr<TableDescriptorHeap> _tableDescHeap;
-
-
-	shared_ptr<DepthStencilBuffer> _depthStencilBuffer;
+	shared_ptr<Input> _input = make_shared<Input>();
 };
 

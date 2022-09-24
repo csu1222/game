@@ -1,0 +1,126 @@
+
+
+		8 . Input 과 Timer
+
+
+이번시간에는 간단한 부품 하나를 추가 할 것 입니다.
+
+지금까지 우리가 만들고 있는 것은 3D물체를 표현하기위한 부품들을 만들고 있었는데요 3D그래픽을 표현하려면 필연적으로 카메라가 있어야 
+이곳 저곳을 찍을수 있을 것인데 이 카메라를 이곳 저곳 움직이려면 일단 입력을 받는게 제일 첫번째 일것입니다.
+그리고 이동을 할때도 임의의 거리를 이동하는게 아니라 일정시간동안 이동을 하는게 필요한게 두번째 입니다.
+
+그래서 Input과 Timer라는 부품을 추가 해주겠습니다.
+
+Engine에 각각 클래스를 추가해주고
+
+# Input 
+input 클래스 부터 시작하겠습니다. Input의 기능은 지금 사용자가 키보드나 마우스의 버튼을 누르고 있는지, 이전 프레임부터 계속 누르고 있는 상태인지, 버튼을 누르던걸 땠는지를 
+감지하는 기능을 가지고 있습니다.
+
+이번시간은 키보드 입력만 다룰 것이고 마우스는 다른 시간에 추가해줄것입니다.
+
+가지고 있는 private 멤버 변수는 윈도우 핸들 HWND _hwnd 와 KEY_STATE라는 타입의 vector _states; 를 가지고 있습니다.
+
+가지고 있는 함수는 Init 함수(_hwnd를 초기화), Update함수로 매 프레임 입력이 어떤지 추적해주고있습니다.
+그리고 3가지 함수 GetButton, GetButtonDown, GetButtonUp 이 있는데 각 기능은
+GetButtonDown : 내가 키보드를 누른 순간 true 반환하는 함수
+GetButtonUp : 내가 누르고 있던 키보드를 때는 순간 true를 반환하는 함수
+GetButton : 매 프레임마다 계속 누르고 있는 상태에 라면 true 를 반환하는 함수 
+
+다음으로 몇몇 enum class와 enum을 추가 해 줄것입니다. 이 enum들은 입력에 대한 것들인데, 그냥 EnginePch에 추가해 줄 수 도 있지만 
+용도가 입력에 대한 enum들이고 입력은 무조건 이 Input클래스를 포함해야 하니깐 Input클래스에 추가 해줘도 무방할것입니다.
+
+enum class KEY_TYPE
+{
+	UP = VK_UP,
+	DOWN = VK_DOWN,
+	LEFT = VK_LEFT,
+	RIGHT = VK_RIGHT,
+
+	W = 'W',
+	A = 'A',
+	S = 'S',
+	D = 'D',
+};
+
+enum class KEY_STATE
+{
+	NONE,
+	PRESS,
+	DOWN,
+	UP,
+	END
+};
+
+enum
+{
+	KEY_TYPE_COUNT = static_cast<int32>(UINT8_MAX),
+	KEY_STATE_COUNT = static_cast<int32>(KEY_STATE::END),
+};
+
+KEY_TYPE은 이번에 입력받을 버튼을 방향키들과 wasd만 일단 받을것입니다. 나중에 필요해지면 다른 버튼들도 추가해줄것입니다.
+VK_UP같은것들은 우리가 직접 추가한 것이 아니라 Windows에서 지원하는 define입니다.
+
+또 한가지 의문점으로 그러면 직접 VK_UP같은 define을 사용하면 되지 왜 굳이 KEY_TYPE이라는 enum class를 또 한번 랩핑을 했는가?
+- 일단 이름을 외우기 쉽게 해줄려는 의도가 하나 있고 , 또 지금은 모르지만 만약 Window가 아닌 환경에서 이 게임을 실행했을때 대응을 하기 쉽도록 이렇게 한번 랩핑으로 관리를 해주고 있습니다.
+
+KEY_STATE는 함수3형제들과 관련된 enum class입니다.
+NONE은 입력이 없는상태, DOWN은 입력을 한 순간, PRESS는 입력이 유지되고있을때, UP은 입력이 해제된순간, END는 그냥 이 enum class의 갯수를 세기위해 넣어놓았습니다.
+
+마지막 enum은 각 enum class의 count를 쓰기위해 만든 enum입니다. KEY_STATE는 END로 갯수를 관리하는데 KEY_TYPE은 왜 그렇게 안할까요?
+KEY_TYPE은 순서대로 나열되기만 한게 아니라 각각 임의의 값을 대입해주었기 때문에 마지막에 END를 추가해도 그게 갯수를 의미 하지 않기 때문입니다.
+그래서 그냥 unsigned int 8bit max 만큼 즉 255개라고 해놓았습니다. 지금은 키를 8개 밖에 사용하고 있지 않지만 점차 늘려갈수 있으니 그냥 큰숫자로 해두었습니다.
+
+GetButton 함수들의 구현은 GetState라는 함수의 리턴 값이 각 KEY_STATE와 같은지 체크하고 있고 
+또 GetState는 
+GetState(KEY_TYPE key) { return _states[static_cast<uint8>(key)]; }
+_state를 리턴하고 있습니다.
+즉,vector<KEY_STATE> _states; 는 각 키에 해당하는 state를 관리하는 벡터라고 할 수 있습니다.
+예를 들어 W 키를 눌렀다면 GetButton의 인자로 W를 주고 구현부의 GetState에서 W의 state를 가지고 있는 _state에서 값을 가져와 체크를 할것입니다.
+
+
+이제 Input 과 Update함수의 구현부를 살펴보겠습니다.
+Input에서는 인자로 받은 HWND를 _hwnd에 받아주고 , _state.resize로 크기는 KEY_TYPE_COUNT(UINT8_MAX(255))만큼 모든 스테이트는 NONE으로 설정해주었습니다.
+(_hwnd가 필요한이유는 이 프로그램이 비활성화 일때도 화살표 버튼이나 wasd버튼을 누르면 우리 게임에서 반응을하지 않도록 현재 활성화된 윈도우를 체크해서 입력을 받지 않도록 해주기 위해서 입니다.
+이 부분은 Update 초반에 나옵니다.)
+
+다음으로 Update 함수의 구현부 입니다. Input::Update는 매 프레임마다 갱신이 되는 함수입니다. 
+왜 입력을 매 프레임마다 체크를 해야 하냐면 입력이 한 프레임 내에서는 유지 된다고 가정을 해야 하기 때문입니다. 
+어떤 A프레임에서 한번 체크할때는 W라는 버튼이 누른 상태였는데 다시 A프레임 내에서 두번째 체크를 할때 W가 때진 상태면 모순이 발생할것이기 때문입니다.
+그러다 보니 매 프레임마다 입력은 고정된 값을 가지게 하기 위해서 매 프레임마다 Update를 호출할것입니다.
+
+Update 함수의 첫 할일은 _hwnd를 Active 상태인지 체크해서 아니라면 _state의 모든 키의 상태를 NONE으로 바꿔주는 일입니다. 
+게임창을 내린상태에서도 입력을 받는다면 이상하겠죠?
+
+다음으로 for문이 또 나오는데 uint32타입의 key라는 변수가 KEY_TYPE_COUNT만큼 반복을 돌아 줄것입니다.
+그리고 if 문으로 ::GetAsyncKeyState(key) & 0x8000 이것을 체크해 줍니다. 이건 Windows에서 제공하는 키가 눌렸는지를 체크하는 방법입니다.
+눌렸다면 
+		KEY_STATE& state = _states[key];
+
+		// 이전 프레임에 키를 누른 상태라면 PRESS
+		if (state == KEY_STATE::PRESS || state == KEY_STATE::DOWN)
+			state = KEY_STATE::PRESS;
+		else
+			state = KEY_STATE::DOWN;
+	else
+		{
+			KEY_STATE& state = _states[key];
+
+			// 이전 프레임에 키를 누른 상태라면 UP
+			if (state == KEY_STATE::PRESS || state == KEY_STATE::DOWN)
+				state = KEY_STATE::UP;
+			else
+				state = KEY_STATE::NONE;
+		}
+이렇게 _state의 모든 요소들을 체크해서 업데이트 해 줍니다.
+
+이제 이렇게 만든 Input 클래스를 Engine 에도 추가 해주겠습니다. include, Get함수 shared_ptr, make_shared를 해주고 Engine::Init에서 Input::Init 도 해주었습니다.
+
+( 이때 다시 코드를 정리 했는데 make_shared를 Engine.cpp에서 하지않고 그냥 Engine.h에서 생성자에게 넘겼습니다. 이런 습관은 전방선언을 해주지 않으면 안되기 때문에 좋은 습관은 아니지만 ,
+지금 프로젝트에서는 전방선언 대신 아예 클래스들을 include 하고 있으니깐 허용 됩니다.)
+
+오랜만에 Engine에 새로운 함수를 추가 해줄건데 Update입니다. 앞으로는 이 Update함수가 여러개 나올수도 있는데 각 업데이트 시점마다 달라지는 것들이 있을수 있기때문입니다.
+Engine::Update는 지금은 간단하게 _Input->Update() 만 해주겠습니다.
+
+그리고 Game::Update로 가서 GEngine객체를 Update해주겠습니다. 위치는 RenderBegin하기 이전에 넣어주겠습니다.
+(지금은 Game::Update에서 렌더링을 해주고 
