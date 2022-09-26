@@ -123,4 +123,176 @@ Update 함수의 첫 할일은 _hwnd를 Active 상태인지 체크해서 아니�
 Engine::Update는 지금은 간단하게 _Input->Update() 만 해주겠습니다.
 
 그리고 Game::Update로 가서 GEngine객체를 Update해주겠습니다. 위치는 RenderBegin하기 이전에 넣어주겠습니다.
-(지금은 Game::Update에서 렌더링을 해주고 
+(지금은 Game::Update에서 렌더링을 해주고 있지만 나중에는 전부 Engine안에서 하게 될겁니다.)
+
+이제 Game이 루프를 돌때마다 Update가 될것이고 Input으로 어떤 실습을 할거냐면 지금까지는 베이가 사진에게 offset으로 trasform이라는 고정값을 줬지만 지금부터는 입력으로 줘보도록 하겠습니다.
+지금까지 사각형 메쉬에 베이가를 매핑해놨던 코드가 이런 형태 였습니다.
+	{
+		Transform t;
+		t.offset = Vec4{ 0.0f, 0.f, 0.f, 0.f };
+		mesh->SetTransform(t);
+
+		mesh->SetTexture(texture);
+
+		mesh->Render();
+	} 
+이전 테스트에서는 베이가를 두개 생성했었는데 일단 한개만 사용할것이고 이 코드에서 입력에 따라 offset이 바뀌도록 하려면 이렇게 바꿔야합니다.
+
+	{
+		static Transform t = {};
+
+		if (INPUT->GetButton(KEY_TYPE::W))
+			t.offset.y += 1.f;
+		if (INPUT->GetButton(KEY_TYPE::S))
+			t.offset.y -= 1.f;
+		if (INPUT->GetButton(KEY_TYPE::A))
+			t.offset.x -= 1.f;
+		if (INPUT->GetButton(KEY_TYPE::D))
+			t.offset.x += 1.f;
+
+		mesh->SetTransform(t);
+
+		mesh->SetTexture(texture);
+
+		mesh->Render();
+	} 
+우선 Trasform t; 가 앞에 static이 붙었습니다. 이전프레임의 값을 유지하도록 지금이 { } 의 유효범위를 넘어서도 유지되도록 해준것이고, 각 if문으로 인풋의 어떤 버튼을 누르고 있는지를 체크하고 있습니다.
+( 여기서 INPUT이라는 define을 사용했는데 내용은 GEngin->GetInput()입니다. EnginPch.h에 추가하였습니다. )
+if문으로 W, S, A, D를 각각 체크해서 Transform의 x 좌표와 y좌표를 가감하고 있습니다. 
+이렇게 해서 실행해보면 첫화면에는 베이가가 있고 WASD의 아무 버튼이나 누르면 그림이 없어집니다. 
+그 이유는 Update가 매 프레임 일어나고 있는데 CPU의 처리속도가 매우 빠르기 때문에 우리가 WASD중 하나를 잠깐만 눌러도 그 방향으로 수십 수백 이나 좌표가 움직여버리기 때문입니다. 
+(이문제를 해결하기위해 이 다음에 배울 TImer가 필요합니다.)
+일단 미봉책으로 각 좌표에 0.001씩을 곱해서 실행해 봤습니다. 이러니까 그럴싸 하게 속도가 느려졌습니다. 
+이러면 되는거아닌가? 꼭 Timer가 필요한가 싶지만, 이렇게 고정값으로 처리하면 컴퓨터 마다 처리속도가 다른데 그러면 각 컴퓨터마다 이 베이가가 움직이는 속도가 달라집니다. 모두가 같은 속도로 움직이게 하기위해 
+프레임사이의 시간을 재서 적절한 속도가 나도록하는게 Timer클래스입니다.
+
+
+# Timer
+
+
+class Timer
+{
+public:
+	void Init();
+	void Update();
+
+	uint32 GetFps() { return _fps; }
+	float GetDeltaTime() { return _deltaTime; }
+
+private:
+	uint64	_frequency = 0;
+	uint64	_prevCount = 0;
+	float	_deltaTime = 0.f;
+
+private:
+	uint32	_frameCount = 0;
+	float	_frameTime = 0.f;
+	uint32	_fps = 0;
+};
+
+이렇게 선언부가 되어 있고 deltaTime은 이전 프레임과 현재 프레임간의 걸린 시간을 말하는 것이고 , fps는 말그대로 Frame per Second 초당 몇 프레임이 지나갔는가를 알려주는 것입니다.
+
+이제 Init과 Update의 구현부도 보겠습니다.
+
+void Timer::Init()
+{
+	::QueryPerformanceFrequency(reinterpret_cast<LARGE_INTEGER*>(&_frequency));
+	::QueryPerformanceCounter(reinterpret_cast<LARGE_INTEGER*>(&_prevCount)); // CPU 클럭
+}
+
+void Timer::Update()
+{
+	uint64 currentCount;
+	::QueryPerformanceCounter(reinterpret_cast<LARGE_INTEGER*>(&currentCount));
+
+	_deltaTime = (currentCount - _prevCount) / static_cast<float>(_frequency);
+	_prevCount = currentCount;
+
+	_frameCount++;
+	_frameTime += _deltaTime;
+
+	if (_frameTime > 1.f)
+	{
+		_fps = static_cast<uint32>(_frameCount / _frameTime);
+
+		_frameTime = 0.f;
+		_frameCount = 0;
+	}
+}
+
+Init에서는 Window에서 제공하는 함수를 사용하고 있는데, Window에서도 시간을 재는 함수를 여러가지 사용하고있습니다 예를 들어 GetTickCount라는 함수는 시간에 따른 틱이라는 단위를 세는 함수인데
+여기서 시간이란 시 분 초 같이 보편적으로 정밀한 시간을 사용하는것이 아닌 상대시간을 사용합니다. 이전 기준점에서 지금까지 얼만큼의 시간이 흘렀는지를 잴수 있으면 충분합니다.
+GetTickCount함수의 단점은 정밀도가 떨어진다는 점인데 그걸 보완하는게 Windows에서 제공하는 
+::QueryPerformanceCounter 입니다. 이 함수는 CPU클럭과 관계있다고 합니다.
+_frequency(빈도?)와 _prevCount(이전 클럭수)를 Init할때 초기화 하고 
+업데이트 함수에서 현재 클럭수 CurrentCount 를 구한다음 현재 클럭수에서 이전 클럭수를 빼면 한 프레임당 클럭이 얼마나 지났는지를 알수 있고 이 한 프레임의 클럭수를 다시 빈도로 나눠주면 
+_deltaTime이 나옵니다.
+
+( 델타 타임이란? 델타 타임이 무엇인지 이해가 잘 안가서 따로 찾아본 내용입니다. 
+컴퓨터간의 성능차이가 생기기 시작한 후로 부터 게임에서 한프레임당 1M를 간다고 치면 연산능력이 2배 빠른 컴퓨터는 기존 컴퓨터보다 같은시간에 두배 멀리 갈수 있게 되었습니다.
+하지만 어떤성능의 컴퓨터라도 항상 동등한 게임 경험을 받도록 하고 싶기때문에 '델타 타임'이 등장하였는데요 이 '델타 타임의 의미는 이전 프레임이 걸린시간' 이라는 뜻이라고 합니다. 
+이게 어째서 동등한 성능을 내기위한 개념인가? 할 수 있는데 프레임당 이동거리에 델타타임을 곱해주면 되는데요
+어떤 컴퓨터 A의 FPS가 10프레임이 나온다고 한다면 이 컴퓨터 A의 델타타임은 1/10초 인겁니다. 반면 컴퓨터 B의 FPS는 20프레임이라면 이 컴퓨터 B의 델타타임은 1/20입니다.
+컴퓨터 A가 어떤 캐릭터를 1프레임에 1M 이동시킨다고 한다면 1M * 1/10초 이므로 1프레임당 0.1M를 움직이고 FPS로 따지면 초당 1M를 움직입니다.
+컴퓨터 B의 경우 1M * 1/20초 이므로 프레임당 0.05M 를 움직이지만 fps 20 프레임이니깐 1초당 1M를 움직이게 됩니다. 
+이렇게 성능이 다른 두 컴퓨터가 동등한 게임 경험을 가지게 됩니다.)
+( 위 코드에서 (currentCount - _prevCount) 이부분에서 한 프레당 몇번의 클럭이 지나갔는가를 알수 있습니다. 예를 들어 20 클럭이 지나갔다고 합니다.
+또 ::QueryPerformanceFrequency라는 함수의 결과물인 _frequency는 1초당 이 CPU가 몇 클럭을 수행하는가 입니다. 100 클럭이라고 해보겟습니다. 이러면 초당 100클럭인데 한프레임당 20클럭이니깐
+FPS 가 5프레임이지 않을까? 라는생각이 듭니다. 그래서 _deltaTime을 구하는 수식을 직접 계산해 보면 20 / (100/1sec) 입니다. 계산후 0.2sec라는 값이 나옵니다. 
+정말 한 프레임당 걸리는 시간이 나왔습니다.)
+
+_deltatime을 구하고 나서는 다음 프레임의 클럭수 계산을 위해 _prevCount에 currentCount값을 넣어줍니다.
+그리고 _frameCount는 한 프레임이 지났으니 1증가시켜주고 1프레임당 시간인 _deltaTime을 _framTime에 += 해줍니다. 
+다음으로 _fps 값을 구하기 위해 if 문을 돌아 _framTime이 1초가 지났는지를 체크 해줍니다. 이 때의 _frameCount는 1초동안의 frame수가 쌓여있을것이고 _frameTime은 1초와 근사값이므로 
+프레임 수와 시간을 나누어서 _fps에 넣어줍니다. 그리고 나서는 다시 _frameCount 와 _frameTime을 0으로 초기화 해줍니다. 다음 _fps를 측정하기 위해서
+
+이렇게 Timer 클래스에서는 _deltaTime과 _fps를 구해주었습니다. 좀 더 고급으로가면 더 다양한 기능이 있다고 하는데 지금 단계에서는 필요 최소한의 기능만을 구현하였습니다.
+( Timer를 일시정지 시킨다거나 더 빠르게 돌린다거하 하는 기능들)
+
+# Engine에 Timer 클래스 추가 
+
+Engine.h에 Timer클래스를 include해주고 GetTimer함수와 Timer 멤버 변수를 만들어줍니다. 
+Engine.cpp에서는 Engine::Init에서 _timer->Init() 을 해주고 Engine::Update에서는 _timer->Update()를 해주어서 매 프레임 업데이트 되도록 해주겠습니다. 
+한가지 더 추가 기능을 넣어 볼것입니다. 바로 윈도우에 fps를 출력하는 기능입니다. 
+ShowFps라는 함수를 만들고 Engine::Update에 같이 실행되도록 넣어줍니다. 
+ShowFps의 구현부는 _timer->GetFps를 받아서 윈도우 API를 이용해 화면에 출력하는 간단한 기능입니다.
+
+void Engine::ShowFps()
+{
+	uint32 fps = _timer->GetFps();
+
+	WCHAR text[100] = L"";
+	::wsprintf(text, L"FPS : %d", fps);
+
+	::SetWindowText(_window.hwnd, text);
+}
+
+# Game에서 DeltaTime 적용
+
+우리가 Timer를 만든이유가 Input으로만 이동을 구현하면 컴퓨터의 성능에 따라 이동 속도가 좌우되는걸 동등하게 하기 위해서였습니다. 
+Input에 Timer에서 구한 deltaTime을 곱해주면 되는데 이 deltaTime이 이곳 저곳에서 쓰일것 같으니 EnginePch에 define을 해주면 편할것 같습니다.
+
+#define DELTA_TIME			GEngine->GetTimer()->GetDeltaTime()
+
+Input에 의한 이동 코드는 이제 
+	{
+		static Transform t = {};
+
+		if (INPUT->GetButton(KEY_TYPE::W))
+			t.offset.y += 1.f * DELTA_TIME;
+		if (INPUT->GetButton(KEY_TYPE::S))
+			t.offset.y -= 1.f * DELTA_TIME;
+		if (INPUT->GetButton(KEY_TYPE::A))
+			t.offset.x -= 1.f * DELTA_TIME;
+		if (INPUT->GetButton(KEY_TYPE::D))
+			t.offset.x += 1.f * DELTA_TIME;
+
+		mesh->SetTransform(t);
+
+		mesh->SetTexture(texture);
+
+		mesh->Render();
+	} 
+이렇게 될것입니다. DeltaTime은 1프레임당의 시간이니깐 우리가 느끼기에는 이제 1초에 1.f씩 움직이는걸로 될것입니다.
+즉, 사실상 이제 이 프로그렘에서 1.f라는 부분이 이동속도를 의미하게 되었습니다. 
+1.f(속도) * DELTA_TIME(시간) = t.offset.y(거리) 가 되는겁니다.
