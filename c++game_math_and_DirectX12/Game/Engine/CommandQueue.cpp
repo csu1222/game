@@ -77,8 +77,11 @@ void CommandQueue::RenderBegin(const D3D12_VIEWPORT* vp, const D3D12_RECT* rect)
 		D3D12_RESOURCE_STATE_RENDER_TARGET); // 외주 결과물
 
 	_cmdList->SetGraphicsRootSignature(ROOT_SIGNATURE.Get());
+
 	// 렌더링시작시 상수버퍼를 밀어줍니다.
-	GEngine->GetCB()->Clear();
+	GEngine->GetConstantBuffer(CONSTANT_BUFFER_TYPE::TRANSFORM)->Clear();
+	GEngine->GetConstantBuffer(CONSTANT_BUFFER_TYPE::MATERIAL)->Clear();
+
 	// 위와 같은이유로 TableDescriptorHeap의 인덱스도 밀어줍니다.
 	GEngine->GetTableDescHeap()->Clear();
 
