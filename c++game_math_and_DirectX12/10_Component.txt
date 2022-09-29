@@ -1,0 +1,402 @@
+
+
+		10. Component
+
+
+이전 시간에 Material 이라는 기능? 클래스? 를 배움으로써 Shader, 여러 인자들, Texture같은게 각기 따로 놀고 있는걸 하나로 모아서 관리하게끔 만들어 줬습니다.
+하지만 이것으로 충분히 정리가 되었다고는 못합니다. 오늘의 주제인 Component 패턴에서 더 알아보겠습니다.
+
+앞으로 언리얼 엔진을 공부하거나, 유니티 엔진을 공부하거나 어쨌든 컨텐츠 작업을 하게 되면 가장 눈여겨 봐야할 부분이 컨텐츠를 만들때 어떻게 만들어야 하는지가 중요합니다.
+
+유니티 같은 경우 Component가 중심이고, 언리얼은 상속이 핵심적인 역할을 한다고 합니다. 
+
+
+이게 무슨말인가 하면 유니티 엔진을 예로 들면 ( 저는 유니티를 배워본적이 없지만 예시를 듭니다. )
+
+> 	새 프로젝트를 열면 카메라와 광원이 있을것입니다. 거기에 새 오브젝트로 큐브를 하나 생성해서 총 3개의 오브젝트가 있다고 해보겠습니다. 
+	각 오브젝트를 번갈아 선택해보면 오른쪽 창 Inspector의 내용이 바뀌고 있습니다. 이 창이 선택한 오브젝트의 정보들 입니다.
+	이 중 큐브의 Inspector를 살펴보면 Transform, Cube(Mesh Filter), Mesh Renderer, Box Colilder라는 4개의 부품으로 이루어져 있다는걸 알 수 있습니다.
+	실제로 유니티는 물체들이 이런식으로 각 부품화 되어있고 부품들을 조립해서 물체를 만들고 있습니다.
+	
+	더 확실한 예시로 유니티에서 텅빈 물체를 만들어주는 Create Empty를 만들어 보겠습니다. 이렇게 만든 물체는 게임 세상에 존재하기는 하지만 아무런 역할도 없고
+	심지어 보이지도 않습니다. 그래도 신기하게 텅빈 이 물체도 부품으로 Transform은 들고있습니다. 유니티에서는 Transform부품이 어떤 물체든 기본으로 들고 있어야하는 
+	부품인 것입니다. 왜 꼭 필요하냐면 나중에는 오브젝트간의 상속적, 계층적 구조를 만들 수 있는데 
+	(상속적, 계층적 이란 어떤 오브젝트을 기준으로 또 다른 오브젝트가 있을 수 있다는것 예를 들어, 어떤 박스 안에 연필이 들어있는 느낌)
+	이럴때 부모 오브젝트를 움직이면 자식 오브젝트가 딸려 움직이거나 할수 있습니다. 이럴때 텅빈 물체라도 좌표가 있어야 하기 때문에 꼭 Transform이 필요합니다.'
+	Transform이 꼭 등장한다는건 번외에 가깝고, 
+
+	얘기 하려는건 만들었더 큐브 오브젝트에 와 텅빈 오브젝트를 비교하면 Cube(Mesh Filter), Mesh Renderer, Box Colilder라는 부품들이 부족합니다.
+	텅빈 오브젝트에 모자란 부품들을 추가해 큐브를 모작해보겠습니다.
+	Mesh Filter는 우리가 만든 엔진에서 사각형을 만들던 Mesh입니다. 큐브를 만들기위해 12개의 삼각형이 필요한다던지 하는 설명들이 있네요,
+	Mesh Renderer안에는 이전시간에 만들었던 Material을 설정해주는 부분도 있습니다. 이 Material을 기본형 아무것이나 넣어보면 큐브와 똑같아 보이는 물체가 되었습니다.
+	이 큐브를 닮은 텅비었었던 오브젝트의 이름을 Cube2라고 지어주면 감쪽같이 큐브 오브젝트가 되겠습니다.
+	여기까지 살펴보면 유니티에서 어떤 오브젝트는 Empty 오브젝트부터 시작해서 여러 부품들을 조합해 필요한 오브젝트를 만드는 것이라는걸 알수 있습니다. 
+	
+	심지어 새 프로젝트를 만들면서 있던 카메라라는 오브젝트 마저도 Inspector에 Camera라는 요소(Component)가 붙어있기 때문에 카메라로써 기능할수 있는 것입니다.
+	이 Camera라는 Component를 꺼버리면 카메라 오브젝트는 아무것도 안하는 텅빈 오브젝트가 되버립니다. 처음부터 있던 광원도 마찬가지입니다.
+
+	위에서 말한것들은 유니티에서 프리셋으로 미리 만들어 놓은 것들이고 이번엔 오브젝트에 생명을 불어넣어서 움직이게 하고 싶습니다. 
+	이런 건 유니티에서 내가 어떻게 움직이게할건지 미리 알수 없으니깐 프리셋으로 만들어 놓을 순 없고 Mono Behavior라는 부품으로 제공하고 그 MonoBehavior를 상속받은 
+	클래스를 스크립트라는 이름으로 만들어서 어떻게 움직일건지 정할수 있습니다. 그래서 만든 스크립트를 열어보면 Start함수와 Update함수가 있는데 여기에 움직임을 코드로 넣어주게 됩니다.
+	
+	이런식으로 물체에 필요한 부품을 붙여서 원하는 기능을 하게 하는것이 Component 패턴이라는 것입니다.
+
+유니티 엔진은 Component가 중심이라는 이야기가 이런 뜻이고 
+
+그러면 언리얼 엔진은 어떤가 알아보겠습니다. 
+언리얼 엔진이 상속중심으로 만들어져 있다고 해서 완전히 Component 패턴이 없다는 이야기는 아닙니다만, 그래도 중심 철학은 상속기반으로 되어있는 경우가 많습니다.
+그럼 언리얼에서 상속 기반으로 만든다는 게 어떤 것인지 예시를 들어보겠습니다.
+
+>	언리얼 4기준으로 1인칭 슈팅 게임 템플릿을 실행했습니다. 언리얼에서 기본으로 제공하는 템플릿이라고 합니다. 
+	유니티와 다른점을 기준으로 알아보겠습니다. 일단 큐브 오브젝트를 드래그 드롭으로 게임 공간에 생성했습니다. 큐브의 좌표도 옮길수 있고 모양도 큐브이고 비슷해 보이는데 
+	유니티에서는 큐브가 empty 오브젝트에서 여러 부품들을 모아서 만들었었는데 언리얼에서는 큐브에 대해 보니깐 큐브의 유형자체가 StaticMeshActor라고 되어있습니다.
+	이게 유니티와 다른점 입니다 유니티였다면 이 큐브든 무엇이든 어떤 오브젝트던간에 빈 깡통부터 시작해서 부품들을 조립하는데에 비해 
+	언리얼의 큐브는 유형, 특징자체를 상속 받고 있습니다. 그리고 언리얼에서 새로운 오브젝트를 생성하기위해 새 C++ 클래스를 만들때도 부모 클래스를 선택하라는 창이 먼저 뜹니다.
+	용도에 맞는 부모 클래스를 상속받아서 사용하라는건데 이만큼 상속 구조가 언리얼에서는 중요하다는 것 입니다. 일반적으로 움직이는 메쉬가 작업대상이다 보니깐 그것에 대한  부모 클래스 부터
+	살펴보면 Actor, Pawn, Character 이렇게 있습니다. Actor는 월드에 배치 또는 스폰 될수 있는 오브젝트를 말하는 것이고 , Pawn은 Actor에서 추가로 어떤 입력을 받아서 컨트롤 할수 있는 오브젝트
+	이고, Character는 Pawn에서 걸어다니는 기능이 추가된 오브젝트입니다. 
+	이렇게 부모 클래스 중에서도 Actor -> Pawn -> Character 로 상속관계가 있다는 걸 알수 있습니다.
+	이런 월드에 등장하는 오브젝트 뿐만아니라 플레이어를 조작하는 컨트롤러 기능을하는 부모 클래스를 상속받아 오버로딩을 해서 사용하던지 게임 모드를 선택하는 클래스를 상속받아 
+	나름의 규칙, 득점 방식 같은 게임 타입의 요소들을 설정하는 오브젝트를 만든다던지 할 수 있습니다.
+
+	기본으로 만들어진 오브젝트인 TestUECharactor라는 오브젝트를 살펴보면 부모클래스가 Character인걸 알 수 있습니다. 이 오브젝트를 VS에서 C++코드로 살펴볼수 있습니다. 
+	C++코드로 살펴보면 굉장히 복잡해 보이는데, 코드상에서도 TestUECharacter가 Character를 상속받고 있고 다시 Character가 Pawn을 상속 받고 있고 Pawn도 다시 Actor를 상속 받고 있는걸
+	확인 할 수 있습니다.
+	
+	위에서 본것 처럼 언리얼 엔진은 상속관계로 틀이 강하게 잡혀있는 특징이 있어서 장점과 단점이 갈립니다. 
+	장점은 한번 만든 게임에서 많이 변경하지않고 몇몇 추가 기능을 넣어서 만들때는 생각보다 빨리 만들 수 있다는 장점이 있습니다.
+	단점은 유니티에 비해 정신이 없는 구조와 자유도가 낮다는 치명적인 단점이 있습니다. 그리고 유니티는 각 오브젝트가 필요한 기능만 가져다 썼지만, 언리얼 같은경우는 부모 클래스에서 
+	상속 받았지만 사용하지 않을 기능들도 들고 있어야한다는 점도 있습니다.
+	상속받은 기능들은 가상함수로 받아온것들이고 원하는 대로 오버라이딩해서 사용하면 됩니다.
+
+그러면 언리얼, 유니티 어느쪽이 더 좋은가? 라는 생각이 드는데 절대적으로 어느쪽이 더 좋은가는 당연히 없습니다. 
+하지만 유니티의 Component 패턴이 프로그래밍하는데에 개념적으로는 좀 더 쉽다고 할 수 있습니다.
+위의 언리얼 엔진에 예시로 나온 FPS게임을 만든다면 이미 단단하게 만들어 놓은 언리얼이 좀 더 빠를수는 있지만, 어떤 게임을 만들지 아직 모르는상태에서 시작한다면 유니티가 더 편할수 있을것 입니다.
+물론 반대로 이야기 하면 어떤 게임을 만들지를 정한다음 그 부품들을 하나하나 만들어 나가야 한다는게 귀찮을 수 도 있으니깐 서로 장, 단점이 있는 것 입니다.
+
+이렇게 유니티와 언리얼의 차이에 대해 알아보았는데, 우리 프로젝트는 DirectX12를 활용해서 Component 기반으로 만들어 나갈 것 입니다.
+
+# 코드 
+
+이제 우리 프로젝트에 Component 패턴을 적용시켜보겠습니다. 
+오늘의 결과물은 사실 이전 시간과 똑같지만 코드를 기능별 부품으로 관리하도록 정리하는데에 의미가 있습니다.
+
+새로 만들어줄 것들이 많습니다. Engine 프로젝트 밑으로 GameObject라는 필터를 하나 만들고  그 밑에 
+Component, GameObject, MeshRenderer, Transfrom, MoneBehavior 라는 이름의 클래스들을 만들어 줍니다. 다들 유니티에 대해 알아볼때 본적있는 이름들입니다. 
+그 중 GameObject클래스는 유니티에서 빈 깡통 오브젝트의 역할을 할 클래스 입니다.
+
+그리고 부품으로 사용할 Transform 클래스와 이미 ConstantBuffer에게 건내주는 구조체 Transform과 이름이 곂치게 됩니다. 그래서 struct TransformMatrix라고 이름을 변경해주겠습니다.
+그리고 EnginePch에서 관리하는게 아닌 Transform 클래스의 헤더에서 관리하도록 옮겨주었습니다. 
+
+# Component 클래스 
+
+시작은 Component 부터 만들어 보겠습니다.
+우선 어떤 부품(Component)들을 사용할것인지 enum class로 만들어 주었습니다.
+enum class COMPONENT_TYPE : uint8
+{
+	TRANSFORM,
+	MESH_RENDERER,
+	// ...
+	MONO_BEHAVIOUR,
+	END,
+};
+주석 부분에 앞으로 추가할 부품들을 끼어 넣을것입니다. 마직막 부품으로 있는 MonoBehavior는 꼭 마지막순서로 있어야 하는데 그 이유는 Monebehavior를 제외한 부품들을 각각의 슬롯을 하나씩 가지고 
+있습니다. 각 역할에 대해 정해져있어서 그런데 MonoBehavior는 그때 그때 여러번 등장해서 슬롯을 몇개를 먹을지 알 수 없기 때문에 마직막순번으로 빠져있습니다.
+
+그래서 정해진 슬롯이 있는 부품들의 갯수를 위해 MONE_BEGHAVIOR를 제외한 Component들의 갯수를 관리해주겠습니다.
+enum
+{
+	FIXED_COMPONENT_COUNT = static_cast<uint8>(COMPONENT_TYPE::END) - 1
+};
+
+class GameObject;
+class Transform; 
+전방선언은 해줘서 Component를 만드는데 필요한 클래스들이 에러가 안나게 해줍니다.
+
+클래스 내용으로 들어가서 처음으로 만들어 줄 것은 생성자와 소멸자입니다. 생성자는 COMPONENT_TYPE을 꼭 받아주는 걸로 만들어 주겠습니다. 소멸자는 가상함수로 만들어 줘야하는데요
+왜냐하면 Component클래스가 이후 부품들의 부모 클래스로 사용될 것 이기때문에 각 부품들이 소멸될때 메모리 누수가 일어나지 않도록 가상함수로 만들어 주는 겁니다.
+public:
+	Component(COMPONENT_TYPE type);
+	virtual ~Component();
+protected:
+	COMPONENT_TYPE _type;
+	weak_ptr<GameObject> _gameObject;
+그리고 protected 멤버 변수로 일단 두개를 가지고 있을것인데요 _type은 생성자에서 인자로 받은 타입을 객체가 기억하고 있도록 들고 있는 변수이고,
+
+_gameObject는 특이하게 weak_ptr로 만들어져있습니다. 그 이유는 나중에 나올 내용이긴하지만, GameObject클래스에서도 Component클래스를 변수로 들고 있을건데 이때 shared_ptr로 만들게 되면
+서로 순환구조가 생겨서 ReferenceCount가 계속 0이 되지 않게되는 문제가 있었죠 그리고 그런 순환구조에서 사용할 수 있는 스마트 포인터가 weak_ptr이었습니다.
+꼭 weak_ptr을 써야하는것은 아니고 GameObject객체가 소멸할때 명시적으로 ReferenceCount를 끊어주는 방법도 있긴한데 일단 여기서는 weak_ptr을 사용하겠습니다.
+
+이제 Component의 4가지 기능들을 추가해주겠습니다.
+public:
+	virtual void Awake() { }	// Start가 실행되기전에 먼저 초기화를 해주는 기능
+	virtual void Start() { }	// 초기화를 해주는 기능
+	virtual void Update() { }	// 매 프레임마다 업데이트를 해주는기능
+	virtual void LateUpdate() { }	// Update 이후에 Update를 해야할 것들을 해주는 기능
+왜 이렇게 여러가지를 만들어 주는것인지? Start와 Update만 있으면 될 것 같기도 합니다.  그 이유는 컨텐츠 작업을 할 때 오브젝트들이나 Component들이 많아질 건데 
+Update함수 하나에 다 몰아 버리는게 아니라 Update가 끝난후에 그때서야 Update를 해주고 싶을 일이 생긴다고하는데 그럴때를 대비해서 이렇게 4개나 만들어 둔 것입니다.
+
+그리고 자신의 타입이 무었인지를 반환하는 GetType, 현재 _gameObject가 유효한지를 bool로 반환하는 IsValid 함수도 만들었습니다.
+또 자신과 관련된GameObject나 Transform을 가져올수 있도록 하는 함수도 만들었습니다.
+public:
+	COMPONENT_TYPE GetType() { return _type; }
+	bool IsValid() { return _gameObject.expired() == false; }
+
+	shared_ptr<GameObject> GetGameObject() { return _gameObject.lock(); }
+	shared_ptr<Transform> GetTransform() { return _gameObject.lock()->GetTransform(); } 
+물론 GetGameObject나 GetTransform함수의 구현부를 보면 GameObject의 기능이 만들어 져야 제대로 빌드가 되겠지만 일단은 만들어 놨습니다.
+
+마지막으로 SetGameObject라는 함수도 만들건데요 이 기능은 GameObject에서만 사용하게끔 하고 싶어서  private로 만들고 상속받을 GameObject 클래스에서만 사용하도록 freind class로 열어주겠습니다.
+private:
+	friend class GameObject;
+	void SetGameObject(shared_ptr<GameObject> gameObject) { _gameObject = gameObject; }
+
+여기까지가 이번 시간에 만들 Component 클래스인데 나중에야 더 많은 기능들이 추가 될 수 있지만 이번시간에는 Component 패턴을 우리 프로젝트에 도입하기 위해 일단 만드는 것입니다.
+
+
+# GameObject 클래스
+
+두번째로 구현할 클래스 GameObject입니다.
+
+시작하기에 앞서 Transform, MeshRenderer, MonoBehavior 클래스들을 전방선언해서 GameObject에서 일단 언급할수 있도록 해주겠습니다.
+Component 헤더는 include를 해주겠습니다. 
+
+처음으로는 private 멤버 변수를 만들어주겠습니다.
+private:
+	array<shared_ptr<Component>, FIXED_COMPONENT_COUNT> _components;
+	vector<shared_ptr<MonoBehaviour>> _scripts;
+
+_components 를 보면 array로 만들어 주었습니다. 크기는 FIXED_COMPONENT_COINT로 만들었구요 이 count의 용도가 각 Component마다 슬롯 번호를 매겨서 사용하려고 만들었었습니다. 
+즉 GameObject에서 필요한 부품들을 슬롯 번호로, 인덱스로 불러와서 가져다 사용하기 용이할 것입니다.
+그리고 _scripts는 MonoBehavoir 타입의 vector입니다. MonoBehavior의 경우 슬롯으로 한개씩 사용하는게 아니라 그때 그때 여러개를 사용할 수 있다고 했었으니깐 크기를 늘리고 줄이기 용이한 
+vector로 따로 관리해주고 있습니다.
+
+이제 기능들을 보면 
+public:
+	GameObject();
+	virtual ~GameObject();
+
+	void Init();
+
+	void Awake();
+	void Start();
+	void Update();
+	void LateUpdate();
+
+	shared_ptr<Transform> GetTransform();
+
+	void AddComponent(shared_ptr<Component> component);
+이렇게 있는데 각각 살펴보겠습니다.
+생성자, 소멸자는 별다를게 없고 소멸자에 virtual을 붙힌 이유는 별 이유가 없습니다. 이번시간에서는 GameObject를 상속받을 클래스를 만들 것도 아니라 딱히 붙히든 안붙히든 상관 없습니다.
+
+Component 클래스에서 본 기능 4가지가 보입니다. 유니티에서 봤듯이 GameObject에 각종 부품들을 붙혀서 필요한 Object를 만들건데 그래서 각 부품들 Component들의 생명주기를 
+이 GameObject에서 4가지 기능으로 한번에 관리해줄 것입니다.
+
+그리고 생소한 상속 방법이 나오는데 이 상속에 대해서는 잠시 후에 다루겠습니다.
+class GameObject : public enable_shared_from_this<GameObject>
+
+cpp 파일로 가서 구현부를 살펴 보겠습니다. 우선 사용할 Component들을 include 해주었습니다.
+#include "pch.h"
+#include "GameObject.h"
+#include "Transform.h"
+#include "MeshRenderer.h"
+#include "MonoBehaviour.h"
+
+생성자 소멸자는 그냥 기본 상태로 만들어 주었습니다. 
+GameObject::GameObject() { }
+GameObject::~GameObject() { }
+
+Init에서는 항상 Transform은 들고 있게 만들어 주었습니다. 유니티에서도 Empty오브젝트도 Transform 부품은 항상 들고 있었죠
+void GameObject::Init()
+{
+	AddComponent(make_shared<Transform>());
+}
+Transform 클래스와 AddComponent함수를 구현하지 않았지만 사용하는 의도는 알겠습니다.
+
+하는김에 AddComponent를 다음으로 보겠습니다.
+void GameObject::AddComponent(shared_ptr<Component> component)
+{
+	component->SetGameObject(shared_from_this());
+
+	uint8 index = static_cast<uint8>(component->GetType());
+	if (index < FIXED_COMPONENT_COUNT)
+	{
+		_components[index] = component;
+	}
+	else
+	{
+		_scripts.push_back(dynamic_pointer_cast<MonoBehaviour>(component));
+	}
+}
+
+여기서 Component와 GameObject가 서로를 참조하고 있어야 하는 이유가 나오는데 구현부 첫줄에 인자로 받은 부품에게 component->SetGameObject(shared_from_this()); 를 해주고 있습니다. 
+무슨 의미냐 하면 Component 클래스를 부모로 둔 Transform, MeshRenderer, MonoBehaviour 객체들에게 이제 이 GameObject객체에게 속한닥고 알려주는 부분입니다. 그래서 
+GameObject는 Component들을 부품으로서 가지고 있을 것이고, Component들은 GameObject를 속할 주인으로 가지고 있을 것입니다.
+shared_from_this()라는 걸로 내가 너의 주인이다 라고 알려주고 있는것인데 이 부분이 GameObject가 상속받은 public enable_shared_from_this<GameObject> 이것과 관련이 있습니다. 
+이 shared_from_this를 사용하지 않으면 클래스 내에서 자신을 가리키는것이 생각 보다 어려운데, 이전에 C스타일 포인터를 사용했을때는 this로 자신을 가리켰지만 
+지금은 스마트 포인터를 사용하고 있습니다. 
+
+만약 this를 make_shared해서 스마트 포인터로 바꾸면 되지 않을까 할 수 있는데 이러면 큰일 납니다. 이때의 this는 AddComponent를 해주던 객체와 떨어져서 별개의 객체로 생성됩니다.
+결국 스마트 포인터에서 this와 같이 동작하도록 하고 싶으면 위의 코드 처럼 클래스에public enable_shared_from_this<GameObject>를 상속 시키고 shared_from_this()를 사용해야합니다.
+
+그러면 상속 받는 public enable_shared_from_this<GameObject> 이것은 어떤 기능이 있는지 살펴보면 특별한 일을 하는것은 아니고 
+자기 자신타입의 weak_ptr을 하나 들고 있습니다. 그리고 shared_from_this()는 이 weak_ptr로 자신을 가리키는 shared_ptr을 반환합니다.
+(제대로 이해하지 못했지만 일단 이렇게 사용한면 되는지는 알겠습니다. 이후에 좀더 고민해볼 문제입니다.) 
+
+아무튼 이렇게 this를 가져와서 인자로 받은 객체의 GameObejct를 설정해줍니다. 
+다음으로 인자의 타입을 가져오는데 타입은 enum class이니깐 캐스팅을 해줍니다. 그리고 나서의 if문은 가져온 타입 값이 곧 _components의 index인데 마지막인 MonoBehaviour가 아니라면 
+_components에서 자신의 인덱스에 저장하고, MonoBehaviour라면 _scripts에 push_back해주고 있습니다. 
+여기서 처음보는 dynamic_pointer_cast는 C++의 dynamic_cast와 비슷한데 스마트 포인터에 사용할수 있는 캐스팅 방법입니다.
+(bynamic_cast는 부모 클래스에서 자식클래스로 다운 캐스팅할때사용하는 캐스팅 방법이었습니다.)
+
+AddComponent는 여기까지고 다음으로 Awake, Start, Update, LateUpdate 함수를 살펴보겠습니다.
+GameObject에서의 이 네가지 함수들을 별다른것은 없고 가지고 있는 Component(MonoBehaviour 포함)들의 각 Awake, Start, Update, LateUpdate함수들을 호출해주는겁니다.
+(여기까지 했을때 이 네가지 함수의 구현부에서 빨간줄이 그어져 있을건데요 그건 아직 Component들의 구현이 안되있기 때문이라서 일단 넘어가겠습니다.)
+
+이제 GameObject의 마지막 함수인 GetTransform함수입니다.
+shared_ptr<Transform> GameObject::GetTransform()
+{
+	uint8 index = static_cast<uint8>(COMPONENT_TYPE::TRANSFORM);
+	return static_pointer_cast<Transform>(_components[index]);
+}
+Transform에 해당하는 인덱스 번호를 가지고 _components에서 Transform을 꺼내 캐스팅 까지 해주고 리턴하는 함수입니다.
+
+
+
+# MonoBehaviour 클래스 
+
+GameObject다음으로 MonoBehaviour를 작업 해보겠습니다. 지금으로써는 script로 우리 프로젝트의 움직임을 추가해주는것 까지는 하지 않을것이기 때문에 껍데기만 만들겁니다.
+#include "Component.h"
+
+class MonoBehaviour : public Component
+{
+public:
+	MonoBehaviour() : Component(COMPONENT_TYPE::MONO_BEHAVIOUR)
+	{ }
+	virtual ~MonoBehaviour();
+public:
+};
+이런 내용이고 정말 생성자, 소멸자만 만들어두고 유일하게 하는것은 자신의 타입이 MONO_BEHAVIOUR라고 설정하는 것입니다. 더 이상의 내용은 나중에 만들것입니다.
+
+
+# Transform 클래스
+
+Transform클래스도 이번시간에 모든 내용을 채우진 않을거고 MonoBehaviour처럼 에러만 안나게 채워주겠습니다.
+
+마찬가지로 자신이 Transform타입이란걸 설정해주고 일단은 마칠것입니다.
+
+지금은 이렇게 대충 넘기지만 Transform은 나중에 중요한 역할을 할겁니다. 모든 GameObject들이 Transform을 들고 있을거고 Object끼리 계층적인 관계도 맺을때 필요한 정보입니다.
+
+
+# MeshRenderer 클래스
+
+오늘은 이 MeshRenderer를 구현해서 이전시간에 했던 Mesh와 Material을 제대로 적용 되게 끔하는게 목표입니다.
+
+그렇게 때문에 Mesh와 Material을 전방선언을 해주고 #include "Component.h"를 한후 상속을 시켜줍니다. 
+MeshRenderer역시 생성자와 소멸자를 만들어주고 자신이 MeshRenderer타입이란걸 설정해주고 시작합니다.
+
+private 멤버 변수로는 mesh와 material을 들고 같이 관리를해주겠습니다. 
+
+함수로는 멤버변수들을 셋팅해줄 SetMesh, SetMaterial함수를 추가 해주겠습니다.
+	void SetMesh(shared_ptr<Mesh> mesh) { _mesh = mesh; }
+	void SetMaterial(shared_ptr<Material> material) { _material = material; }
+인자로 받은 Mesh, Material을  멤버변수에 할당하는 것입니다.
+
+다음은 받은 Mesh, Material을 그려줄 Render함수입니다. 
+void MeshRenderer::Render()
+{
+	//GetTransform()->Update();
+
+	_material->Update();
+	_mesh->Render();
+}
+이렇게 각각 렌더링할때 필요한 함수들을 호출해 줍니다.
+GetTansform->Update는 아직 Transform을 구현을 덜 했기 때문에 주석 처리가 되어있지만 나중에는 Transform정보도 Update해서 게임세상 어느 좌표에 이 GameObject가 위치해있는지도 
+알수 있을 것입니다.
+
+그리고 이 Render함수를 따로 호출하기 보다는 GameObject에서 Update를 할때 MeshRenderer는 Render를 하도록 오버라이드를 해주었습니다.
+	virtual void Update() override { Render(); }
+
+Component 구조는 여기까지 만들어 주고 
+
+이전에 만들었던 코드들중에 손을 봐야하는 부분을 고쳐 보겠습니다. 
+
+
+# Mesh 클래스 
+
+이전 시간까지 Mesh 클래스에서 Transform 정보와 Material 객체도 들고 있었습니다.  
+이제 Component 패턴으로 작업을 하려면 Mesh는 Mesh정보만 들고 있고 Transform은 Transform Component가 Material은 MeshRenderer Component가 들고 있게 해야 합니다.
+
+그래서 Mesh 클래스가 들고 있던 _transform, _mat을 없애주었습니다. 그에 연관된 SetTransform, SetMaterial 함수도 없애주고 
+또 에러가 나는 부분을 찾아보니 Mesh::Render안에서 _mat->Update와 ConstantBuffer에 _transform정보를 PushData해주던 부분도 없애주었습니다.
+( CONST_BUFFER(CONSTANT_BUFFER_TYPE::TRANSFORM)->PushData(&_transform, sizeof(_transform)); 이부분은 나중에 Transform Component를 구현할때 잊지말고 해줘야 합니다. 
+지금은 위치 정보도 Material이 가지고 있으니깐 넘어갑니다.)
+
+
+
+여기까지 하고 어디에 다른 문제가 있나 빌드를 다시 해보니 Component.cpp에 GameObject를 include를 해줘야 합니다. 
+
+그리고 Engine에서 CreateConstantBuffer를 할때 Transform이 뭔지 모르겠다고 나오는데 이것은 이전시간에 공용헤더 EnginePch에서 struct Transform으로 사용하고 있었던걸 
+Transform 클래스로 바꾸고 그안에 TransformMatrix로 이름을 바꿔 놓았기 때문입니다.
+그래서 이름도 바꿔주고 Transform헤더도 include 해주었습니다.
+
+기왕 Engine클래스로 온김에 한가지 알아야 할것은 나중에는 Engine의 Init, Update, 추가로 LateUpdate 같은 함수에서 게임의 오브젝트들을 Update 해주게 될겁니다. 
+지금은 Client 프로젝트의 Game 클래스내에서 해주고 있지만 결국은 그것들을 Engine 안에서 해줘야 한다는 것 입니다.
+
+
+# 실습 
+
+이제 Engine 쪽은 빌드가 됩니다. 다음으로 오늘 한 Component 패턴으로 우리 결과물이 잘 실행 되는지를 확인하기위해 Game클래스로 왔습니다.
+
+오늘 실습에 사용할 GameObject와 MeshRenderer를 include 해주고, 
+이전에는 Mesh객체를 전역으로 사용하고 있었는데 이제는 GameObject 객체를 전역으로 만들어주면 GameObject안에서 모두 관리해 줄수 있으니깐 수정해주었습니다.
+(GameObject 객체는 전역으로, Mesh 객체는 Game::Init 안으로)
+
+Game::Init에서 gameObject 객체를 초기화 해주었습니다. ( Transform을 추가하는 부분)
+	gameObject->Init(); // Transform 추가하는 부분
+
+다음으로 MeshRenderer를 만들어서 Mesh와 Material을 연결해주겠습니다.
+	shared_ptr<MeshRenderer> meshRenderer = make_shared<MeshRenderer>();
+그리고 각각 Mesh와 Material을 연결합니다.
+	{
+		shared_ptr<Mesh> mesh = make_shared<Mesh>();
+		mesh->Init(vec, indexVec);
+		meshRenderer->SetMesh(mesh);
+	}
+	{
+		shared_ptr<Shader> shader = make_shared<Shader>();
+		shared_ptr<Texture> texture = make_shared<Texture>();
+
+		shader->Init(L"..\\Resource\\Shader\\default.hlsli");
+		texture->Init(L"..\\Resource\\Texture\\veigar.jpg");
+
+		shared_ptr<Material> material = make_shared<Material>();
+		material->SetShader(shader);
+		material->SetFloat(0, 0.3f);
+		material->SetFloat(1, 0.4f);
+		material->SetFloat(2, 0.3f);
+		material->SetTexture(0, texture);
+	}
+그리고 나서는 이렇게 만든 meshRenderer를 gameObject의 _components에 담아주겠습니다.
+	gameObject->AddComponent(meshRenderer);
+
+지금 한 결과물을 보면 결국 래핑이 하나 더 늘은건데 뭐가 간편하다는 건지 모르겠지만 유니티에서 보듯이 이걸 툴로 만들면 그냥 드래그 드롭으로 처리되게끔 처리 가능해진다고 합니다.
+
+
+Game::Update안에서 
+
+GEngine->RenderBegin과 RenderEnd사이에 있던 입력을 받고 Mesh의 Render 함수를 호출하는부분이 이제 gameObject의 안으로 갈무리 되었습니다.
+void Game::Update()
+{
+	GEngine->Update();
+
+	GEngine->RenderBegin();
+
+	gameObject->Update();
+
+	GEngine->RenderEnd();
+}
+
+이제 빌드하고 실행하면 짜잔 이전 시간과 똑같은 베이가 입니다. 
+
+어제와 결과가 똑같다고 실망하면안되겠죠 게임의 구조를 바꿨는데 똑같이 작동한다는것이 오늘의 작업이 성공 했다는 이야기 이기 때문입니다.
