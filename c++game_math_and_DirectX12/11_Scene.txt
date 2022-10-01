@@ -1,0 +1,247 @@
+	
+
+	11. Scene
+
+
+지난 Material, Component 시간들에 거쳐 코드들을 정리하고 있습니다.
+이렇게 정리를 해도 아쉬운 점은 있습니다. 클라이언트 단에서 전역으로 GameObject객체를 관리한다던지 RenderBegin과 RenderEnd사이에 렌더링 할 물체들을 끼워 넣어야 한다던지
+이런 것들은 엔진에서 관리하는게 맞습니다. 
+
+실제 언리얼이나 유니티에서 클라이언트를 작업할때도 엔진의 모든 동작원리를 이해하면서 작업하지는 않고 엔진에서 제공하는 툴과 함수들을 이용해서 컨텐츠들을 만들텐데
+지금 우리 코드는 그런 분리가 잘 되어 있지 않습니다.
+
+그러면 왜 이렇게 클라이언트에서 엔진의 할일을 꺼내 사용하고 있었냐 하면, 물체라는 것을 어디서 관리할지 아직 정하지 못해서 그렇습니다. 
+
+물체를 사용 엔진, 여기서는 유니티를 예로 들겠습니다. 유니티에서는 어떻게 관리하고 있는지 살펴보면 프로젝트 시작후 기본 오브젝트인 카메라나 조명이 SampleScene에서 관리가 되고 있습니다.
+이 Scene이라는 것은 게임에서 필드? 공간? 같은 개념입니다. 와우로 예를 들면 게임 실행하면 로그인 Scene에서 개인정보를 입력해서 접속하면 다시 캐릭터 선택 Scene이 나오고 거기서 다시 
+접속할 캐릭터를 고르면 그제서야 본 게임 Scene이 나옵니다. 
+이런 것을 Scene이라고 보면 되겠습니다.
+
+나중에 컨텐츠 작업을 할때 Scene을 어디까지 나눠서 관리해야 하는가 라는 고민이 생길 수 있습니다. RPG를 예로 들면 게임Scene에서 아이템 강화창이 띄워지는데 화면을 가득채웁니다. 
+이럴때 아이템 강화 Scene을 따로 만들어서 관리를 해야 하는지 아니면 그냥 UI가 화면을 가득 채운걸로 처리를 해야할지 고민이 됩니다.
+물론 만드는 사람 마음이지만 생각보다 Scene사이를 이동하는데 부하가 많이 걸리기 때문에 과도하게 각 Scene으로 분리해서 관리를 하지 않아도 될 것 입니다.
+Scene을 변경할때 그 Scene의 오브젝트들을 싹 날리고 새로운 Scene에서 사용할 오브젝트들을 다시 생성하는 방식이기 때문입니다. 
+그럼에도 로그인, 캐릭터 선택 Scene과 게임 Scene은 분리하는경우가 대부분인 이유는 로그인, 캐릭터 선택 Scene에서 사용하는 UI들이 게임 내에서 사용될 가능성이 거의 없기 때문에 
+확실히 사용하지 않을 오브젝트들이라면 Scene을 분리해서 오브젝트를 정리하는 것 입니다.
+
+이런 이유로 이번 시간에는 Scene이라는 개념을 도입해 클라이언트에서 관리하던 오브젝트 정보들을 정리하고 Render작업도 Engine객체 안에서 관리하도록 해보겠습니다.
+
+
+## 코드
+
+# SceneManager 클래스 
+
+Scene 뿐만 아니라 전역에서 관리(Manager)해줄 것들을 모아놓을 필터를 Engine프로젝트 밑으로 Manager라는 이름으로 만들어 줍니다. 
+그 Manager필터 아래로 SceneManager클래스를 생성해주었습니다. 그리고 SceneManager클래스는 말그대로 Scene을 관리 해주는 클래스이기 때문에 Scene클래스도 하나 생성해 주었습니다.
+
+지금까지 물체들을 어떻게 관리해왔는지를 다시 살펴보면 EnginePch.cpp에서 전역 unique_ptr로 Engine 객체를 관리하고 있었고 Engine클래스 안에 모든 Window관련 부품, Graphics 관련 부품, 
+오브젝트를 묘사하는 부품들을 관리하고 있었습니다.
+이렇게 객체를 전역으로 관리하는 전역 패턴이 있었다면 이번에 추가할 개념 SceneManager에서는 싱글톤 패턴이라는 걸로 코드를 관리해보겠습니다.
+
+싱글톤 이라는 개념은 어떤 클래스를 이곳 저곳에서 부를수 있고, 생성자를 호출 할 수 있지만 실제 객체는 하나이고 최초 생성한 객체 이후에 호출되는 생성자 함수는 최초 생성 객체를 리턴하는 개념입니다.
+객체를 전역적으로 부를수 있는 방법은 static이 있습니다. 그리고 그 객체가 nullptr인지를 체크해서 생성해주는 패턴이 고전적인 싱글톤 패턴이라고 합니다. 
+class SceneManager
+{
+private :
+	SceneManager() { }
+	~SceneManager() { }
+	static SceneManager* _instance;
+public :
+	static SceneManager* GetInstance()
+	{
+		if ( _instance == nullptr )
+			_instance = new SceneManager();
+		
+		return _instance;
+	}
+};
+이런식입니다.
+private로 생성자와 소멸자를 막아 버려서 GetIntance함수 외로 새로운 객체를 만들수 없게 해주었습니다.	
+
+또는 static 멤버 변수로 instance를 들고 있지 않고 GetInstance함수내에 static 변수로 만들어 주어도 되겠습니다.
+	static SceneManager* GetInstance2()
+	{
+		static SceneManager instance;	// 함수내부에 만든 변수의 주소를 리턴하는것은 위험하지 않을까 할 수 있는데 static이 붙은 경우는 함수 내부에 정의된 변수라도 
+		return &instance;			// data영역에 저장되어 전역 변수처럼 사용됩니다.
+	}
+이런 버전들 말고도 여러가지 버전이 있는데 그 중에서 적당한걸 골라 사용하면 될것입니다.
+
+두번째 전역 static변수를 이용하는 방법이 짧으니 이걸 우리 프로젝트에서 사용할것입니다.
+
+# EnginPch.h
+
+싱글톤 패턴을 사용하기로 하였지만 위의 코드를 매 클래스 마다 타이핑하기보다는 define으로 간편하게 사용하도록 매크로를 만들어 보겠습니다.
+일반적으로 define은 같은줄의 코드만 포함이 되지만 모든 코드 뒤에 \을 붙히면 같은 줄로 인식해서 define이 통과가 된다고 합니다. 
+#define DECLARE_SINGLE(type)		\
+private:					\
+	type() {}				\
+	~type() {}				\
+public:					\
+	static type* GetInstance()		\
+	{				\
+		static type instance;	\
+		return &instance;		\
+	}				\
+이러면 이제 type에 클래스의 이름을 넣으면 싱글턴 패턴을 간편하게 사용할수 있게 됩니다. 
+추가로 GetInstance함수를 편하게 호출하기위해 define을 하나더 해주겠습니다.
+#define GET_SINGLE(type)	type::GetInstance()
+
+
+# SceneManager 클래스
+
+class SceneManager
+{
+	DECLARE_SINGLE(SceneManager);
+};
+
+이제 준비가 어느정도 되었고 부품들을 만들어 주겠습니다. 
+public:
+	void Update();
+	void LoadScene(wstring sceneName);
+
+public:
+	shared_ptr<Scene> GetActiveScene() { return _activeScene; }
+
+private:
+	shared_ptr<Scene> LoadTestScene();
+
+private:
+	shared_ptr<Scene> _activeScene;
+SceneManager는 복잡한 기능을 가지고 있는건 아니고 Scene들을 들고 있는 역할 입니다. 활성화 된 Scene을 private 멤버 변수로 들고 있습니다.
+
+매 프레임 마다 업데이트 하는 Update함수, Scene을 바꾸겠다 할때 사용하는 LoadScene함수 (Scene의 문자열을 받아서 로드합니다.)
+지금은 바꿀만한 다른 Scene이 없으니까 LoadTestScene이라는 임시 함수로 대체 하겠습니다.
+마지막으로 지금 동작하는 Scene이 무엇인지 궁금할 수 있으니까 GetActiveScene함수를 만들었습니다.
+
+SceneManager의 헤더는 완료되었습니다. 이제 cpp로 구현부를 만들려고 보니,  일단 Scene클래스가 완성이 되야 더 수월할것 같아 
+
+잠시 Scene 클래스의 처리부터 하고 오겠습니다.
+
+
+# Scene 클래스 
+
+Scene의 역할도 간단한 편입니다.
+class GameObject;
+class Scene
+{
+public:
+	void Awake();
+	void Start();
+	void Update();
+	void LateUpdate();
+
+	void AddGameObject(shared_ptr<GameObject> gameObject);
+	void RemoveGameObject(shared_ptr<GameObject> gameObject);
+private:
+	vector<shared_ptr<GameObject>> _gameObjects;
+};
+멤버 변수로는 이 Scene에서 활동할 게임 오브젝트들을 vector로 들고 있을것 입니다. 
+그리고 그 게임 오브젝트들을 추가하는 AddGameObject함수, 제거하는 RemoveGameObject함수 가 있고 
+들고 있는 오브젝트들의 활동주기를 관리하는 4개의 함수들도 가지고 있습니다.
+
+AddGameObject는 push_back으로 추가해주고 , RemoveGameObject는 지울 오브젝트의 이터레이터를 std::find로 찾아서 erase를 해주는 방법입니다. 
+
+나머지 Awake, Start, Update, LateUpdate는 for 문을 돌아 각 오브젝트의 Awake, Start, Update, LateUpdate를 해주면 되는데 
+강의 예제 코드의 for문의 형태가 특이합니다.
+for (const shared_ptr<GameObject>& gameObject : _gameObjects)
+이런 형태인데
+
+계속 써오던 
+for (size_t i = 0; i < _gameObject.size(); i++)
+	_gameObject[i];
+이런 for 반복문과 위의 반복문은 같은 의미입니다. 
+
+의미는 같지만 
+for (const shared_ptr<GameObject>& gameObject : _gameObjects)
+이 코드는 내용물을 수정하지 않고 쭉 스캔을 하는데는 더욱 가독성이 좋습니다. 
+
+std에서 vector, list같은 선형 컨테이너에는 이런 기능을 지원해줍니다.
+( 이 문법에서 꼭 const 참조 형태가 아니라도 되긴합니다. 하지만 그냥 shared_ptr로 하게 되면 매 loop마다 ReferenceCount가 1증가했다가 소멸하면서 주는 과정이 생깁니다. 
+반면 const 참조로 만들면 그런 부분이 없죠, 지금이 사용법의 경우는 임시로 객체를 받아준다음 바로 소멸시킬 용도로는 const 참조가 더 효율적입니다.)
+
+이번시간의 Scene은 여기서 마무리가 될것이지만 
+
+좀 더 프로젝트가 커졌을때를 생각 해보면 한 Scene에 수많은 오브젝트들이 담겨 있을것입니다. 캐릭터, npc, 몬스터, 나무들, 벽 등등 이런 수많은 오브젝트들이 
+vector라는 컨테이너로 관리가 된다면 원하는 오브젝트를 찾기위해 매프레임마다 0번 인덱스부터 끝까지 서칭을 해서 찾아야 할것입니다.	
+이런 문제를 유니티 같은데서는 vector 하나에 모든 오브젝트를 다 저장하는것이 아니라 레이어를 만들어 각 유형의 오브젝트들끼리 모아 두는 겁니다. 
+예를들러 [  벽  ], [  몬스터  ], [  캐릭터  ] 이런식으로 2중 배열같은 느낌으로 관리를 하면 좀더 좋은 성능을 낼 수 있을 겁니다.
+
+# SceneManager 클래스
+
+Scene을 마무리 했으니 다시 SceneManager의 구현부를 만들겠습니다.
+
+우선 Update는 간단하게 활성화되어 있는Scene 멤버 변수인 _activeScene 이 nullptr인지 체크하고 _activeScene->Update(), _activeScene->LateUpdate()를 해줍니다.
+
+LoadScene 함수는 원래라면 지금 활성화 되어있는 Scenen을 정리하고, 인자로 받은 Scene의 이름으로 다음 활성화할 Scene을 찾아 로드, Awake, Start까지 해주는 기능입니다. 
+지금은 Scene을 교체하는 것은 구현을 못하고 위에서 임시적으로 만든 LoadTestScene을 _activeScene으로 설정하는 정도만 할것입니다.
+
+그러면 LoadTestScene은 어떤 기능을 하는가 하면 지금까지 우리가 구현했던 베이가 사진을 초기화 해주는 역할입니다. 
+그래서 Game::Init에서 GameObject를 초기화 했던 코드들을 전부 복사 해오고 include도 가져왔습니다. 
+거기에 더해 함수내에서 Scene객체를 만들고 Scene객체 에 gameObject를 담아서 반환해줄 것입니다.
+코드를 읽어보면 LoadTestScene함수안에 GameObject와 Scene의 객체가 만들어지고 Transform 정보들을 초기화해준 Transform을 gameObject->Init() 시점에서 설정이 될것입니다. 
+(지금은 Transform을 제대로 구현하지는 않았습니다.)다음으로 어떤 쉐이더를 사용할지와 텍스쳐와 또다른 인자들 를 가지고 있을 Material, Mesh를 포함한 MeshRenderer를 
+gameObject에 추가해줍니다. 그리고 Scene에 다시 그 gameObject를 담습니다. 마지막으로 Scene을 리턴
+
+이쯤에서 SceneManager를 마치고 
+
+
+# Engine 클래스
+
+마무리로 Engine 클래스로 들어가 SceneManager를 추가하려고 합니다. 
+이때 눈에 밟히는것이 Input과 Timer 클래스입니다. Input과 Timer도 Engine에서 관리할게 아니라 전역에서 사용할수 있을것 같습니다. 두 클래스를 Manager필터 아래로 이동하고,
+각각 DECLARE_SINGLE()을 해주어서 싱글톤 패턴으로 만들어줍니다. 
+잊지말고 EnginePch에서 매크로로 Input과 deltatime을 가져오는 것도 수정해줍니다. 
+#define INPUT				GET_SINGLE(Input)
+#define DELTA_TIME			GET_SINGLE(Timer)->GetDeltaTime()
+
+다시 Engine 클래스로 돌아가 Input, Timer와 관련된 코드들을 지워 줍니다. 이제 Engine에서 렌더링과 관련되지 않은 것들을 싱글톤으로 빼주게 되었습니다.
+
+헤더에 변경된 사항이 있으니 cpp파일에서도 에러가 뜰것입니다. 보면 input과 timer객체를 사용하는 부분인데 이 부분은 위에서 만든 GET_SINGLE을 사용해 주겠습니다.
+#include "Input.h"
+#include "Timer.h"
+GET_SINGLE(Input)->Init(info.hwnd);
+GET_SINGLE(Timer)->Init();
+
+비슷한 부분들을 모두 바꿔줍니다.
+
+이제는 ScennManager를 어디서 업데이트를 해줘야 하는지가 고민이 됩니다. SceneManager는 활성화된 Scene을 관리하고 있고 Scene은 여러 GameObject를 가지고 있습니다. 
+즉, SceneManager::Update는 GameObject들을 Update해주는겁니다. GameObject들이 업데이트하면서 다음 프레임에 그려질 데이터를 렌더링을하는데 이 렌더링은
+커맨드 큐의 커맨드리스트가 매핑이 열렸을때 RenderBegin과 RenderEnd사이에 넣는 것이었습니다. 
+그래서 
+Engine::Render의 RenderBegin과 RenderEnd사이에서 SceneManager를 업데이트 해주겠습니다.
+
+다음으로 고민되는것은 이제 이 엔진을 Game.cpp에서 어떻게 호출할지가 문제 입니다.
+지금까지에서는 Game::Init에서 GEngine을 Init하고 Game::Update에서 GEngine을 Update, RenderBegin, 여러 렌더링 할것, RenderEnd를 하는식이었는데 
+목표는 GEngine->Update만으로 다 끝내는 것입니다.
+그리고 한가지 더 생각나는것은 SceneManager에서 어떤 씬을 사용할지를 정하는 LoadScene함수가 있었는데 사용할 씬을 정하는건은 엔진쪽에서 할 일이 아니라 클라이언트, Game클래스에서 하는게 
+맞는것 같습니다.
+void Game::Init(const WindowInfo& info)
+{
+	GEngine->Init(info);
+	GET_SINGLE(SceneManager)->LoadScene(L"TestScene");
+}
+
+Game::Update에서 GEngine->Update안에서 모두 처리를 하려면 기존 Engine::Update는 Input과 Timer의 업데이트와 ShowFps만 실행되고 있었습니다.
+여기에 아까 Render함수를 SceneManager::Update로 정리를 했었으니 Update에 추가를 해주었습니다.
+void Engine::Update()
+{
+	GET_SINGLE(Input)->Update();
+	GET_SINGLE(Timer)->Update();
+	
+	Render();
+
+	ShowFps();
+}
+
+이제 Update에서 Render를 호출해주고 있으니 Engine.h에서 정리를 좀 하면 Init과 Update는 public으로 클라이언트에서 주로 호출되는 함수가 될것이고 Render는 아래로 옮겨주었습니다.
+거기에 전에 언젠가 사용한다고 만들었던 LateUpdate는 필요할때 다시 만들어 주기로 하고 지금은 삭제하겠습니다. 
+( 에초에 gameObject들의 LateUpdate는 Object랑 Component안에 넣어줬기도 합니다.)
+
+이렇게 해서 코드들이 많이 정리가 되었고 빌드 후 실행하면 정상적으로 베이가 그림이 뜬다면 성공입니다.
+
+#에러
+Shader Create Failed라는 메세지가 뜨고 실행이 실패 하였습니다. 
+이유는 이전에 강의 프로젝트랑 쉐이더 파일을 관리하는 폴더이름이 달랐는데 이번 시간에 코드를 복사하다가 그부분을 빠트렸습니다.
+이번에는 비교적 쉽게 버그를 잡았습니다.
+
+
