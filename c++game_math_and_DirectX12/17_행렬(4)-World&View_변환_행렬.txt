@@ -171,3 +171,28 @@ Translation 역행렬  1   0   0   0
 
 -  (View 변환행렬) = (카메라의 World 변환행렬)^-1 = (카메라의 Rotation 성분과 Translation성분)^-1 = (T^-1)(R^-1)
 
+
+* 추가 
+위의 방법들 외에 또한가지 View 변환행렬 구하는 방법이 있습니다.
+C++에서 지원하는 함수인데 
+
+XMMATRIX XM_CALLCONV XMMatrixLookAtLH (FXMVECTOR EyePosition, FXMVECTOR FocusPosition, FXMVECTOR UpDirection);
+이런 시그니처를 가진 함수인데 인자들의 설명을 보면 EyePosition은 카메라의 위치를 뜻하고, FocusPosition은 focal point(초점)의 위치, 
+UpDirection은 카메라의 Up Dierction(보통 0.0f, 1.0f, 0.0f라고 합니다.)
+반환하는 내용은 World Space 에서 View Space로 변환하는 View Matirx를 반환하다고 되어있습니다.
+
+그러면 이 함수는 갑자기 뜬금없이 등장했는지, 이전에 배웠던 내용들과 어떤 관련이 있는지를 보겠습니다.
+함수의 동작원리는 먼저 첫번째 인자로 입력해주는 EyePosition은 카메라의 좌표라고 했습니다. FocusPosition은 그 카메라가 주시하고 있는 임의의 점을 말합니다. 카메라가 있으면 찍고 있는 방향이 있을겁니다.
+그리고 마지막 인자로 UpDirection을 입력하는데 여기서 말하는 Up은 카메라의 실질적인 Up벡터가 아니라 임의로 정해주는 대략적인 Up벡터를 넣어줍니다.
+
+실제 동작으로 첫번째 Eye에서 Focus로 가는 벡터가 하나 만들어집니다. 카메라 좌표계에서 카메라가 바라보는 방향이 Look벡터라고 했었습니다. 이런 카메라 좌표계의 기저 벡터중 하나인 Look벡터를 
+Eye와 Focus를 이은 벡터를 단위벡터로 변환하면 구할 수 있는겁니다. 이제 나머지 Right벡터와 Up벡터를 구하면 됩니다.
+다음으로 구할 기저벡터는 Right 벡터인데 먼저 구했던 Look벡터와 함수의 세번째 인자로 넣어준 임의의 UpDirection을 가지고 구할겁니다. 
+Look과 UpDirection을 가지고 평면을 만들고 그 평면에 수직한 벡터를 구하면 Right벡터가 됩니다. 즉 Look벡터와 UpDirection벡터의 외적에 수직인 단위 벡터를 구하면 되겠습니다.
+이렇게 구한 Look벡터와 Right벡터를 다시 외적해서 수직인 벡터를 구하면 실질적인 카메라의 Up벡터도 구해줄 수 있습니다.
+
+함수로 구한 카메라의 실제 Look, Right, Up 벡터를 가지고 ViewMatrix를 반환해줍니다.
+ Right.x   Up.x   Look.x   0
+ Right.y   Up.y   Look.y   0
+ Right.x   Up.z   Look.z   0
+-x·Right  -y·Up   -z·Look  1
