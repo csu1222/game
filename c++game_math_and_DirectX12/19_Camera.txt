@@ -1,0 +1,183 @@
+
+
+        19. Camera 
+
+
+꽤 긴 시간동안 게임수학에 대항 이론을 배우고 오랜만에 프로젝트로 돌아왔습니다. 
+게임수학이론들을 우리가 만들고 있던 코드에 적용시켜보겠습니다.
+변환행렬들을 어디에 적용시키는가 하면 
+
+default.hlsli 파일 즉 쉐이더파일을 보면 이전에는 입력해준 좌표에 별다른 변환을 해주지 않고 고대로 사용하고 있었습니다.
+이제는 열심히 배운 행렬을 이용해서 World,View,Projection변환 행렬들을 사용해서 쉐이더 함수에 적용시킬겁니다.
+
+프로젝트를 만들었을때 무작정 복사했던 내용중 EnginePch.h에 XMVECTOR나 XMMATRIX같은 typedef가 있었습니다. 이것들의 정체부터 조금 살펴보자면 
+XMMATRIX를 f12로 따라 들어가보니 struct로 만들어져있고 #endif로 어떤 상황일때는 ~~하게 만들어져있고 #else일때는 ~~하게 되어있습니다. 
+그런데 기능을 보면 연산자오버로딩으로 연산이 가능하게는 되어있지만 우리가 배웠던만큼 복잡한 기능을 들고 있지 않습니다.
+행렬의 어느부분을 Translation을 담당하는 부분이라거나 Right, Up, Look벡터를 가리키는 부분을 가지고 Rotation행렬을 만든다 혹은 Scale행렬을 만드는 
+부분이 하나도 없습니다. 그러면 사용할때 직접 코딩해야하나 싶네요
+또, 행렬이 XMVECTOR r[4]; 이런식으로 구현되어있는데 이 XMVECTOR라는 구조체도 살펴보면 별로 정보가 있지는 않다는걸 알 수 있습니다.
+
+필요한 기능들을 하나씩 직접 만드는것은 공부하기에는 좋은 방법이긴 하지만 그러기 보다는 있는 라이브러리로 최대한 만드는것을 해볼거에요
+- 왜 모든걸 하나하나 직접 만드는걸 추천하지 않는가? -> 이미 만들어져있는 라이브러리가 은근히 최적화가 잘 되어있습니다.
+  우리가 배웠던 float를 사용하는방법도 있지만 라이브러리에서는 float를 조금 특수한 하드웨어를 사용합니다. 그것을 simd(Single Instruction Multiple Data)라고 하는데
+  아까 봤던 XMVECTOR 가 __m128 이라는 타입을 사용하고 있었는데 이런것들이 기본적인 float를 사용하는게 아니라 데이터를 묶어서 처리한다고 보면 됩니다.
+  연산때 사용하는 레지스터가 일반 레지스터가 아닌 float이나 행렬 같은거에 궁합이 잘 맞는 특수 레지스터를 활용할겁니다.
+  이런 복잡하고 어려운 struct를 혼자서 만드는것은 힘들겁니다. 
+
+우리가 d3dx12.h 라는 헤더 파일이 비공식적인 마이크로소프트 공식(?)헤더라고 했던것 처럼 게임수학에 관한 헤더를 인터넷에서 다운 받을 수 있습니다.
+dx12 simplemath.h 라고 구글에 검색하면 마이크로소프트의 깃허브가 나오는데 거기서 Download ZIP으로 받아서 압축해제를 했습니다. 
+그 라이브러리에서 가져올 파일은 3개입니다. inc폴더의 simplemath.h, simplemath.inl 그리고 src 폴더의 simplemath.cpp 파일 입니다. 
+우리 프로젝트의 Engine->Utils필터에 추가해주었습니다.
+
+이제 EnginePch로 가서 simplemath를 include해주고 밑으로 내려가서 사용하던 typedef  Vec2,Vec3,Vec4,Matrix를 XMVECTOR,XMMATRIX로 사용하던걸 
+DirectX::SimpleMath::Vecter2,3,4 와 DirectX::SimpleMath::Matrix로 바꿔 주었습니다.
+
+궁금하니깐 변경한 Matirx를 따라 들어가보면 Matrix가 XMFLOAT4X4를 상속하고 있고 또 따라 들어가면 
+    union
+    {
+        struct
+        {
+            float _11, _12, _13, _14;
+            float _21, _22, _23, _24;
+            float _31, _32, _33, _34;
+            float _41, _42, _43, _44;
+        };
+        float m[4][4];
+    };
+이런 형태입니다. 여기서 union이 어떤 의미냐 하면 한땀한땀 만든 struct나 float 2차배열로 만든 것이나 데이터는 하나인데 접근하는 방식이 여러가지인겁니다.
+union에서 정의된 크기가 다르면 크기가 큰걸 기준으로 잡히는데 지금은 둘다 float 16개 짜리라서 그렇지는않습니다. 행렬의 0,0에 접근하려고 하면 m[0][0]으로 접근 
+할 수도 있고 아니면 _11로 접근 할 수도 있다는 겁니다. 그리고 XMFLOAT4X4의 기능을 보면 이것도 생각보다 기능이 많지 않습니다. 
+
+대신 DirectX::SimpleMath::Matrix를 보면 기능이 많이 있습니다. 아까 없어서 아쉽다고 했던 Right, Up 그리고 Look은 없지만 Forward, Backword로 되어있습니다.
+Translation도 잡혀있고 Transpose(전치행렬), Invert(역행렬) 그리고 Determinant도 구해주는거 볼 수 있습니다. 
+그리고 Static Function이라고 해서 CreateTranslation, CreateScale, CreateRotationX,Y,Z 같은 함수들로 변환에 필요한 행렬들을 구할 수 있습니다.
+그것 이외에도 온갖기능들이 있습니다. 이 기능들을 잘 사용하면 될것 같습니다.
+
+한가지 아쉬운점이 있는데 이 DirectX::SimpleMath::Matrix는 Right-Handed cooordinate(오른손 좌표계)로 만들어져있어서 Look벡터의 역할을 할것 같던 Forward를 잘 
+살펴보면 부호가 -로 되어있어 알고있던 Look벡터와 방향이 반대입니다. 이부분을 기억하고 조심해서 사용하면 됩니다. 정 마음에 안들면 고치면 되기도 합니다.
+
+이번엔 DirectX::SimpleMath::Vector4를 보면 위와 비슷하게 XMFLOAT4라는 걸로 되어있는데 정말 x,y,z,w라고 float4개로 만들어져있는걸 확인할 수 있습니다.
+그리고 역시 상속받은 Vector4도 이런저런 기능들이 포함되어있습니다. 예시로 Magnitude라고 소개했던 벡터의 크기가 있는데 이건 벡터의 각 성분들을 적절히 
+피타고라스의 정리를 사용해서 구하는 것입니다. 여기서는 Length라는 함수로 표현되어있고 바로 밑에 LengthSquared라는 Length의 제곱을 구하는 부분이 있는데
+단순 비교를 할때는 그냥 LengthSquared를 사용해도 됩니다. Length를 연산하면서 루트를 해야하는데 이 루트가 시간이 좀 걸리는 편이다 보니깐 꼭 필요하지 않는다면 이렇게 합니다.
+그리고 Dot, Cross 함수도 있습니다. 벡터의 내적과 외적을 이렇게 표현한다고 배웠었습니다. 그리고 단위벡터를 구하는 Normalize함수 등등이 있습니다.
+
+그래서 우리가 필요한 수학적 기능들이 다 들어있다는걸 알았습니다. 
+이걸 적절히 조립해서 우리 코드에 사용하면 되겠습니다.
+
+
+# Transform
+
+처음으로 건드릴 코드는 Transform 부터 시작하게 됩니다.
+여기서 S,R,T를 받아서 물체에 적용하는 부분을 만들겠습니다. 그러기 위해 우선 멤버 변수로 Vec3를 3개 만들어서 각각 _position,_rotaion,_scale이라고 이름을 지어 들고 있겠습니다.
+
+- 시작하기전에-
+시작하기전에 어떤 상황에 대한 예시를 한가지 더 들고 가야합니다. 
+유니티엔진에서 어떤 물체 큐브를 만들었습니다. 이 큐브의 Transform Component중 Position을 (5,0,0)으로 변경했습니다 이 큐브를 큐브_5.0 이라고 하겠습니다..  
+그리고 원점을 표시할 구 모양 물체를 (0,0,0)Position에 두겠습니다. 또 큐브하나를 생성해서 (10,0,0) Position에 배치했습니다 이 큐브를 큐브_10.0 이라고 하겠습니다
+.여기까지 쉽습니다.
+지금 상태는 원점에 구, 큐브_5.0, 큐브_10.0 이 옆으로 배치된 상태입니다.
+
+그리고 유니티뿐만이 아닌 게임엔진들은 물체들을 상속시키는 기능이 있습니다. 이 상속기능을 사용해서 큐브_5.0에 큐브_10.0을 상속시켰습니다. 
+겉보기에는 달라진게 없지만 이제 큐브_5.0이 이동하면 큐브_10.0도 같이 움직이고 회전하면 같이 회전합니다. 큐브_10.0의 Tranform 속성을 다시 보면 (10,0,0)이었던
+Position이 (5,0,0)이 되어있습니다.
+Transform이라는 Component가 World 좌표만을 기준삼고 있다면 위의 예시는 모순적입니다.
+좌표가 왜 바뀌었냐면 위에서 말했듯이 큐브_5.0에 큐브_10.0을 상속시켰기 때문에 큐브_10.0은 큐브_5.0을 기준으로부터 (5,0,0)이라는 좌표를 가지게 된겁니다.
+
+여기서 알 수 있는것은 Tranform의 Position, Rotation, Scale 같은 정보들은 월드 스페이스의 원점을 기준으로 하고 있는게아닌 바로 직속으로 상속된 오브젝트의 
+로컬좌표를 기준으로 하고 최상위의 기준은 월드 좌표의 원점인것은 맞다는걸 알 수 있습니다.
+
+먼저 시간에 배웠던 변환 순서인 Local -> World -> View -> Projection -> Screen 인데 실제 작업을 할 때 사실 물체간의 계층구조가 있다면 단계가 하나더 있다고 
+생각해도 무방합니다.
+자신의Local -> 부모의Local -> World -> View -> Projection -> Screen
+그래서 코드로 구현을 할 때도 자기 위치부터 해서 Local이라는게 등장할 텐데 계층구조를 고려한 것이니 알고 있으면 되겠습니다.
+- 
+
+멤버변수 이름을 이렇게 바꿔주었습니다. 이 변수들은 parent물체를 기준으로 한 자신의 Tranform 정보들을 말하는겁니다.	
+	Vec3 _localPosition = { };
+	Vec3 _localRotation = { };
+	Vec3 _localScale = {1.f, 1.f, 1.f};
+스케일은 기본값이 1,1,1이라서 이렇게 초기화 해주었습니다.
+
+또 들고 있을 변수들은 우선 부모 물체의 Transform을 weak_ptr로 들고 있을것이고 그 부모기준의 Local행렬을 임시 저장 하기위해 하나, 월드 변환을 할 행렬도 하나 들고 있겠습니다.
+	Matrix _matLocal = { };
+	Matrix _matWorld = { };
+
+	weak_ptr<Transform> _parent;
+
+추가할 함수로는 이렇게 두가지 있습니다.
+	virtual void FinalUpdate() override;
+	void PushData();
+
+PushData는 이전에 있던 CONST_BUFFER~~~로 PushData하던 부분이고
+FinalUpdate는 이전에 Tranform이 상속받은 Component의 4개의 기능 awake,start,update,lateupdate 에서 한가지 더 추가되는 부분입니다.FinalUpdate가 있어야 작업하기 쉬운데
+그 이유는 awake,start,update,lateupdate는 MonoBehaviour라는 스크립트에서 활용하는 기능들입니다. 이 기능들을 재활용해서 사용하는게 아닌 엔진에서 모든 작업들이 끝나고 
+진짜 마지막부분에 행렬과 관련된 부분이 하나 더 있으면 서로 곂치는 현상이 줄어들겁니다. 괜히 행렬연산을 LateUpdate에 넣어놨다가 순서가 꼬일수 있는데 그걸 그냥 
+Final로 꺼내서 맨 마지막에 순서꼬이지않게 하도록 만든겁니다.
+그래서 상위 클래스인 Component에 virtual 함수로 FinalUpdate를 만들어주고 다시 Tranform에서 override를 하였습니다.
+GameObject클래스에도 FinalUpdate 함수를 추가해서 가지고 있는 컴포넌트들의 FinalUpdate를 실행시켜주어야 합니다.
+void GameObject::FinalUpdate()
+{
+	for (shared_ptr<Component>& component : _components)
+	{
+		if (component)
+			component->FinalUpdate();
+	}
+}
+GameObject::LateUpdate 와 비슷하지만 script의 FinalUpdate하는 부분은 삭제하였습니다.
+그리고 혹시 다른 클래스가 MonoBehaviour를 상속받아서 FinalUpdate를 override 할 수 있는데 이걸 막아주기 위해 
+private:
+	virtual void FinalUpdate() sealed { }
+이렇게 막아 주었습니다. 이러면 FinalUpdate는 정말로 엔진에서 마지막 공정때 활용하는 목적이라고 못을 박았습니다.
+
+GameObject와 Component들 뿐만 아니라 이것들을 관리하는 Scene클래스에도 마찬가지로 FinalUpdate함수를 만들어 주었습니다.
+void Scene::FinalUpdate()
+{
+	for (const shared_ptr<GameObject>& gameObject : _gameObjects)
+	{
+		gameObject->FinalUpdate();
+	}
+}
+
+다음으로 실제 FinalUpdate함수가 사용되는 곳이 어디냐면 SceneManager클래스의 Update함수 내에 LateUpdate가 실행되고 그 다음 순서로 FinalUpdate가 실행되도록 
+입력해줍니다.
+void SceneManager::Update()
+{
+	if (_activeScene == nullptr)
+		return;
+
+	_activeScene->Update();
+	_activeScene->LateUpdate();
+	_activeScene->FinalUpdate();
+}
+
+이렇게 FinalUpdate를 세팅하였고 구현부를 보겠습니다. 우선 온갖 헬퍼 함수들을 만들어줘야 합니다. 
+public:
+	// Parent 기준
+	const Vec3& GetLocalPosition() { return _localPosition; }
+	const Vec3& GetLocalRotation() { return _localRotation; }
+	const Vec3& GetLocalScale() { return _localScale; }
+
+	const Matrix& GetLocalToWorldMatrix() { return _matWorld; }
+	const Vec3& GetWorldPosition() { return _matWorld.Translation(); }
+
+	Vec3 GetRight() { return _matWorld.Right(); }
+	Vec3 GetUp() { return _matWorld.Up(); }
+	Vec3 GetLook() { return _matWorld.Backward(); }
+
+	void SetLocalPosition(const Vec3& position) { _localPosition = position; }
+	void SetLocalRotation(const Vec3& rotation) { _localRotation = rotation; }
+	void SetLocalScale(const Vec3& scale) { _localScale = scale; }
+
+public:
+	void SetParent(shared_ptr<Transform> parent) { _parent = parent; }
+	weak_ptr<Transform> GetParent() { return _parent; }
+
+온갖 Get함수들 Set함수들이 있습니다. SetParent, SetLocalPosition, SetLocalRotation, SetLocalScale들은 
+그냥 해당하는 변수들을 받은 인자로 초기화 하는 함수들입니다. 
+
+공식 유니티 공식문서에서 Matirx의 Property 중 
+localPosition, localRotation, localScale 의 의미는 월드의 원점을 기준으로한 성분들이 아니고 계층구조인 상위 물체를 기준으로한 성분들이라고 했습니다.
+그런데 localToWorldMatirx 는 부모기준의 Transform 성분들이 아닌 물체 자체의 Local Space에서 World Space로 뛰어 넘기위한 행렬을 말합니다.
+
+
