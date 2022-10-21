@@ -33,3 +33,19 @@ void Camera::FinalUpdate()
 	S_MatView = _matView;
 	S_MatProjection = _matProjection;
 }
+
+void Camera::Render()
+{
+	shared_ptr<Scene> scene = GET_SINGLE(SceneManager)->GetActiveScene();
+
+	// TODO : Layer ±¸ºÐ
+	const vector<shared_ptr<GameObject>>& gameObjects = scene->GetGameObjects();
+
+	for (auto& gameObject : gameObjects)
+	{
+		if (gameObject->GetMeshRenderer() == nullptr)
+			continue;
+
+		gameObject->GetMeshRenderer()->Render();
+	}
+}

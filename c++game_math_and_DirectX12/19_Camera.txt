@@ -371,6 +371,298 @@ Engine.h 로 가서 엔진이 가지고 있는 WindowInfo를 const 참조로 반
 	const WindowInfo& GetWindow() { return _window; }
 이렇게 가져온 Window 정보를 가지고 Projection 변환 행렬을 만들건데 PROJECTION_TYPE에 따라 변환 행렬을 구하는 방법이 다릅니다. 
 우리가 게임수학에서 배웠던 Projection 변환행렬 구하는 방법은 PERSPECTIVE(원근 투영) 일때의 방법입니다. 필요했던 정보들 fov, ratio, near, far를 인자로 
-넣어주면 알아서 계산해주는 함수::XMMatrixPerspectiveFovLH 를 사용했고 이 함수는 기본적인 DirectX 함수를 사용했는데 SimpleMath의 Projection 변환행렬
+넣어주면 알아서 계산해주는 함수::XMMatrixPerspectiveFovLH 를 사용했고 이 함수는 기본적인 DirectX 함수를 사용했는데 SimpleMath의 Projection 변환행렬은 
+오른손 좌표계를 기준으로 만들어져 있기때문에  왼손 좌표계용 DirectX함수를 사용했습니다.
+else에 있는 직교투영 행렬 구하는 방법은 나중에 직교투영을 사용할때 더 자세히 알아보고 지금은 미리 수학적으로 공부해 봤던 원근 투영에 더 집중하겠습니다. 
+if-else문 밑으로 static matView, static _matProjection 변수들에 결과를 담아주고 있는데 이 부분은 위에서 말했듯이 임시적으로 만든 변수이고 제대로 된 카메라의 
+행렬을 글로벌 비슷하게 사용하는방법은 다음에 배울겁니다.
 
+* 이시점에서 Tranform::PushData 함수에 필요했던 World, View, Projection 변환 행렬들이 모두 갖춰졌습니다. 
+  잊기 전에 Tranform 클래스로 가서 #include "Camera.h"를 해주고 Tranform::PushData 에 
+  Matrix matWVP = _matWorld * Camera::S_MatView * Camera::S_MatProjection; 이렇게 WVP 변환행렬을 CONST_BUFFER->PushData 의 인자로 넘겨주었습니다.
+  이제 Tranform은 모두 구현하였고 아직 카메라에서 구현할 부분이 남았으니 다시 카메라 클래스를 보겠습니다.
+
+Camera::FinalUpdate를 구현하였으니 다음으로 Render를 구현해야합니다. 카메라에서 카메라의 촬영범위 안에 있는 GameObject들을 Render해줘야 합니다. 
+모든 GameObject를 Render해주는 것은 아니고 MeshRenderer를 Compnent로 가지고 있는 GameObject들을 Render 해주기는 합니다.
+
+void Camera::Render()
+{
+	shared_ptr<Scene> scene = GET_SINGLE(SceneManager)->GetActiveScene();
+
+	// TODO : Layer 구분
+	const vector<shared_ptr<GameObject>>& gameObjects = scene->GetGameObjects();
+
+	for (auto& gameObject : gameObjects)
+	{
+		if (gameObject->GetMeshRenderer() == nullptr)
+			continue;
+
+		gameObject->GetMeshRenderer()->Render();
+	}
+}
+
+Render 함수에서 처음에 하는 작업이 일단 지금 활성화된 Scene을 가져오고 있습니다. 우선 Scene의 모든 GameObject 를 체크해서 그 물체가 MeshRenderer를 가지고 
+있는지를 체크해서 가지고 있다면 Render를 해주고 있는 코드입니다. 
+여기서 GetGameObjects, GetMeshRenderer Property는 아직 구현이 안된 상태라서 Scene, GameObject 클래스에서 각각 추가 해줘야 합니다.
+우선 Scene 클래스로 가보겠습니다. Scene 클래스의 헤더에 추가해줄 코드는 이렇습니다.
+const vector<shared_ptr<GameObject>>& GetGameObjects() { return _gameObjects; }
+Scene이 들고있던 멤버변수가 게임 오브젝트들을 벡터로 들고 있었는데 그걸 const 참조로 리턴하는 함수입니다.
+
+이제 GameObject 클래스로 가서 GetMeshRenderer 함수를 추가해줄겁니다.
+GameObject 클래스에는 비슷한 기능을 하는 함수인 GetTransform 함수가 있습니다. 그리고 지금은 MeshRenderer 버전을 만들려고 하고 있는데 이렇게 컴포넌트마다 하나씩 
+함수를 늘리면 가독성과 관리가 힘들어 집니다. 그래서 한번에 관리해서 원하는 컴포넌트를 꺼내 반환하는 함수인 GetFixedComponent 라는 함수를 만들어주었습니다.
+shared_ptr<Component> GameObject::GetFixedComponent(COMPONENT_TYPE type)
+{
+	uint8 index = static_cast<uint8>(type);
+	assert(index < FIXED_COMPONENT_COUNT);
+	return _components[index];
+}
+enum FIXED_COMPONENT_COUNT 는 컴포넌트들 중 MonoBehaviour 를 제외한 컴포넌트들의 인덱스로 사용할 수 있습니다. 그래서 한번 assert 함수로 에러체크를 하고 
+원하는 _components를 리턴합니다. 
+이 GetFixedComponent 를 활용해서 원하는 컴포넌트를 가져오는 함수들을 만들어 주겠습니다.
+	shared_ptr<Transform> GetTransform();
+	shared_ptr<MeshRenderer> GetMeshRenderer();
+	shared_ptr<Camera> GetCamera();
+구현부는 각 용도에 맞게 사용하면 되겠습니다.
+shared_ptr<Transform> GameObject::Get'원하는 컴포넌트'()
+{
+	shared_ptr<Component> component = GetFixedComponent(COMPONENT_TYPE::'원하는 컴포넌트');
+	return static_pointer_cast<'원하는 컴포넌트'>(component);
+}
+GetFixedComponent로 가져온 컴포넌트를 리턴할때는 스태틱캐스트로 자신 본래의 타입으로 캐스팅해서 반환을 하는걸 알 수 있습니다.
+
+이렇게 카메라의 기능들은 모두 구현을 한것 같습니다. 
+
+
+# MeshRenderer 
+
+카메라에서 Render를 해주면 각 게임오브젝트들의 매쉬랜더러의 랜더를 해주도록 하였습니다. 그래서 MeshRenderer::Render 함수는 문제가 없는지 한번 체크해보겠습니다.
+
+void MeshRenderer::Render()
+{
+	//GetTransform()->Update();
+
+	_material->Update();
+	_mesh->Render();
+}
+확인해보니 이전 테스트에서는 Transform 정보는 사용하지 않고 B1 슬롯의 Material 에서 물체의 Tranform을 담당하고 있어서 주석처리가 되어있었습니다. 
+이걸 다시 주석을 풀어주면서 Update 대신 PushData 함수로 바꿔주었습니다.
+//GetTransform()->Update(); 에서  GetTransform()->PushData(); 로 
+그리고 MeshRenderer.cpp에 #include "Tranform.h" 도 해주어야 했습니다.
+참고로 이전에 사용하던 Update 대신 PushData라는 이름으로 바꾼 이유는 Update는 가지고 있는 여러 데이터를 갱신하는 뉘앙스에 가깝고 PushData는 그 데이터들을 사용하는
+뉘앙스라서 PushData가 더 의미상 가깝기 때문에 바뀐것 같습니다.
+
+그리고 이 MeshRenderer::Render 가 실행되는 시점이 부모 클래스인 Component::Update 할때 Render가 실행되게 해놨었는데 지금시점에서는 이러면 안됩니다. 
+왜냐면 Tranform 정보들을 갱신하는 FinalUpdate는 LateUpdate보다도 늦게 실행되야 하는데 더 빠른 시점인 Update에서 Render를 하게되면 Update도 안된 Transform 정보를 
+PushData하는것입니다. 
+	virtual void Update() override { Render(); } 이 오버라이드가 문제가 되기 때문에 삭제를 해주고 나중에 적절한 곳에서 Render를 해주겠습니다.
+
+마찬가지 이유로 Material도 Update 함수의 이름을 PushData로 바꿔주었습니다.
+
+# Engine
+
+마지막으로 Engine에서 제대로 작동할지 한번 체크를 합니다. Engine에서 어떻게 처리를 하고 있었는지를 살펴보니
+void Engine::Update()
+{
+	GET_SINGLE(Input)->Update();
+	GET_SINGLE(Timer)->Update();
+
+	Render();
+
+	ShowFps();	
+}
+
+void Engine::Render()
+{
+	RenderBegin();
+
+	GET_SINGLE(SceneManager)->Update();
+
+	RenderEnd();
+}
+이런식으로 Render에서 SceneManager 를 Update해주고 있는데 지금 생각해보면 Update는 게임로직이 실행되서 데이터들이 갱신한다는 의미이기 때문에 Render에 있는것이 
+부자연스럽습니다. 이 GET_SINGLE(SceneManager)->Update(); 를 Engine:::Update() 로 옮겨주고 새로 GET_SINGLE(SceneManager)->Render(); 를 만들어서 
+Engine::Render에서 사용하겠습니다.
+
+# SceneManager
+
+이 클래스에 Render 함수를 만들어 주겠습니다. 그런데 이 Render는 나중에 또 수정,삭제 될 수 있습니다. 지금은 이렇게 사용해야 될것같지만 나중에 조명을 배우면 또 
+상황이 달라지기때문입니다. 일단 지금은 임시로 만드는 Render입니다.
+// TEMP
+void SceneManager::Render()
+{
+	if (_activeScene == nullptr)
+		return;
+
+	const vector<shared_ptr<GameObject>>& gameObjects = _activeScene->GetGameObjects();
+	for (auto& gameObject : gameObjects)
+	{
+		if (gameObject->GetCamera() == nullptr)
+			continue;
+
+		gameObject->GetCamera()->Render();
+	}
+}
+게임 오브젝트를 쭉 돌면서 카메라가 있으면 카메라의 렌더를 해주는 코드입니다. 나중에는 이런식이 아니라 RenderManager같은걸 만들어서 거기서 Render를 관리해 줄 수도 
+있을겁니다.
+
+이렇게 SceneManager::Render를 만들어 줬고 Engine에서 호출되면 SceneManager로 왔다가 Camera로 갔다가 MeshRenderer로 가서 Tranform, Material, mesh를 
+PushData 혹은 Render를 해주게 됩니다. 
+
+다시 Engine으로 가서 살펴보면
+
+# Engine
+void Engine::Update()
+{
+	GET_SINGLE(Input)->Update();
+	GET_SINGLE(Timer)->Update();
+	GET_SINGLE(SceneManager)->Update();
+
+	Render();
+
+	ShowFps();	
+}
+
+void Engine::Render()
+{
+	RenderBegin();
+
+	GET_SINGLE(SceneManager)->PushData();
+
+	RenderEnd();
+}
+
+Engine::Update를 하게 되면 SceneManager에서 Update, LateUpdate, FinalUpdate 순으로 실행되고 난다음 Engine::Render 가 실행되면서 업데이트 된 데이터를 
+가지고 PushData , Render가 되는 과정이 정리되었습니다.
+
+
+# 테스트
+
+이제 코드를 테스트 해봐야 합니다. 이전까지 우리 프로그램의 게임 오브젝트 즉 베이가 사진을 어디서 관리하고 있었냐면 
+SceneManager::LoadTestScene 이라는 임시 함수에서 TestGameObject를 만들어 주고 있었습니다. 이 부분을 다시 복습해보면 
+처음에 일단 GameObject 객체를 만들어 주고 vertex를 4개 짜리 로 만들고 index로 삼각형 두개를 표현 해주었습니다. 
+그 다음 GameObject->init() 으로 Tranform 컴포넌트를 추가 해주었는데 이 부분이 지금 보니 직관적이지 않습니다. 그래서 Init을 없애고 그냥 
+LoadTestScene 함수내에 AddComponent를 직접 작성해주었습니다.
+
+gameObject->AddComponent(make_shared<Transform>());
+
+이렇게 추가해준 Tranform 컴포넌트는 아직 내용이 없습니다. 이걸 설정해주겠습니다.
+	shared_ptr<Transform> transform = gameObject->GetTransform();
+	transform->SetLocalPosition(Vec3(0.f, 100.f, 200.f));
+	transform->SetLocalScale(Vec3(100.f, 100.f, 1.f));
+임시 객체를 transform에 받아주고 이 객체의 정보들을 수정하는데 여기서 로컬 포지션은 사실 부모 물체가 없다보니까 그냥 월드에서의 위치라고 할 수 있습니다. 
+그리고 스케일도 물체가 떨어져 있는만큼 100, 100 으로 x,y 값을 늘려주었습니다.
+이렇게 Tranform 값을 설정해준 다음 
+
+MeshRenderer를 추가해주기 위해 위에서 설정한 vertex와 index를 담아주고 Material도 shader, texture, materialparam을 채워준 다음 gameObject에 add 해주고 
+이걸 다시 Scene에 addGameObject를 해주었습니다.
+
+TestObject는 완성됐고 이걸 관측하기위한 Camera 오브젝트를 또 만들어 주겠습니다. 
+
+	shared_ptr<GameObject> camera = make_shared<GameObject>();
+	camera->AddComponent(make_shared<Transform>());
+	camera->AddComponent(make_shared<Camera>()); // near = 1, far = 1000, fov = 45
+	//camera->AddComponent(make_shared<Transform>());
+
+	camera->GetTransform()->SetLocalPosition(Vec3(0.f, 100.f, 0.f));
+
+마찬가지로 임시 객체 camera를 만들어서 모든 게임 오브젝트가 들고 있을 Transform, 카메라의 기능을 할 Camera, 지금은 주석 처리 되었지만 나중에 카메라를 움직이게할
+스크립트를 AddComponent 해줬습니다. 
+Tranform 정보를 0.f, 100.f, 0.f 로 해서 아까만든 베이가 사진을 z축으로 100.f 만큼 떨어진 곳에 설정하였고 
+Camera 컴포넌트는 기본값으로 near = 1, far = 1000, fov = 45도 로 설정해 놨었는데 딱히 건드리지 않아도 될거 같아 그냥 두었습니다. 
+이렇게 설정되 camera 오브젝트를 Scene에 추가 해주면 
+
+이제 베이가 사진과 그걸 찍을 카메라가 완성된겁니다.
+
+이제 프로그램을 실행해보면 
+
+짜잔 베이가 사진이 뜹니다. 
+
+이렇게 이것 저것 적용시켜도 아무것도 안변하는것 같다고 생각할 수 있지만 우리는 알수 있습니다. 정말 많은것이 바뀌었다는걸
+이전까지는 그냥 아무런 연산없이 곧바로 Projection 인것 처럼 물체를 투영해서 화면에 출력했지만 
+지금은 유니티에서 본것처럼 게임공간에 가로 100 세로 100의 베이가 사진을 100 걸음 뒤에서 찍는 카메라로 World, View, Projection 변환을 해서 화면에 출력하고 있습니다.
+
+
+여기서 마무리하면 조금 심심하니까 카메라를 움직이는 스크립트를 추가 해보겠습니다.
+
+# TestCameraScript
+
+임시 클래스로 TestCameraScript를 만들어 주었습니다. 이 스크립트가 하는 일은 단순한데 우리가 키보드를 누르면 거기에 맞춰 카메라가 움직이게 될겁니다.
+스크립트는 MonoBehaviour 를 상속합니다. 
+
+헤더
+class TestCameraScript : public MonoBehaviour
+{
+public:
+	TestCameraScript();
+	virtual ~TestCameraScript();
+
+	virtual void LateUpdate() override;
+
+private:
+	float		_speed = 100.f;
+
+};
+
+LateUpdate 순서에서 입력을 받아 카메라의 이동을 해줄겁니다. _speed 라는 멤버변수는 카메라 이동속도를 
+고정으로 설정해놓은것 같습니다.
+
+구현부를 보면 우선 필요할 것 같은 헤더들을 include 해줍니다.
+#include "Transform.h"
+#include "Camera.h"
+#include "GameObject.h"
+#include "Input.h"
+#include "Timer.h"
+일단 카메라 오브젝트에 필요한걸 모두 가져왔고 구현할 때 필요한걸 가져다 쓸겁니다. 지금은 임시 클래스니깐 넉넉하게 가져온 느낌입니다.
+
+LateUpdate 에서 어떻게 구현할것이냐면
+void TestCameraScript::LateUpdate()
+{
+	Vec3 pos = GetTransform()->GetLocalPosition();
+
+	if (INPUT->GetButton(KEY_TYPE::W))
+		pos += GetTransform()->GetLook() * _speed * DELTA_TIME;
+
+	if (INPUT->GetButton(KEY_TYPE::S))
+		pos -= GetTransform()->GetLook() * _speed * DELTA_TIME;
+
+	if (INPUT->GetButton(KEY_TYPE::A))
+		pos -= GetTransform()->GetRight() * _speed * DELTA_TIME;
+
+	if (INPUT->GetButton(KEY_TYPE::D))
+		pos += GetTransform()->GetRight() * _speed * DELTA_TIME;
+
+	if (INPUT->GetButton(KEY_TYPE::Q))
+	{
+		Vec3 rotation = GetTransform()->GetLocalRotation();
+		rotation.x += DELTA_TIME * 0.5f;
+		GetTransform()->SetLocalRotation(rotation);
+	}
+
+	if (INPUT->GetButton(KEY_TYPE::E))
+	{
+		Vec3 rotation = GetTransform()->GetLocalRotation();
+		rotation.x -= DELTA_TIME * 0.5f;
+		GetTransform()->SetLocalRotation(rotation);
+	}
+
+	GetTransform()->SetLocalPosition(pos);
+}
+이렇게 합니다. 우선 pos라는 로컬 vecter3를 만들어 줬는데 Tranform 중 Position 을 받고 있습니다. 이게 카메라의 Position을 말하는데 
+어떻게 TestCameraScript의 Tranform이 카메라의 Tranform을 말하냐면 이 TestCameraScript 자체를 Camera에 추가할 컴포넌트이기 때문에 그렇습니다.
+이럴 구조가 유니티에서도 사용된다고 합니다. 스크립트에서 트랜스폼을 가져오는데 스크립트 자체의 트랜스폼이 아닌 스크립트가 붙은 오브젝트의 트랜스폼을 가져온다.
+
+밑으로 if 문들로 wasd 를 누르면 _speed라는 속도로 이동을 하는 코드가 들어가 있고 
+
+Q 와 E 를 누르면 카메라의 Rotation 카메라의 보는 방향을 회전하고 있습니다. 
+
+그리고 이렇게 매 프레임 입력에 따라 변경된 pos를 카메라의 포지션에 세팅을 해주고 있습니다. 
+
+여기서 Q와 E키가 Input에 없는데 이걸 추가 해주겠습니다.
+
+이제 다시 SceneManager::LoadTestScene 에서 Camera 부분의 주석 처리를 해놨던 부분을 TestCameraScript로 추가 해주면 되겠습니다. 물론 include도 해주어야 합니다.
+카메라의 컴포넌트로 이 스크립트가 추가 되었으니 엔진의 업데이트 부분의 LateUpdate가 실행될때 TestCameraScript의 LateUpdate 도 낑겨서 실행되어 입력을 받아주게 되었습니다.
+
+
+실행해보면 이제 WASDQE를 기지고 움직이는 카메라를 볼 수 있습니다.
 
