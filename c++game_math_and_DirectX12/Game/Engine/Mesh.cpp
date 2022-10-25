@@ -3,6 +3,14 @@
 #include "Engine.h"
 #include "Material.h"
 
+Mesh::Mesh() : Object(OBJECT_TYPE::MESH)
+{
+}
+
+Mesh::~Mesh()
+{
+}
+
 // Vertex와 Index를 활용하는 버전
 void Mesh::Init(const vector<Vertex>& vertexBuffer, const vector<uint32>& indexBuffer)
 {

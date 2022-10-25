@@ -1,0 +1,424 @@
+
+
+        20. Qube,Sphere
+
+카메라 다음으로는 조명을 구현 할 차례입니다. 그런데 지금 우리 프로젝트에있는 물체는 그냥 2D 이미지인데 그러면 조명을 구현해도 확인할 방법이 없습니다.
+그래서 번외편으로 우리 게임 오브젝트를 큐브모양 그리고 구형으로 만들어서 다음 시간의 조명을 준비하겠습니다.
+
+
+# 큐브 계획
+우리 프로젝트의 평면 베이가 사진의 면이 6개가 되면 큐브가 되는 개념일것인데 이걸 좀 더 자세히 들여다 보면 
+큐브의 중심점을 원점이라고 했을때 원점에서 오른쪽 면에 닿는 거리를 width, w 라고 부를수 있고 위쪽면까지의 거리를 height, h 라고 부를 수 있고 
+원점에서 더 깊은 면 까지를 depth, d 라고 부르겠습니다.
+
+이럴때 큐브의 카메라와 가까운 면을 좌표로 표현 하자면 우선 d 값은 모두 -d 일것이고 좌상단부터 시계방향으로 (-w,h,-d), (-w,-h,-d), (w,-h,-d),(w,h,-d)
+이렇게 표현할수 있을겁니다.
+
+이렇게 좌표를 구한다음은 정점 버퍼로 사용할수 있고 인덱스 버퍼로 적절히 이어줄수도 있을겁니다. 이런식으로 6면체를 만들면 되는 큐브는 그렇게 어려운 점은 
+없을겁니다. 
+
+# 구 계획 
+그런데 구는 좀 어려울것 같습니다. 게임에서 물체는 모두 삼각형을 이어붙혀서 만들건데 삼각형으로 어떻게 구를 구현할지가 고민이 되는데,
+우선 그래픽적으로 원을 구현하는 방법부터 보겠습니다. 실물로도 그렇지만, 그래픽으로도 정의 상의 원은 사실 그릴 수 없습니다. 
+일정 거리를 둔 점들을 원 모양으로 나열하고 그 점들을 잇는걸로 원을 표현하는데 이 방법을 이용해서 구를 구현할겁니다. 
+
+예를들어 남극, 북극점을 먼저 찍습니다. 일정거리를 둔 수평선을 극점에서는 작고 한 중간에서는 가장 큰 구형을 그리도록 선들을 그어줍니다. 
+그리고 그 선들 범위내로 수직선도 그어줍니다 이렇게 수직 수평으로 교차하는 선으로 무얼할거냐면 우선 수평선들로 여러 링을 표현해서 구의 형태를 잡아주고 
+수직선으로 수평선과 교차하는 곳이 정점들이 될겁니다. 이 정점들을 북극점, 남극점들과 이어주면서 삼각형들을 만들면 되겠습니다.
+
+
+# 코드
+
+우리가 프로젝트에서 게임 오브젝트를 만들어 주고 있는 곳이 SceneManager 였습니다. 그런데 SceneManager에서 게임오브젝트들을 생성해주고 있는것이 부자연스럽습니다.
+그래서 이부분을 다시 따로 빼내보도록 하겠습니다.
+
+Manager 필터에 Resources 라는 이름의 클래스로 관리할 겁니다.
+
+이 리소시즈 클래스는 큐브, 구 같은 걸 표현하는 정점 버퍼, 인덱스 버퍼도 물론 다루겠지만 더 많은 부분을 다룰수 있습니다. SceneManager에서 다루던 게임 오브젝트에 대한
+트랜스폼, 쉐이더, 텍스쳐, 메테리얼, 스크립트 같은 컴포넌트들을 모두 다룰겁니다 	 . 혹시 나중에 진지하게 엔진을 만들게 되면 이런 오브젝트들을 각각 파일로 저장하면서 
+툴을 통해 관리를 할 수도 있을겁니다. 그래서 이 리소시즈를 계획할때 이런 점들을 고려하면서 만들면 좋겠습니다.
+
+지금까지 Resources 필터에서 관리하던 클래스들이 메테리얼, 텍스쳐, 메쉬, 쉐이더 클래스들이었습니다. 그리고 이 클래스들은 연관되어 있지 않고 그냥 각자 기능을 하고 있었습니다.
+거기에 또 GameObject 필터에서는 컴포넌트 들과 게임 오브젝트 클래스가 혼재되어 있었는데 
+이것들을 한번에 관리해줄 상위 클래스가 있으면 좋을 것 같습니다. 그 상위 클래스로 Object 라는 클래스를 만들어주고 GameObject 필터 이름도 Object로 바꿔주게습니다.
+이 필터 밑으로 Component 필터로 컴포넌트들을 관리 해주고 Resources 필터의 멤버들도 Object 필터 아래로 이동 시켜주었습니다.
+
+
+
+오브젝트 클래스를 먼저 만들어 주겠습니다. 우선 필요한것은 오브젝트 타입들과 오브젝트 카운트가 필요한데 enum을 활용하겠습니다.
+enum class OBJECT_TYPE : uint8
+{
+	NONE,
+	GAMEOBJECT, // PREFAB
+	COMPONENT,
+	MATERIAL,
+	MESH,
+	SHADER,
+	TEXTURE,
+
+	END
+};
+
+enum
+{
+	OBJECT_TYPE_COUNT = static_cast<uint8>(OBJECT_TYPE::END)
+};
+여기서 게임 오브젝트가 리소스는 아니지 않을까 하는 생각이 들수도 있는데 게임오브젝트도 메쉬, 트랜스폼, 메테리얼, 쉐이더, 텍스쳐 들이 셋팅되어 있는 게임 오브젝트를 Scene에 
+넣어주기도 했는데 이 게임 오브젝트 자체도 파일로 빼서 관리하기도 합니다. 이런걸 Prefab, Blueprint 라고도 합니다.
+
+선언부
+public:
+	Object(OBJECT_TYPE type);
+	virtual ~Object();
+
+	OBJECT_TYPE GetType() { return _objectType; }
+
+	void SetName(const wstring& name) { _name = name; }
+	const wstring& GetName() { return _name; }
+
+	// TODO : Instantiate
+
+protected:
+	friend class Resources;
+	virtual void Load(const wstring& path) { }
+	virtual void Save(const wstring& path) { }
+
+protected:
+	OBJECT_TYPE _objectType = OBJECT_TYPE::NONE;
+	wstring _name;
+선언부를 살펴보면 멤버 변수로는 오브젝트타입과 이름을 들고 있을겁니다. 리소스들을 파일로 저장해 놓을거니깐 이름이 필요할겁니다.
+
+함수들을 보면 이제 오브젝트 클래스가 최상위 클래스가 될것이니 생성자에서 타입을 지정해주는것과 소멸자에 virtual을 꼭 붙여줘야합니다. 
+다음 함수 GetType 오브젝트의 타입을 가져오는 함수구요, name을 셋팅, 가져오는 기능인 SetName, GetName 함수도 있습니다. 
+그 밑에 주석으로 TODO: Instantiate라고 되어 있는데 이건 나중에 구현할 기능으로 해당 오브젝트를 복사하는 기능입니다. 
+
+리소시즈 클래스에서 가져다 쓸수 있도록 friend class로 열어준 Load, Save 함수들도 있습니다.
+
+구현부는 생성자 소멸자부분만 있습니다.
+Object::Object(OBJECT_TYPE type) : _objectType(type)
+{
+
+}
+
+Object::~Object()
+{
+
+}
+오브젝트 타입을 지정하는 생성자만 열어주었습니다.
+
+조금 귀찮지만 하위 클래스들에 각각 상속을 해주어야합니다. 
+그리고 각 클래스의 생성자에서 자신의 오브젝트 타입을 지정 해주어야 합니다.
+
+
+이제 Resources 를 보겠습니다. 
+
+싱글톤 패턴으로 일단 만들어 줄것이구요
+	DECLARE_SINGLE(Resources);
+include 도 나중에 필요할 헤더를 모두 추가 해주었습니다. 
+#include "GameObject.h"
+#include "Material.h"
+#include "Mesh.h"
+#include "Shader.h"
+#include "Texture.h"
+
+그리고 이 Resources가 들고 있을 멤버 변수는 
+private:
+	using KeyObjMap = std::map<wstring/*key*/, shared_ptr<Object>>;
+	array<KeyObjMap, OBJECT_TYPE_COUNT> _resources;
+오브젝트를 맵으로 관리하는데  그 맵을 또 오브젝트 타입만큼의 배열로 관리하고 있습니다. 이러면 같은 타입의 오브젝트가 여러개가 있어도 더 관리하기 편할것 같습니다. 
+이렇게 두번에 거쳐서 관리를 하는데 정리하면 멤버변수 _resources는 배열이지만 오브젝트의 맵으로 이루어진 배열이다. 라고 합니다.
+
+다음에 구현할 내용은 파일로 저장된 리소스를 로드 하거나 이미 로드한 리소스를 가져오고 이미 메모리에있던걸 임시로 잠시 추가해주는 기능을 구현할겁니다.
+
+public:
+	template<typename T>
+	shared_ptr<T> Load(const wstring& key, const wstring& path);
+
+	template<typename T>
+	bool Add(const wstring& key, shared_ptr<T> object);
+
+	template<typename T>
+	shared_ptr<T> Get(const wstring& Key);
+
+	template<typename T>
+	OBJECT_TYPE GetObjectType();
+
+여기서 템플릿을 사용하는 이유는 리소시즈 클래스에서 관리하는 리소스들의 타입이 여러가지인데 각 타입마다 Load, Get, Add 함수를 따로 만들기는 번거롭기 때문입니다.
+템플릿을 사용한 멤버 함수는 구현부를 cpp 쪽에 구현하기는 어렵습니다. 그래서 그냥 헤더 파일에 구현부도 같이 두는데 이렇게 헤더에 구현부를 만들어주고 inl 파일로 빼주는 경우도 
+있었습니다.
+(inline 으로 빼주는건 헤더 파일이 너무 장황해지지 않도록 정리하는 겁니다.)
+
+ 그러면 Add, Load, Get, GetObjectType의 구현부를 보겠습니다.
+template<typename T>
+inline shared_ptr<T> Resources::Load(const wstring& key, const wstring& path)
+{
+	OBJECT_TYPE objectType = GetObjectType<T>();
+	KeyObjMap& keyObjMap = _resources[static_cast<uint8>(objectType)];
+
+	auto findIt = keyObjMap.find(key);
+	if (findIt != keyObjMap.end())
+		return static_pointer_cast<T>(findIt->second);
+
+	shared_ptr<T> object = make_shared<T>();
+	object->Load(path);
+	keyObjMap[key] = object;
+
+	return object;
+}
+
+template<typename T>
+bool Resources::Add(const wstring& key, shared_ptr<T> object)
+{
+	OBJECT_TYPE objectType = GetObjectType<T>();
+	KeyObjMap& keyObjMap = _resources[static_cast<uint8>(objectType)];
+
+	auto findIt = keyObjMap.find(key);
+	if (findIt != keyObjMap.end())
+		return false;
+
+	keyObjMap[key] = object;
+
+	return true;
+}
+
+template<typename T>
+shared_ptr<T> Resources::Get(const wstring& key)
+{
+	OBJECT_TYPE objectType = GetObjectType<T>();
+	KeyObjMap& keyObjMap = _resources[static_cast<uint8>(objectType)];
+
+	auto findIt = keyObjMap.find(key);
+	if (findIt != keyObjMap.end())
+		return static_pointer_cast<T>(findIt->second);
+
+	return nullptr;
+}
+
+template<typename T>
+inline OBJECT_TYPE Resources::GetObjectType()
+{
+	if (std::is_same_v<T, GameObject>)
+		return OBJECT_TYPE::GAMEOBJECT;
+	else if (std::is_same_v<T, Material>)
+		return OBJECT_TYPE::MATERIAL;
+	else if (std::is_same_v<T, Mesh>)
+		return OBJECT_TYPE::MESH;
+	else if (std::is_same_v<T, Shader>)
+		return OBJECT_TYPE::SHADER;
+	else if (std::is_same_v<T, Texture>)
+		return OBJECT_TYPE::TEXTURE;
+	else if (std::is_convertible_v<T, Component>)
+		return OBJECT_TYPE::COMPONENT;
+	else
+		return OBJECT_TYPE::NONE;
+}
+
+이 4가지 함수중에 Get, Add, Load 함수내에서 GetObjectType를 사용하고 있기 때문에 GetObjectType부터 살펴보겠습니다. 
+
+GetObjectType 함수는 자신의 타입을 템플릿으로 자동변환된 T와 objectType의 각각의 항목들을 하나씩 비교하면서 일치하는 OBJECT_TYPE을 반환하는 함수입니다. 
+이름 그대로 자신의 오브젝트 타입을 가져오는 함수인 겁니다. 
+어기서 사용되는 std::is_same_v 이 고급 템플릿 문법으로 들어가는 문법인데 이 문법이 실행되는 시점이 컴파일 시점에 실행된다고 합니다. 
+그런데 우리가 Object라는 클래스를 만들때 GetType이라는 함수를 만들어 놨는데 왜 이걸 활용하지 않고 다시 함수를 만들었을까요?
+일단 Object::GetType 은 먼저 객체가 생성이 되어야 합니다. 각 리소스 객체를 생성하는 생성자에서 _objectType을 초기회해주고 있었는데요
+반면 GetObjectType 함수는 템플릿으로 들어온 클래스 타입만 보고 판단을 합니다. 코드실행 단계보다 앞선 컴파일링 단계에 실행되기 때문인데요 다른 Get, Add, Load 함수들에서 
+GetObjectType 함수가 쓰일때는 아직 객체가 만들어 지지 않은 상태이고 먼저 _resources 의 인덱스를 가져와야 하기 때문에 Object::GetType 은 여기서는 실행이 안됩니다.
+
+다음으로 구현 순서대로 Load 함수를 보겠습니다. 인자로 path와 key를 받고 있습니다. key는 위에서 정의한 KeyObjMap 에서 Map의 key를 설정해주고, 
+path는 나중에 구현할 Object::Load 함수에서 불러올 파일의 경로를 뜻합니다.
+템플릿에서는 이 Resources를 상속받을 오브젝트 타입들중 하나가 들어올겁니다.
+이후 GetObjectType 함수로 자신의 타입을 objectType이라는 임시 변수에 받아줘서 지금 생성할 Map이 _resources에서 몇번째 인덱스에 들어가야 하는지 설정해주고 있습니다.
+KeyObjMap& keyObjMap = _resources[static_cast<uint8>(objectType)]; 라는 코드인데 타입이 참조값이기 때문에 실제 _resources안에 원본에 접근하고 있는겁니다.
+auto findIt = keyObjMap.find(key);
+	if (findIt != keyObjMap.end())
+		return static_pointer_cast<T>(findIt->second);  // 여기서 ->second 는 map 의 원소가 key와 value의 페어로 이루어져있는데 그중 두번째 value를 추출한것
+여기서는 인자 map에 이미 그 key가 있다면 두번 로드 하지 않고 그대로 리턴해줍니다.
+만약 _resources에 key에 해당되는 원소가 없다면 템플릿으로 make_shared로 객체를 생성한다음 나중에 구현될 Load함수로 그 경로에 있는 파일의 내용을 긁어 옵니다. 
+그리고 keyObjMap[key] = object;로 _resources의 해당 인덱스 원본에 저장을 해준 다음 object를 리턴하는 함수입니다.
+
+Add와 Get도 비슷합니다. Get 함수의 경우 똑같이 objectType 을 GetObjectType으로 받아서 _resources 의 해당 인덱스의 Map을	참조로 가져오고 find로 인자로 받은 key를 찾아서 
+있다면 그 이터레이터의 second, 객체를 반환하고 없다면 nullptr을 반환합니다. 
+
+Add는 비슷하게 _resources의 인덱스를 찾아서 이미 있다면 false반환 없다면 추가하고 true 반환 하는 함수인데 
+나중에가면 파일로 저장한 리소스들을 다 Load해주는 방향으로 가야 겠지만 지금은 파일을 만드는 작업까지는 하지 않을것이기 때문에 잠깐 임시로 객체들을 추가하기 위해 사용하는 
+함수입니다. 실제 유니티에는 Add라는 부분이 없다고 합니다. 존재하는 파일을 Load하는 방식이라고 합니다.
+
+
+이제 이번시간에 필요한 함수인 LoadCubeMesh, LoadSphereMesh를 보겠습니다.
+	shared_ptr<Mesh> LoadCubeMesh();
+	shared_ptr<Mesh> LoadSphereMesh();
+
+이 함수들의 구현부 코드는 생략하고 해석만 할것인데 
+우선 수업자료 코드에서 복사 하면 여러군데에서 에러가 나고 있습니다. 예전에 만든 struct Vertex 를 좀 수정해줘야 합니다. 
+이전 Vertex는 이렇게 되어 있었습니다.
+struct Vertex
+{
+	Vec3 pos;
+	Vec4 color;
+	Vec2 uv;
+};
+위치정보인 pos, 베이가 텍스쳐를 입히지 않았을때 사용하던 color, 텍스쳐를 입혀줄 좌표인 uv 이렇게 3가지로 구성되어 있었는데 지금 생각해보면 이미 
+텍스쳐로 메쉬를 꾸며주고 있고 color자체는 이제 필요가 없어 보입니다. color는 삭제해주겠습니다. 
+그 다음에 다음 시간인 Lighting 시간에 필요한 정보가 normal, tangent 같은 정보가 필요한데 그걸 미리 넣어주겠습니다. 넣어주긴 하는데 이 normal, tangent가 무슨 역할을 
+하는지는 다음에 알아보도록하고 각 요소들을 쉽게 채워주기위한 생성자를 추가 해줄텐데 기본생성자는 기본으로 두고 각 pos, uv, normal, tangent 를 채워주는 인자를 받는 생성자도 
+추가해주겠습니다.
+struct Vertex
+{
+	Vertex() {}
+
+	Vertex(Vec3 p, Vec2 u, Vec3 n, Vec3 t)
+		: pos(p), uv(u), normal(n), tangent(t)
+	{
+	}
+
+	Vec3 pos;
+	Vec2 uv;
+	Vec3 normal;
+	Vec3 tangent;
+};
+
+그런데 이렇게 Vertex를 수정하고나서 잊지말고 같이 수정해줘야 하는게 있는데 바로 Shader입니다. 
+Shader에서 받은 정보들을 어떻게 처리할지를 정하고 있는데 그 받은정보에 Vertex도 포함되기 때문인데 쉐이더는 이런 Vertex와 거기에 TRANSFORM_PARAMS, MATERIAL_PARAMS를 
+받아서 물체를 표현해줍니다. 
+
+Shaer.cpp 로가서 Vertex를 어떻게 표현하고 있는지 보면 이렇습니다.
+D3D12_INPUT_ELEMENT_DESC desc[] =
+	{
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 28, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+	};
+이중 이제 삭제된 COLOR 부분을 삭제하면 TEXCOORD 가 POSITION 다음으로 오는데 5번째 인자로 들어가는 0,12,28 같은 숫자는 몇번째 바이트부터 시작하면 되는지를 알려줍니다. 
+그래서 TEXCOORD의 시작바이트를 12로 변경해주었습니다. 거기에 위에서 변경된 Vertex 정보인 normal, tangent를 추가해주면 이렇게 되겠습니다.
+	D3D12_INPUT_ELEMENT_DESC desc[] =
+	{
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 20, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+	};
+그러면 쉐이더 파일도 뭐 수정할것이 없는지 살펴봐야 합니다. 
+
+defalut.hlsli 파일로가서 이번에 수정한 정점 정보와 관련된 부분이 VS_IN 부분인데 현재 코드는 이렇습니다.
+struct VS_IN
+{
+    float3 pos : POSITION;
+    float4 color : COLOR;
+    float2 uv : TEXCOORD;
+};
+아까 지웠던 COLOR가 여기도 남아있고 VS_OUT에도 남아있습니다. 둘다 지워주겠습니다. 그리고 VS_MAIN 안에도 output.color를 계산해주는 부분이 있는데 이 부분도 삭제 해주었습니다.ㄴ
+쉐이더 파일에서는 왜 normal, tangent를 또 추가하지 않냐면 이번시간에서는 꼭 추가해줄 필요는 없기 때문인데 쉐이더 파일에서 있는걸 안찾는건 괜찮은데 없는걸 찾으면 문제가 됩니다.
+struct VS_IN
+{
+    float3 pos : POSITION;
+    float2 uv : TEXCOORD;
+};
+
+struct VS_OUT
+{
+    float4 pos : SV_Position;
+    float2 uv : TEXCOORD;
+};
+
+VS_OUT VS_Main(VS_IN input)
+{
+    VS_OUT output = (VS_OUT)0;
+
+    output.pos = mul(float4(input.pos, 1.f), matWVP);
+
+    output.uv = input.uv;
+
+    return output;
+}
+
+
+이제 원래 해석하던 부분으로 돌아가면 되는데 어느 부분이었냐면 
+Resources 클래스의 LoadCubeMesh를 해석하고 있었습니다.
+
+큐브를 해석해보면 우선 만들려고 하는 메쉬가 있는지를 체크해보는 코드가 있습니다. Resources에서 만든 함수 Get을 이용해서 Cube라는 이름의 메쉬가 있다면 그걸 바로 리턴하고 아니라면
+다음 코드로 진행될겁니다. 
+float형 변수 3개를 만들건데 w2, h2, d2 라는 이름을 지었습니다. 값들은 모두 0.5f 인데 뜻이 뭐냐면 width/2, height/2, depth/2 라는 뜻인데 0.5f 씩을 값을 주면 결과물 인 
+큐브의 크기가 1x1x1 인 큐브가 나오도록합니다.
+vector<Vertex> vec(24);	 이렇게 정점데이터가 24개짜리인 벡터를 생성합니다. 6면체인데 각면의 정점들을 4개씩 계산한겁니다. 
+이제 vec의 각 인덱스마다 정점들을 적절히 넣어서 6면체를 표현해줍니다. 
+다음으로 다시 vector<uint32> idx(36); 이렇게 인덱스 버퍼를 만들어서 삼각형들을 그려주었고 Mesh 객체를 생성해서 Init의 인자로 위에서 만들었던 vec, idx 를 주어서 
+큐브를 만들고, Resources::Add 로 Cube라는 이름으로 추가해주었습니다. 그리고 이 Mesh를 리턴합니다.
+
+큐브는 이해하기 쉽습니다. 
+
+
+다음 메쉬인 구, Sphere 를 해석해 보겠습니다.
+
+시작은 큐브와 마찬가지로 일단 _resources 안에 해당 메쉬가 있는지를 체크해서 있다면 그걸 리턴하고 아니라면 다음으로 진행합니다. 
+이번 시간 처음에 배웠던것 처럼 그래픽에서의 구는 실제 개념상의 구가 아니라 구와 비슷하게 보이는 다각형입니다. 
+큐브때 사용했던 w2, h2, d2 대신 구에서는 
+	float radius = 0.5f; // 구의 반지름
+	uint32 stackCount = 20; // 가로 분할
+	uint32 sliceCount = 20; // 세로 분할
+이렇게 3가지 값이 필요합니다. radius는 말 그대로 구의 반지름이고, stackCount, sliceCount 는 구를 어떻게 구현하는지 설명할때 가로로 나누고 세로로 나눈다고 했는데 
+그 나누는 횟수입니다. 이 횟수가 커질수록 구의 형태는 더 곡선에 가까운 형태를 할것입니다.
+다음으로 구의 Mesh의 인자가 될 vector<Vertex> vec; 와 Vertex v; 이렇게 재사용하면서 vec의 내용을 채워주기 위한 임시변수도 같이 만들어 줍니다.
+
+구를 표현하기위해 북극과 남극을 정하고 그 사이의 가로분할, 세로분할을 해서 그 교차점이 정점이 돠고 각 정점들을 삼각형형태로 이어주면 된다고 했었습니다. 
+그러기 위해 우선 북극을 v를 이용해서 만들어 줬습니다.
+	// 북극
+	v.pos = Vec3(0.0f, radius, 0.0f);
+	v.uv = Vec2(0.5f, 0.0f);
+	v.normal = v.pos;
+	v.normal.Normalize();
+	v.tangent = Vec3(1.0f, 0.0f, 1.0f);
+	vec.push_back(v);
+이중 normal, tangent의 내용은 일단 신경쓰지 말고 pos값을 보면 아주 쉽습니다. y값만 반지름 만큼 위쪽에 위치하고 있습니다. 
+그 다음은 남극을 만들어 주는게 아니라 가로분할, 세로분할로 정점들을 계산해 vec.push_back 해줄건데요 왜 남극부터 안만드냐면 나중에 인덱스를 만들때 순서를 쉽게 하기 위해서
+입니다. 이런 정보들을 사용해서 적절히 정점들을 vec.push_back 해줍니다. 그 후에 남극 정점도 추가 해주면 정점은 완료 된겁니다. 
+
+다음은 인덱스 정보를 추가해주는데 인덱스도 적절한 방법을 통해 설정을 해주면 되겠습니다. 
+
+이 원의 정점들과 인덱스를 구하는 방법은 나중에 시간이 나면 자세히 알아봐도 되고 아니면 사실 게임 엔진을 이해하는 데에는 중요한 내용은 아니기 때문에 넘어가도 괜찮을 겁니다.
+아무튼 이런저런 코드를 통해서 구를 구현 할 수 있다는게 중요합니다. 우선은 넘어가겠습니다.
+
+
+
+이렇게 구와 큐브를 만들어 봤는데 이제 프로그램을 실행해서 확인해보겠습니다. 
+그러기위해 SceneManager로 가서 우리가 사용하던 오브젝트인 TestObject를 삭제 해주겠습니다. 그리고 Sphere를 추가해주겠습니다.
+#pragma region Sphere
+	{
+		shared_ptr<GameObject> sphere = make_shared<GameObject>();
+		sphere->AddComponent(make_shared<Transform>());
+		sphere->GetTransform()->SetLocalScale(Vec3(100.f, 100.f, 100.f));
+		sphere->GetTransform()->SetLocalPosition(Vec3(0.f, 100.f, 200.f));
+		shared_ptr<MeshRenderer> meshRenderer = make_shared<MeshRenderer>();
+		{
+			shared_ptr<Mesh> sphereMesh = GET_SINGLE(Resources)->LoadSphereMesh();
+			meshRenderer->SetMesh(sphereMesh);
+		}
+		{
+			shared_ptr<Shader> shader = make_shared<Shader>();
+			shared_ptr<Texture> texture = make_shared<Texture>();
+			shader->Init(L"..\\Resources\\Shader\\default.hlsli");
+			texture->Init(L"..\\Resources\\Texture\\veigar.jpg");
+			shared_ptr<Material> material = make_shared<Material>();
+			material->SetShader(shader);
+			material->SetTexture(0, texture);
+			meshRenderer->SetMaterial(material);
+		}
+		sphere->AddComponent(meshRenderer);
+		scene->AddGameObject(sphere);
+	}
+#pragma endregion
+해설하면 우선 sphere 라는 게임 오브젝트를 만들어 주고있습니다. 나중에는 Prefab을 구현됐을때는 게임오브젝트를 로드해오면 되지만 지금은 직접 생성해주고 있습니다.
+sphere에 Transform 컴포넌트를 추가하고 컴포넌트 정보를 넣어주고 있습니다. 그리고 메쉬렌더러를 만들어주고 있습니다. 
+그 중 처음에 TestObject에서는 정점데이터와 인덱스를 SceneManager에서 설정해주고 있었는데 지금 sphere에서는 우리가 만든 Resources를 이용해서 LoadSphereMesh를 해주고 있습니다.
+메쉬 렌더러의 나머지 내용은 사실 TestObject와 다를 부분이 없습니다.
+이 메쉬 렌더러를 sphere에 컴포넌트 추가를 해주고 Scene에도 sphere를 추가해주었습니다.
+(#include "Resources.h" 를 해줘야 GET_SINGLE이 정상적으로 작동할 겁니다.)
+
+큐브도 구와 비슷하게 추가해주는데 조금 다른점은 SetLocalPosition 값에서 x값을 150.f 를 주어서 구 옆에 큐브가 위치하도록 해줍니다. 
+그렇지 않으면 두 물체가 곂쳐있을 겁니다.
+
+이제 코드를 실행하면 감격스럽게도 구와 큐브의 형태의 베이가가 출력됩니다. 
+
+
+이번시간에 만든 이 물체들은 다음시간부터 배울 Lighting으로 빛을 비추면 어느부분이 어둡고 어느부분은 밝아지는지를 확인할 수 있습니다. 
+
+그리고 이번에 만든 Resources 클래스는 그냥 땜빵용 클래스가 아니라 리소스들을 파일화 시켜서 저장한다던가 그 파일을 경로로 찾아 서 로드한다던가 하는 기능을 추가해서 
+사용할 겁니다.
