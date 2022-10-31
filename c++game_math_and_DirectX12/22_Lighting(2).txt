@@ -1,0 +1,460 @@
+
+
+        22. Lighting - 코드 (1)
+
+
+ 이전시간에 배운 Light의 개념을 코드로 구현하는 시간입니다.
+
+ 지금만들고 있는 엔진은 유니티 기반인 컴포넌트 패턴으로 만드는 엔진이다보니 조명도 게임오브젝트에 Light 컴포넌트를 붙여주는 식으로 구현하면 될것 같습니다.
+
+우선 컴포넌트 필터아래로 Light 라는 클래스를 만들어 주고 Light가 컴포넌트이다 보니 상속도 같이 해줍니다. 
+
+Light가 들고있어야할 데이터들이 있는데 그걸 먼저 만들어주겠습니다.
+
+enum class LIGHT_TYPE : uint8
+{
+	DIRECTIONAL_LIGHT,
+	POINT_LIGHT,
+	SPOT_LIGHT,
+};
+
+struct LightColor
+{
+	Vec4	diffuse;
+	Vec4	ambient;
+	Vec4	specular;
+};
+
+struct LightInfo
+{
+	LightColor	color;
+	Vec4		position;
+	Vec4		direction;
+	int32		lightType;
+	float		range;
+	float		angle;
+	int32		padding;
+};
+
+struct LightParams
+{
+	uint32		lightCount;
+	Vec3		padding;
+	LightInfo	lights[50];
+};
+
+
+빛의 종류 3가지를 enum class LIGHT_TYPE 으로 만들었고 빛의 세가지 성분을 LightColor 라는 스트럭쳐로 만들었습니다. 그리고 빛을 표현하는데 필요한 데이터 전부를 
+들고 있을 LightInfo도 만들었습니다. 
+
+여기서 이상한점들이 LightColor의 요소들이 RGB 값만 가지고 있으면 되서 Vec3로도 될것 같은데 Vec4타입으로 되어있고 LightInfo의 lightType이나 padding이 int32로 되어있는데
+이부분은 나중에 쉐이더로 정보를 넘겨줄때 필요한 값이니 나중에 알아볼것입니다.
+
+마지막으로 실제 쉐이더에 넘겨줄 파라미터 정보로 LightParams 라는 스트럭처가 있는데 조명이 몇개가 있는지를 들고있을 lightCount, padding은 별의미없지만 바이트 수를 맞춰주기 
+위한 값, 그리고 LightInfo 를 배열로 만들어서 최대 50개 까지 넣어줄 수 있도록 만들었습니다.
+
+지금까지 쉐이더에서 넣어줬던 정보들은 TRANSFORM_PARAMS, MATERIAL_PARAMS 각각 하나씩 넣어줬다면 Light의 경우는 여러개를 묶어서 통으로 넘겨준다는 차이가 있다고 볼 수 있습니다.
+이렇게 하는 이유가 뭐냐면 물체를 그린다거나 할때 예를 들어 구를 그린다고 할때 물체를 하나 그릴때 만다 TRANSFORM_PARAMS, MATERIAL_PARAMS 을 매번 채워주면서 하나씩 그렸습니다.
+Light 같은 경우는 매 물체마다 교체하는것이 아니라 프레임마다 딱 한번만 모든 빛에 대한 정보를 셋팅해주면 그 다음은 다른 물체들과 별 상관이 없기 때문에 빛은 한번에 셋팅한다고 
+볼 수 있습니다. 
+
+여기까지가 이제 Light 에서 사용할 enum들 struct 들이고 이제 클래스의 내용을 채워줄겁니다.
+	public:
+		Light();
+		virtual ~Light();
+
+		virtual void FinalUpdate() override;
+
+	public:
+		const LightInfo& GetLightInfo() { return _lightInfo; }
+
+		void SetLightDirection(const Vec3 & direction) { _lightInfo.direction = direction; }
+
+		void SetDiffuse(const Vec3 & diffuse) { _lightInfo.color.diffuse = diffuse; }
+		void SetAmbient(const Vec3 & ambient) { _lightInfo.color.ambient = ambient; }
+		void SetSpecular(const Vec3 & specular) { _lightInfo.color.specular = specular; }
+
+		void SetLightType(LIGHT_TYPE type) { _lightInfo.lightType = static_cast<int32>(type); }
+		void SetLightRange(float range) { _lightInfo.range = range; }
+		void SetLightAngle(float angle) { _lightInfo.angle = angle; }
+
+	private:
+		LightInfo _lightInfo = {};
+
+내용을 해석해보자면 일단 들고있을 변수는 LightInfo _lightInfo = {}; 뿐입니다. 그리고 함수들 역시 이 _lightInfo 의 내용을 세팅해주는 함수들이 많습니다. 
+생성자 에서는 컴포넌트 타입을 LIGHT로 설정해주고 소멸자는 별다른 역할은 없습니다. 
+FinalUpdate 함수는 이제 게임 오브젝트에서 부터 상속받은 건데 가장 마지막 단계의 업데이트 시점에서 빛의 position 정보를 채워줍니다.
+
+그런데 이 코드를 처음에 작성하면 Set 함수에서 에러들이 발생합니다. 받은인자는 Vec3 의 데이터를 받았는데 설정해줄 _lightInfo의 각 구조들은 Vec4로 이루어져 있다보니깐 
+암시적 호환이 안되서 생긴 오류입니다. 그러면 각각 매번 캐스팅을 해줘서 값을 추출 해야하나 할수 있는데 
+앞으로도 종종 Vec3를 Vec4에 넣어야 할 일이 생길겁니다. 그래서 이 구조를 수정하겠습니다. 
+- Vec4 를 f12 로 따라 들어가면 EnginPch.h 에서 설정한 using 문법이 나옵니다. 거기서 다시 DirectX::SimpleMath::Vector4 를 타고들어가 보겠습니다.
+  그러면 마이크로 소프트에서 비공식적으로 지원하는 SimpleMath 헤더로 들어갑니다. 밑쪽을 살펴보면 Assignment operator 항목이 있는데 그곳에 
+            Vector4& operator=(const Vector3& V) noexcept { x = V.x; y = V.y; z = V.z; w = 0.f; return *this; }
+  이렇게 오퍼레이터 오버로드를 하나더 추가 해줍니다. = 뒤에 Vec3 가 왔을때 x, y, z를 받은 Vec3로 채워주고 남은 w를 기본적으로 0으로 초기화 해주는 함수입니다.
+
+잊지말아야 하는 점이 하나더 있는데 COMPONENT_TYPE에 LIGHT 도 추가 해줘야 하는데 Light 오브젝트를 만들면서 생성자에서 타입을 지정해주기 때문인데 
+여기서 잊지말고 GameObject 클래스로 가서 GetLight 함수도 추가해줍니다. 이때 GameObject.h 에서도 Light를 전방선언해주고 cpp 파일에서도 Light.h 를 include 해줘야 겠습니다.
+
+
+이렇게 Light 컴포넌트가 추가 되었는데 이제 이 Light를 어떻게 렌더를 할건지에 대해 생각을 해봐야 겠습니다.
+
+- 쉐이더에서 Light 클래스
+이전에 default.hlsli 파일에서 TRANSFORM_PARAMS, MATERIAL_PARAMS 처럼 b2 슬롯에 LIGHT_PARAMS 를 줘서 표현하면 되지 않을까 생각이 드는데 이렇게 처리하면 문제가 생긴다고 합니다.
+어떤 문제냐 하면 게임에서 큐브를 그리고, 구를 그리고, 오크를 그릴때 마다 TRANSFORM_PARAMS, MATERIAL_PARAMS 들은 다시 세팅을 하고 있습니다.
+(어디서 이런 작업을 해주고 있었냐면 TableDescriptorHeap::CommitedTable 에서 물체를 그릴때 마다 _currentGroupIndex를 하나씩 넘어가면서 세팅해주었습니다.)
+이런 상황인데 Light의 다른점은 
+위에서 LIGHT_PARAMS 의 LightInfo를 50개 짜리 배열로 들고있었던 이유가 물체를 그릴때 마다 빛을 다시 그릴 필요 없이 프레임마다 한번만 그려주면 되기 때문입니다. 
+그래서 빛 파라미터를 물체를 그리는데 사용하던 쉐이더에 같이 두면 의미없이 물체를 그릴때마다 새로 다시 설정이 되는 상황이 됩니다.
+
+왜 이럴수 밖에 없는가를 DirectX 거의 처음부분에서 했던 원론으로 설명해보면 우선 RootSignature 라는 GPU 의 레지스터에 서명을 해줬었습니다. 
+처음에는 CBV를 직접 서명하는 방법을 사용했었는데 이렇게 사용하다보면 레지스터 용량이 부족할 수 있을것 같아서 다음 방법인  DescriptorTable을 사용하는 방법으로 바꿨습니다. 
+이 DescriptorTable 방식은 어떤 조건에 따라 사용할 Table을 다른곳에서 가져와서 사용하는 개념이었는데 이 방법의 단점은 미리 준비된 Table을 사용하는 것이다 보니 중간에 
+내용을 업데이트하는데 어려움이 있습니다. 
+그러면 다시 DescriptorTable 을 왜 사용해야 하는지 이유가 또 있는데 우리가 그래픽카드에게 일을 시킬때 매번 한개씩 일을 시키는것보다 할일을 목록으로 한번에 넘겨주고 순서대로 
+처리하게 하는 엔진 부품이 있었는데 바로 CommandList 입니다. 커맨드 리스트의 방법 자체가 한 프레임 내에 할 일을 한번에 등록해서 순차적으로 처리하는 것이기 때문입니다.
+그래서 그 추가할 하나 하나의 명령들을 DescriptorTable 로 채워서 넘겨주고 있었습니다.
+
+이 부분을 렌더링과 빛 오브젝트를 분리시켜줘야 한다는 얘기가 됩니다. 
+RootSignature 에서 지금은 DescriptorTable 들만으로 이뤄져 있던 부분을 DescriptorTable 다음에 고정으로 처리해줄 CBV 같은걸 추가해서 거기서 빛 오브젝트를 계산해주면 되겠습니다.
+
+
+굉장히 오래된 내용이라 가물가물 한데 우선 RootSignature 에서 선언을 해줘야합니다.
+RootSignature::CreateRootSignature 에서 어떻게 서명할지 정해주고 있습니다. 여기를 수정해야 할것 같습니다.
+처음에 보면
+	CD3DX12_DESCRIPTOR_RANGE ranges[] =
+	{
+		CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, CBV_REGISTER_COUNT, 0), // b0~b4
+		CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, SRV_REGISTER_COUNT, 0), // t0~t4
+	};
+
+	CD3DX12_ROOT_PARAMETER param[1];
+	param[0].InitAsDescriptorTable(_countof(ranges), ranges);
+이렇게 range라는 배열에 CBV와 SRV 를 b0~b4, t0~t4 까지의 영역을 사용하는 range를 만들어주고있고 이 range를 파라미터로 삼는 param을 1개짜리 배열로 만들어 주고 있습니다.
+여기서 b0 슬롯 같은경우에는 전역 용도로 활용하게끔 따로 빼주겠습니다. 
+왜 b5 슬롯을 전역으로 사용하지 않는지는 이미 지금까지 만들어놨던 코드들중에 EnginPch.h 에서 enum class CBV_REGISTER 나 enum class SRV_REGISTER 에서 
+b0~b4 , t0~t4 까지를 잡고 있고 또 그걸로 count도 하고 있다보니 이걸 수정하면 코드가 꼬일 가능성이 있습니다. 그래서 그냥 b0를 전역으로 빼서 사용합니다.
+	CD3DX12_DESCRIPTOR_RANGE ranges[] =
+	{
+		CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, CBV_REGISTER_COUNT - 1 , 1), // b1~b4
+		CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, SRV_REGISTER_COUNT, 0), // t0~t4
+	};
+이렇게 CBV_REGISTER_COUNT 에서 하나뺀 수를 b 슬롯 카운트로 주고 b0 가 아니라 b1 부터 시작하도록 마지막인자를 수정했습니다. 
+
+다음으로 param을 수정했습니다.
+	CD3DX12_ROOT_PARAMETER param[2];
+	param[0].InitAsConstantBufferView(static_cast<uint32>(CBV_REGISTER::b0));
+	param[1].InitAsDescriptorTable(_countof(ranges), ranges);
+param 배열의 크기를 두개로 늘리고 원래 사용하던 range를 1번인덱스, 전역으로 사용할 b0 를 0번 인덱스로 설정했습니다.
+
+여기까지 수정하면 이 밑의 코드들은 param을 가지고 설정을 해줄 것이다 보니 딱히 손을 대지 않아도 될것 같고 ,
+대신 RootSignature 에서 끝나는게 아니라 연계된 부품들을 같이 수정해줘야 합니다.
+
+그래서 다음으로 볼 부품은 TableDescriptorHeap 클래스입니다. 여기서 사용하던 b0 슬롯을 빼줘야 하는데 우선 TableDescriptorHeap::Init 에서 
+desc.NumDescriptors = count * REGISTER_COUNT; 부분이 있는데 여기서 b0 가 빠졌으니 수정해줘야합니다
+desc.NumDescriptors = count * (REGISTER_COUNT - 1);  이렇게 
+_groupSize = _handleSize * (REGISTER_COUNT - 1);  이부분도 마찬가지로 수정해주었습니다.
+
+그리고 실제 CBV를 설정해주는 TableDescriptorHeap::SetCBV 함수를 보면 몇번 레지스터 부터 버퍼를 설정할지를 정하는 것이
+	D3D12_CPU_DESCRIPTOR_HANDLE destHandle = GetCPUHandle(reg);
+이 코드인데 여기서 GetCPUHandle 이란 함수도 TableDescriptorHeap 의 멤버 변수입니다. 살펴보자면
+D3D12_CPU_DESCRIPTOR_HANDLE TableDescriptorHeap::GetCPUHandle(uint32 reg)
+{
+	D3D12_CPU_DESCRIPTOR_HANDLE handle = _descHeap->GetCPUDescriptorHandleForHeapStart();
+	handle.ptr += _currentGroupIndex * _groupSize;
+	handle.ptr += reg * _handleSize;
+	return handle;
+}
+이렇습니다. 받은 레지스터를 uint32 로 캐스팅해서 인자로 받습니다. 여기서 그룹 사이즈로 크게 한번 이동하고 레지스터 단위로 작게 이동 할건데 이제는 b0 부터가 아니라 b1 부터 
+시작할때 b1 을 캐스팅하면 1 부터 시작 하는걸 수정해주겠습니다.
+D3D12_CPU_DESCRIPTOR_HANDLE TableDescriptorHeap::GetCPUHandle(uint32 reg)
+{
+	assert(reg > 0);
+	D3D12_CPU_DESCRIPTOR_HANDLE handle = _descHeap->GetCPUDescriptorHandleForHeapStart();
+	handle.ptr += _currentGroupIndex * _groupSize;
+	handle.ptr += (reg - 1)*_handleSize;
+	return handle;
+}
+assert 함수로 우선 reg가 b1 부터 시작하는게 맞는지 부터 체크하고  (reg -1) 로 사용할 핸들 주소를 조정해주었습니다.
+여기까지 TableDescriptorHeap 을 수정했습니다. 
+
+다음으로 볼 부품은 Engine 클래스인데 엔진클래스에서 CBV를 생성하는 함수가 있었습니다.
+	CreateConstantBuffer(CBV_REGISTER::b0, sizeof(TransformParams), 256);
+	CreateConstantBuffer(CBV_REGISTER::b1, sizeof(MaterialParams), 256);
+b0를 트랜스 폼으로 사용하고 b1 을 마테리얼로 사용하고 있었는데 하나씩 밀어주었습니다.
+	CreateConstantBuffer(CBV_REGISTER::b1, sizeof(TransformParams), 256);
+	CreateConstantBuffer(CBV_REGISTER::b2, sizeof(MaterialParams), 256);
+
+여기서 b0 슬롯을 설정해줄건데 
+	CreateConstantBuffer(CBV_REGISTER::b0, sizeof(LightParams), 1);
+이렇게 LightParams 의 크기만큼을 확보해줍니다. 그리고 세번째 인자가 1로 다른 버퍼들과 다른데 이유는 Light 가 여러번을 생성할것이 아닌 한번만 생성해주면 되기 때문입니다.
+
+Constant Buffer 가 어떤식으로 사용되고 있었는지를 확인해보면 매 ConstantBUffer마다 ConstantBuffer::Clear 로 _currentIndex를 0으로 밀어주고 ConstantBuffer::PushData를 
+통해 Mapping 된 메모리에 우리가 Push 할 데이터를 들고 있는 Buffer를 카피해주고 다음 버퍼로 넘어가는걸 반복하고 있습니다.
+
+그런데 우리가 Light 를 넘겨줄 용도인 b0 슬롯의 데이터는 프레임마다 한번만 Push 해주면 되기 때문에 새로운 함수를 만들어서 처리해줄겁니다.
+void ConstantBuffer::SetGlobalData(void* buffer, uint32 size)
+{
+	assert(_elementSize == ((size + 255) & ~255));
+	::memcpy(&_mappedBuffer[0], buffer, size);
+	CMD_LIST->SetGraphicsRootConstantBufferView(0, GetGpuVirtualAddress(0));
+}
+해석은 이 전역 데이터는 한번만 넘겨줄 것이기 때문에 PushData 처럼 _mappedBuffer의 인덱스를 이것저것 바꿀 필요없고 그냥 0번째 인덱스에 넣으면 되고, _currentIndex를 증가시켜 
+나가는것도 필요없습니다. 이 함수를 이용해서 Light를 넘겨줄수 있을겁니다.
+
+그리고 ConstantBuffer.h 에서 enum class CONSTANT_BUFFER_TYPE 으로 필요할때 원하는 타입의 상수 버퍼를 가져오고 있었는데 여기에 GLOBAL 도 추가해주겠습니다.
+enum class CONSTANT_BUFFER_TYPE : uint8
+{
+	GLOBAL,
+	TRANSFORM,
+	MATERIAL,
+	END
+};
+이러면 나중에 Light 에 관련해서 수정하고 싶을때 CONST_BUFFER(CONSTANT_BUFFER_TYPE::GLOBAL)로  가져와서 SetGlobalData 로 수정할수 있을겁니다.
+
+이렇게 해준뒤 다시 Light 를 보겠습니다.
+현재 Light 클래스의 내용중 FinalUpdate 에서는 그냥 Transform::position 을 설정해주고 있는데 여기서 Render 같은걸 해서 바로 데이터를 넘겨주지 않는이유는 
+LightParam 이 LightInfo 50개 까지 한번에 줄수 있도록 만들었기 때문에 이 Light 를 관리해주는 상위 오브젝트에서 LightParam을 채워서 한번에 Render 해줘야 합니다.
+
+그럼 어디서 Render를 해줘야 할지를 찾아보니 SceneManager 에서 임시로 만들었던 Render 가 있습니다. 이 함수에서는 활성화된 Scene 에서 게임오브젝트들을 순회하면서
+Camera 컴포넌트가 있는 게임오브젝트를 찾아 Render 해주고 있습니다.
+Light 도 비슷하게 게임 오브젝트를 순회해서 Light 컴포넌트가 있는 오브젝트를 Render 해주면 될것 같습니다. 
+그런데 이 작업을 지금의 SceneManager 가 아니라 Scene 에서 하도록 이전 해주는게 좋겠습니다.
+
+
+
+void Scene::Render()
+{
+	PushLightData()
+
+	for (auto& gameObject : _gameObjects)
+	{
+		if (gameObject->GetCamera() == nullptr)
+			continue;
+
+		gameObject->GetCamera()->Render();
+	}
+}
+Scene 으로 이전하면서 GetGameObject 같은걸로 가져오지 않아도 Scene 자체가 들고 있는 멤버 변수이다 보니 간략화 할 수 있습니다. 그리고 지금 GetCamera 를 할때 에러가 뜨는데 
+이유는 Scene 에서 Camera 가 뭔지 몰라서 그런것이니깐 include 해줍니다.
+ 
+지금 한 이전은 카메라를 렌더하는부분을 이전한것이고 원래 이번 강의의 주제인 Light 도 적용해볼겁니다. 
+우선 Scene::Render 의 카메라를 렌더하는 코드 전에 LightParam 에 필요한 만큼의 LightInfo를 추가하는 코드를 작성할겁니다. 
+
+void Scene::PushLightData()
+{
+	LightParams lightParams = {};
+
+	for (auto& gameObject : _gameObjects)
+	{
+		if (gameObject->GetLight() == nullptr)
+			continue;
+
+		const LightInfo& lightInfo = gameObject->GetLight()->GetLightInfo();
+
+		lightParams.lights[lightParams.lightCount] = lightInfo;
+		lightParams.lightCount++;
+	}
+
+	CONST_BUFFER(CONSTANT_BUFFER_TYPE::GLOBAL)->SetGlobalData(&lightParams, sizeof(lightParams));
+}
+해석하면 일단 나중에 ConstantBuffer->SetGlobalData 의 인자로 들어갈 빈 LightParams 를 만들고나서 Scene이 들고 있는 게임오브젝트를 순회해 Light 컴포넌트를 들고 있는 오브젝트의
+LightInfo를 lightParams.lights의 0번째 인덱스부터 채워줍니다. 그리고 SetGlobalData 로 전역 상수버퍼로 데이터를 푸시해주었습니다.
+이렇게 구성하면 PushLightData 는 Scene::Render 할때 한 프레임에 딱 한번 실행되는걸 알수 있고
+이제 엔진에서는 Light 를 적용할 준비가 되었고 이제 이 데이터를 해석해줄 쉐이더를 프로그래밍 해야합니다. 
+
+
+우선 쉐이더 정돈부터 다시 할겁니다. 
+먼저 
+cbuffer TRANSFORM_PARAMS : register(b0)
+{
+    row_major matrix matWVP;
+};
+여기서 WVP를 한번에 묶어서 다루고 있었습니다. 바로 Screen 변환까지 가는 용도라면 상관없습니다. 그런데 W, V, P 변환들 따로 하고 싶던가 WV 변환만 하고 싶던가 할 때 가 있을수 
+있습니다. TransformParams 를 EnginePch 에서 정의하고 있었는데 이걸 수정하겠습니다.
+struct TransformParams
+{
+	Matrix matWorld;
+	Matrix matView;
+	Matrix matProjection;
+	Matrix matWV;
+	Matrix matWVP;
+};
+이 TransformParams 가 활용되는 코드는 Transform::PushData 에서 입니다. 
+void Transform::PushData()
+{
+	TransformParams transformParams = {};
+	transformParams.matWorld = _matWorld;
+	transformParams.matView = Camera::S_MatView;
+	transformParams.matProjection = Camera::S_MatProjection;
+	transformParams.matWV = _matWorld * Camera::S_MatView;
+	transformParams.matWVP = _matWorld * Camera::S_MatView * Camera::S_MatProjection;
+
+	CONST_BUFFER(CONSTANT_BUFFER_TYPE::TRANSFORM)->PushData(&transformParams, sizeof(transformParams));
+}
+이렇게 수정을 했는데 각각 월드, 뷰, 프로젝션 , 월드*뷰, 월드*뷰*프로젝션 다섯가지의 변환 행렬들을 모두 들고 있는 transformParams 을 PushData 해주었습니다. 
+그럼이제 이 형식에 맞게 쉐이더를 수정해야 하겠습니다.
+
+TRANSFORM_PARAMS 에서 matWVP 만 가지고 있던걸 이제 각각의 행렬중에 고를수 있도록 수정했습니다.
+cbuffer TRANSFORM_PARAMS : register(b1)
+{
+    row_major matrix g_matWorld;
+    row_major matrix g_matView;
+    row_major matrix g_matProjection;
+    row_major matrix g_matWV;
+    row_major matrix g_matWVP;
+};
+
+그리고 Light 클래스에서 만들었던 LightColor, LightInfo, LightParams 를 쉐이더에서도 똑같이 받아주도록 추가합니다.
+struct LightColor
+{
+    float4      diffuse;
+    float4      ambient;
+    float4      specular;
+};
+
+struct LightInfo
+{
+    LightColor  color;
+    float4	    position;
+    float4	    direction;
+    int		    lightType;
+    float	    range;
+    float	    angle;
+    int  	    padding;
+};
+
+cbuffer GLOBAL_PARAMS : register(b0)
+{
+    int         g_lightCount;
+    float3      g_lightPadding;
+    LightInfo   g_light[50];
+}
+우리가 Scene::Render 에서 PushLightData() 로 넘겨준 빛 오브젝트들의 데이터를 그대로 받아주고 있습니다.
+
+그런데 이제 쉐이더 파일의 코드를 보니까 쉐이더 함수에 넣어줄 데이터들을 정의하는 부분이 너무 길어졌습니다. 그래서 쉐이더 파일 분할을 해볼겁니다.
+3가지로 분할해줄 건데 원래 있던 default, 파라미터들을 관리해줄 params, 유틸리티들을 관리할 utils 로 분할해서 프로젝트에 추가해주겠습니다.
+
+분할해서 추가하는 작업은 쉐이더에서 헤더 파일처럼 쓴다는 느낌인데 CPP 파일에서는 헤더가 중복 되지 않도록 #pragma once 를 사용했는데 쉐이더에서는 이게 작동 되지 않는다고 합니다. 
+그래서 이 pragma once 기능을 풀어서 쓰는 
+#ifndef _파일_설명_
+#define _파일_설명_
+	내용
+	내용
+	"
+	"
+#endif
+이런 형식으로 if not define _파일_설명_ : 이 파일이 정의되지 않았다면 define 과 endif 사이의 내용을 추가한다는 의미입니다. 
+
+ifndef 방식으로 params.hlsli 파일에서 적용을 하고 이 파일의 내용은 파라미터에 관한 내용들만 모아 두었고 
+default.hlsli 에서 파라미터 관련 내용은 지우고 여기도 ifndef 을 적용합니다. 그리고 #include "params.hlsli" 로 추가 해줍니다.
+
+default.hlsli 에서 VS_IN 과 VS_OUT 의 내용을 수정합니다.
+struct VS_IN
+{
+    float3 pos : POSITION;
+    float2 uv : TEXCOORD;
+    float3 normal : NORMAL;
+};
+
+struct VS_OUT
+{
+    float4 pos : SV_Position;
+    float2 uv : TEXCOORD;
+    float3 viewPos : POSITION;
+    float3 viewNormal : NORMAL;
+};
+VS_IN 에서는 normal 을 받아주고 VS_OUT에서는 view 스페이스에서의 position과 normal이 반환 되도록 해주었는데 이 이유는 나중에 나옵니다.
+
+여기서 쉐이더의 입력값을 변경하면 다시 프로젝트의 Shader 클래스도 맞춰주도록 체크하는걸 습관화 해야합니다. 확인해보니 이전 시간에 Vertex 스트럭쳐를 수정할때 normal 과 tangent를 추가 
+해주고 Shader 클래스에도 적용 시켜놨었습니다.
+
+VS_IN 에서의 pos 가 VS_OUT 에서는 SV_Position 이라는 float4 값으로 변환되는데 공식문서에 그렇다고 기재 되어있습니다.
+
+그리고 파라미터를 정의 하면서 왠지 모르게 LightColor 의 성분들을 float4로 만들었고, LightInfo, GLOBAL_PARAMS 의 성분들중 padding 이라는 걸 끼워 넣어놨었습니다.
+이 잉여 데이터들은 심지어 사용도 안할 건데 왜 끼워놨느냐를 알아볼겁니다. 
+
+마이크로 소프트 공식문서에서 Packing Rule 이라는게 있습니다. 
+어떤 구조체를 만들어서 메모리에 올릴때 메모리의 정렬순서 같은 느낌으로 이해하면되는데, 내용을 약간 읽어보면 데이터는 기본적으로 4-byte 바운더리를 지키지만 HLSL 에서는 데이터가 16-byte
+가 넘어가면 안된다는 이야기를 하고 있습니다.
+기본적으로 4바이트 바운더리를 지킨다는것은 구조체의 내용을 4바이트 보다 적은 데이터타입이나 4바이트 보다 큰 데이터타입을 사용해도 실질적으로 4바이트 단위로 끊어서 읽는다는 이야기 이고
+HLSL 에서 16 바이트 바운더리를 넘어가지 못한다는게 무슨 말인지 예시로 보면 
+//  2 x 16byte elements
+cbuffer IE
+{
+    float4 Val1;
+    float2 Val2;  // starts a new vector
+    float2 Val3;
+};
+4 바이트 짜리 float를 4개 사용하는 Val1 과 2개를 사용하는 Val2, Val3 순으로 이루어진 구조체는 16 x 2 로 범위가 잡힙니다. 그러면 그냥 각각 바이트수를 더하면 되는건가 싶은데 다음 예제를 보면
+//  3 x 16byte elements
+cbuffer IE
+{
+    float2 Val1;
+    float4 Val2;  // starts a new vector
+    float2 Val3;  // starts a new vector
+};
+Va1 과 Val2 의 타입을 서로 바꿨을 뿐인데 16 x 3 으로 범위가 잡힙니다.
+여기서 16바이트 바운더리를 넘을수 없다는 말의 의미를 알 수 있는데 첫번째 예제에서는 16 바이트 짜리 Val 이 한 바운더리를 사용하고 두번째 바운더리의 절반씩을 Val2, Val3 가 사용해서 
+두개의 바운더리로 정리가 되었는데 
+두번째 예제에서는 첫 바운더리의 8바이트를 Val1 이 사용하고 나서 바운더리의 남은 공간이 8바이트인데 비해 Val2 의 크기는 16바이트로 범위를 초과하기때문에 바운더리1 의 남은 8바이트는 
+비어있는 채로 두고 바운더리2를 새로 잡아서 Val2를 할당합니다. 바운더리 2 가 또 꽉찼으니 바운더리 3를 잡아서 8바이트의 Val3 를 할당하고 있는겁니다.
+
+우리가 작성한 코드대로 차곡차곡 저장되는게 아니라 중간에 빈공간도있고 이렇게 멋대로 처리되는이유는 하드웨어적으로 이렇게 하는게 성능이 더 좋기 때문이라고 합니다.
+
+이런 규칙이 HLSL 즉 쉐이더 측에서의 규칙인데 우리가 이걸 신경쓰지 않고 그냥 진행한다고 하면 데이터 순서가 어긋날 수 있습니다.
+CPP 쪽에서 작성한 LightParams 와 쉐이더 쪽에서 받아들이는 GLOBAL_PARAMS 의 형태가 달라져서 제대로 인식이 안되는겁니다.
+struct LightParams
+{
+	uint32		lightCount;
+	Vec3		padding;
+	LightInfo	lights[50];
+};
+
+cbuffer GLOBAL_PARAMS : register(b0)
+{
+    int         g_lightCount;
+    float3      g_lightPadding;
+    LightInfo   g_light[50];
+}
+ 
+이 두가지 구조체를 비교해서 padding 부분이 없다고 생각해보면 CPP 코드인 LightParams 는 uint32 인 lightCount 다음 바로 이어서 lights를 저장 할 수 있고 
+params.hlsli 의 GLOBAL_PARAMS 에서는 g_lightCount 다음 g_light 가 덩치가 너무 크다보니 12바이트의 공간을 비워두고 다음 바운더리부터 저장을 시작하게 되는데 
+이 비어있는 12바이트 만큼 cpp 코드와 쉐이더 코드의 차이가 발생하게 됩니다.
+
+이런 부분을 쉽게 생각하면 쉐이더로 넘길 정보들은 16 바이트 단위로 정렬해서 넘겨준다고 생각하면 되겠습니다.
+
+LightColor 의 내용물을 Vec4 타입들로 만든것도 cpp 쪽 과 쉐이더의 저장 구조를 맞춰주기 위한것입니다. 만약 Vec3 들로 만들었다면 각 내용물들 사이에 4바이트의 
+패딩들을 일일히 끼워 넣어줘야 할겁니다.
+
+이런 내용을 알고 위에서 만들었던 Light 클래스의 구조체들을 다시 보면 
+LightColor도 16 바이트씩을 사용하는 원소들 3개로 이루어져있고 LightInfo 도 LightColor(16x3), position(16), direction(16), lightType(4), range(4), angle(4), padding(4)
+로 16 바이트의 배수로 딱 맞춰 놨습니다. LightParams 에서 LightInfo를 50 짜리 배열로 사용할때 LightInfo 자체가 16 바이트의 배수이기 때문에 손쉽게 사용할수있습니다.
+LightParams 는 lightCount(4), padding(12), lights(LightInfo) 로 이것도 16바이트의 배수로 설정이 되어있는겁니다.
+여기까지 padding을 사용하는 이유에 대해 알아 봤고 
+
+다음으로 쉐이더 함수를 보겠습니다. 
+우선 이전에 VS_MAIN에서는 W,V,P 변환이 모두 완료된 VS_OUt 을 반환하고 있었는데 이번에 VS_IN에서도 normal을 추가했고 VS_OUT 에서도 viewPos, viewNormal 을 추가 
+했기때문에 이 부분을 어떻게 채워주는지를 보겠습니다. 
+
+VS_OUT VS_Main(VS_IN input)
+{
+    VS_OUT output = (VS_OUT)0;
+
+    output.pos = mul(float4(input.pos, 1.f), g_matWVP);
+
+    output.uv = input.uv;
+
+    output.viewPos = mul(float4(input.pos, 1.f), g_matWV).xyz;
+    output.viewNormal = normalize(mul(float4(input.normal, 0.f), g_matWV).xyz);
+
+    return output;
+}
+
+output.pos 와 output.uv 는 이전과 마찬가지로 input.pos 에 마지막 1.f 를 추가한 벡터에 g_matWVP 를 곱해주고 output.uv는 input.uv를 그대로 주고 있습니다.
+이부분은 정점으로 이루어질 물체의 position과 텍스쳐가 매핑될 좌표를 설정하는 부분이라 그대로 적용이 되고 
+새로 추가된 viewPos, viewNormal 을 어떻게 채워주는지를 보면 viewPos 는 input의 pos에 마지막에 1.f 를 넣어주고 있는데 행렬변환 시간에 마지막에 1을 넣으면 Transition
+값을 가지게 되서 위치정보도 들고 있을 수 있었고 거기에 W,V 까지만 계산한 View 스페이스에서의 Pos를 계산하고있습니다. 
+viewNormal은 위치 정보말고 방향값만 가지고 있는 벡터이기 때문에 input의 normal값의 마지막을 0.f 로 설정한겁니다.
+지금설명한 VS_Main 은 말그대로 Vertex Shader 를 계산하는 함수 정점데이터를 계산해준겁니다. 이 데이터를 다시 Rasterize 를 통해 비율에 맞춰 평균화를 해주고 
+PS_Main 함수는 Pixel Shader 함수 각 픽셀마다의 계산을 하는 함수인겁니다.
