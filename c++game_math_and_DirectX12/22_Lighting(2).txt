@@ -458,3 +458,376 @@ output.pos 와 output.uv 는 이전과 마찬가지로 input.pos 에 마지막 1
 viewNormal은 위치 정보말고 방향값만 가지고 있는 벡터이기 때문에 input의 normal값의 마지막을 0.f 로 설정한겁니다.
 지금설명한 VS_Main 은 말그대로 Vertex Shader 를 계산하는 함수 정점데이터를 계산해준겁니다. 이 데이터를 다시 Rasterize 를 통해 비율에 맞춰 평균화를 해주고 
 PS_Main 함수는 Pixel Shader 함수 각 픽셀마다의 계산을 하는 함수인겁니다.
+
+왜 갑자기 VS_OUT 에서 viewNormal 을 받아주는지 이유가 궁금합니다. 
+Light 개론 시간에 빛의 세가지 성분을 계산하기 위해 필요했던 요소들이 몇가지 있었는데 기본적으로 빛을 계산해서 적용시켜줄 그 좌표점 그리고 그 좌표의 normal 벡터
+부터 알아야할것입니다. 빛이 들어오는 벡터는 Light 오브젝트의 정보에 있을것이고 카메라의 위치는 또 카메라 오브젝트에 정보가 있을겁니다. 
+게임 오브젝트 자신에게서 얻을 데이터는 좌표와 normal 벡터인겁니다. 
+
+여기서 또 한가지 궁금점이 이 빛을 계산해서 각 픽셀에 색을 결정하는 연산을 하는 좌표계는 어디일까요?
+게임 오브젝트는 일단 로컬 좌표계가 있었고 World 좌표로 변환을 했다가 카메라 기준으로 변환하는 View 변환이 있었는데 이 세가지 좌표계중 어딘가에서는 연산을 해줘야 할텐데 
+사실 정해진건없고 각자 편한 좌표계에서 해주면 되는데 일반적으로 World나 View 쪽에서 해주는게 일반적이라고 합니다. 
+중요한 점은 만약 normal 벡터는 World 기준으로 구하고 픽셀 좌표는 View 기준으로 구한다면 당연히 안됩니다. 즉 좌표계를 하나로 통일해서 구해줘야합니다.
+
+기본적으로 World 좌표계에서 구해주는게 더 일반적이긴 하나 View 좌표계를 기준으로 구하는 것도 괜찮은데 View 를 기준으로 하면 한가지 장점이 있습니다.
+카메라의 좌표를 추가적으로 넘길 필요가 없어진다는 겁니다. View 좌표계에서는 카메라를 원점으로 하는 좌표계이기 때문에 View 좌표계의 원점이 카메라가 되는겁니다.
+
+그래서 지금 코드는 View 스페이스를 기준으로 계산해주고 있습니다.그래서 VS_OUT 에 추가한 viewPos 와 viewNormal 은 view 스페이스에서 연산하기 쉽도록 미리 변환을 해준겁니다.
+pos와 normal을 제외한 나머지 값들도 view 스페이스로 변환을 해줘야 합니다.
+
+다시 또 강조 해보자면 VS_Main 에서 구한 VS_OUT 을 이제 PS_Main 의 인자로 넘겨주게 되는데 여기서 viewNormal, viewPos를 사용할겁니다. 
+정점 쉐이더(VS)에서 로컬 좌표를 받아 필요한 변환을 해주고 레스터라이즈를 해서 정점들사이의 공간을 보간 해준다음 픽셀 세이더(PS) 에서 그 픽셀들을 하나씩 색상 계산을 해줍니다. 
+
+PS_Main 함수를 보겠습니다. 이전에는 각픽셀의 색상을 텍스쳐와 매핑된 색상을 입혀주었는데 
+이번 시간에는 빛을 적용시킨 결과를 더 알기 쉽게 하기 위해 우선 텍스쳐의 색상 계산은 주석처리하고 float4(1.f, 1.f, 1.f, 1.f);
+이렇게 아예 새하얀 색으로 물체의 색을 정해주겠습니다. 이 하얀 물체가 빛의 도입으로 어떻게 색이 변하는지를 보면 됩니다.
+   float4 color = float4(1.f, 1.f, 1.f, 1.f);
+	return color;
+
+다음으로 빛을 도입해 색상을 조절해보는 코드를 보겠습니다.
+    LightColor totalColor = (LightColor)0.f;
+
+    for (int i = 0; i < g_lightCount; ++i)
+    {
+         LightColor color = CalculateLightColor(i, input.viewNormal, input.viewPos);
+         totalColor.diffuse += color.diffuse;
+         totalColor.ambient += color.ambient;
+         totalColor.specular += color.specular;
+    }
+
+    color.xyz = (totalColor.diffuse.xyz * color.xyz)
+        + totalColor.ambient.xyz * color.xyz
+        + totalColor.specular.xyz;
+물체의 색에 연산해줄 totalColor 는 Scene에서 가지고 있는 모든 빛오브젝트를 가져와서 앞으로 만들어줄 CalculateLightColor 함수를 통해 각
+diffuse, ambient, specular 값을 채워주고 마지막에 픽셀의 색상 color 에 적용해주고 있습니다.
+여기서 조금 자세히 보면 diffuse, ambient 는 각 값에 물체의 색상을 곱해서 정해주고 있는 반면, specular 는 그냥 자기 자신의 색을 더해주고 있는걸 알 수 있습니다.
+specular 는 정반사광으로 물체의 색은 상관없이 빛자체의 색이 반사되는것이다 보니 그렇습니다.
+사실 여기 빛의 색상 계산은 정해진 공식이 없고 각자 수단과 방법을 가리지 않고 간편하고 빠르게 계산할 수 있으면 된다고 합니다.
+
+다음으로 할 것은 CalculateLightColor 함수를 구현하는 부분인데 빛 개론시간에 알아본 계산하는 방법을 잘 담아주면 되겠습니다.
+
+우선 CalculateLightColor 함수가 받고있는 인자는 첫번째 지금이 몇번째 빛오브젝트인지에 대한 인덱스 번호, 두번째로 VS_Main에서 연산된 정점데이터의 viewNormal, 
+세번째로 마찬가지 정점데이터의 viewPos 를 받고 있습니다. 
+이 함수의 목적은 물체의 본래 RGB 값이 있고 빛에 따라 더 곱하거나 더해질 양(diffuse, ambient, specular) 을 구하는게 목적입니다. 
+LightColor CalculateLightColor(int lightIndex, float3 viewNormal, float3 viewPos)
+{
+    LightColor color = (LightColor)0.f;
+
+    float3 viewLightDir = (float3)0.f;
+
+    float diffuseRatio = 0.f;
+    float specularRatio = 0.f;
+    float distanceRatio = 1.f;
+
+    if (g_light[lightIndex].lightType == 0)
+    {
+        // Directional Light
+        viewLightDir = normalize(mul(float4(g_light[lightIndex].direction.xyz, 0.f), g_matView).xyz);
+        diffuseRatio = saturate(dot(-viewLightDir, viewNormal));
+    }
+    else if (g_light[lightIndex].lightType == 1)
+    {
+        // Point Light
+        float3 viewLightPos = mul(float4(g_light[lightIndex].position.xyz, 1.f), g_matView).xyz;
+        viewLightDir = normalize(viewPos - viewLightPos);
+        diffuseRatio = saturate(dot(-viewLightDir, viewNormal));
+
+        float dist = distance(viewPos, viewLightPos);
+        if (g_light[lightIndex].range == 0.f)
+            distanceRatio = 0.f;
+        else
+            distanceRatio = saturate(1.f - pow(dist / g_light[lightIndex].range, 2));
+    }
+    else
+    {
+        // Spot Light
+        float3 viewLightPos = mul(float4(g_light[lightIndex].position.xyz, 1.f), g_matView).xyz;
+        viewLightDir = normalize(viewPos - viewLightPos);
+        diffuseRatio = saturate(dot(-viewLightDir, viewNormal));
+
+        if (g_light[lightIndex].range == 0.f)
+            distanceRatio = 0.f;
+        else
+        {
+            float halfAngle = g_light[lightIndex].angle / 2;
+
+            float3 viewLightVec = viewPos - viewLightPos;
+            float3 viewCenterLightDir = normalize(mul(float4(g_light[lightIndex].direction.xyz, 0.f), g_matView).xyz);
+
+            float centerDist = dot(viewLightVec, viewCenterLightDir);
+            distanceRatio = saturate(1.f - centerDist / g_light[lightIndex].range);
+
+            float lightAngle = acos(dot(normalize(viewLightVec), viewCenterLightDir));
+
+            if (centerDist < 0.f || centerDist > g_light[lightIndex].range) // 최대 거리를 벗어났는지
+                distanceRatio = 0.f;
+            else if (lightAngle > halfAngle) // 최대 시야각을 벗어났는지
+                distanceRatio = 0.f;
+            else // 거리에 따라 적절히 세기를 조절
+                distanceRatio = saturate(1.f - pow(centerDist / g_light[lightIndex].range, 2));
+        }
+    }
+
+    float3 reflectionDir = normalize(viewLightDir + 2 * (saturate(dot(-viewLightDir, viewNormal)) * viewNormal));
+    float3 eyeDir = normalize(viewPos);
+    specularRatio = saturate(dot(-eyeDir, reflectionDir));
+    specularRatio = pow(specularRatio, 2);
+
+    color.diffuse = g_light[lightIndex].color.diffuse * diffuseRatio * distanceRatio;
+    color.ambient = g_light[lightIndex].color.ambient * distanceRatio;
+    color.specular = g_light[lightIndex].color.specular * specularRatio * distanceRatio;
+
+    return color;
+}
+이게 CalculateLightColor 함수의 내용인데 꽤 길어서 이해하기 어려워 보이지만 하나씩 차근차근 해석해보면 이미 아는 내용일겁니다.
+우선 함수 초반에 값을 설정해주기 위한 변수들을 생성하고 있습니다.
+    LightColor color = (LightColor)0.f;
+
+    float3 viewLightDir = (float3)0.f;
+
+    float diffuseRatio = 0.f;
+    float specularRatio = 0.f;
+    float distanceRatio = 1.f;
+이중 color 라는 변수는 함수내에서 모든 연산을 총합해서 리턴할 값입니다. viewLightDir 이라는 변수는 Light Direction 빛의 방향입니다. 그런데 VS_Main에서 
+viewNormal과 viewPos 처럼 View 스페이스 기준으로 연산을 하고 있었으니깐 빛의 방향도 view 스페이스 기준으로 가지고 있을 viewLightDir 입니다. 
+다음으로 diffuseRatio 는 사실상 우리가 연산해줄 diffuse 값입니다. ambient 가 없는 이유는 ambient(환경광)은 연산과 상관없이 
+상수같은 느낌으로 더해줄 물체의 최소밝기이기 때문에 따로 구해주지는 않습니다. distanceRatio는 포인트 라이트와 스포트 라이트 의 경우 광원과의 거리에 따라
+밝기가 달라지는데 이값을 가지고 있을 변수입니다. 
+
+변수들을 정의 해줬고 다음으로는 if else 문으로 각 광원들의 타입을 체크해주고 있습니다. 빛의 타입에 따라 계산하는 식이 달라졌었습니다. 
+먼저 만약 빛의 타입이 Directional 이라면 이렇게 될겁니다.
+    if (g_light[lightIndex].lightType == 0)
+    {
+        // Directional Light
+        viewLightDir = normalize(mul(float4(g_light[lightIndex].direction.xyz, 0.f), g_matView).xyz);
+        diffuseRatio = saturate(dot(-viewLightDir, viewNormal));
+    }
+디렉셔널 라이트에서는 specularRatio와 distanceRatio를 그대로 두고 있습니다. 태양같이 빛을 저 멀리서 일정한 방향으로 비춰주고 있는 타입의 빛이기 때문인데
+viewLightDir을 구하는 코드를 보면 g_light에서 이번 인덱스의 빛 오브젝츠를 가져와서 그 direction을 꺼내는데 이 빛 오브젝트는 이미 월드 변환을 한상태이기 때문에
+거기에 g_matView를 곱하면 W,V 변환까지 마친 상태이고 거기에 normalize로 단위 벡터로 만들어 주었습니다. 
+diffuseRatio를 구하는 코드는 dot 이라는 함수는 내적함수를 말하는 것이었고 -viewLightDir과 viewNormal을 내적을 해주고 있습니다.
+그리고 그 내적한 값을 saturate 해주면 이 값이 무조건 0~1 사이에 있도록 보정을 해준다고 했었습니다. 즉 만약 내적값이 음수로 나온다면 그냥 0으로 밀어버린다는 이야기입니다.
+빛 개론에서 디렉셔널 라이트를 계산해주는것은 빛의 입사각과 normal 이 일치하면 가장 밝고 직각이 될수로 어두워진다고 했고 그걸 cosθ값으로 알수 있고 
+cosθ 를 쉽게 구하는 방법이 단위 벡터들을 내적하는것이라고 배웠고 그걸 표현한 코드입니다.
+
+이렇게 디렉셔널 타입일때 구한 값을 어떻게 적용시켜주고 있는지를 보려면 함수의 거의 밑에 코드를 보면되는데
+    color.diffuse = g_light[lightIndex].color.diffuse * diffuseRatio * distanceRatio;
+    color.ambient = g_light[lightIndex].color.ambient * distanceRatio;
+    color.specular = g_light[lightIndex].color.specular * specularRatio * distanceRatio;
+각 세가지 성분들의 원래 값에 ratio를 곱해주고 있습니다. 이말은 원래 빛의 세기에서 각 성분들 곱해주고 있다는이야기입니다.
+조명의 색이 만약 빨간색 이었다면 그 빨간색 에 비율들을 곱해주는겁니다.
+그리고 디렉셔널 라이트에서는 distanceRatio를 건드려주고 있지않은데 디렉셔널 라이트 자체가 모든 곳에서 같은 밝기를 가지고 있다고 표현되기 때문에 초기값인 1.f를 그대로 
+사용하고 포인트 라이트나 스포트 라이트에서는 distanceRatio를 필요에 따라 수정해서 사용하게 될겁니다.
+
+ambient 값은 처음에 설정한 값에 distanceRatio 만 곱해주고 
+specular 는 if 문 밖에서 따로 구해주는데 
+    float3 reflectionDir = normalize(viewLightDir + 2 * (saturate(dot(-viewLightDir, viewNormal)) * viewNormal));
+    float3 eyeDir = normalize(viewPos);
+    specularRatio = saturate(dot(-eyeDir, reflectionDir));
+    specularRatio = pow(specularRatio, 2);
+reflectionDir 는 빛이 물체에 닿고 난 다음 반사되는 빛의 각도인데 처음의 빛의 각도에서 x축 반전을 해준 벡터입니다. 
+eyeDir 은 자신의 픽셀위치에서 카메라까지의 단위 벡터를 의미하는데 world 좌표에서는 카메라의 위치 좌표에서 물체의 위치좌표를 뺀 벡터를 단위벡터화 시키면 됩니다.
+그런데 지금은 view 변환을 거친 view 좌표계입니다. view 좌표계 자체가 카메라를 중심으로 모든 오브젝트들의 좌표를 변환한 좌표계인 만큼 이 view 좌표계의 원점이 바로 
+카메라의 위치좌표인겁니다. 그래서 viewPos 는 물체의 view 좌표계에서의 위치이지만 이걸 벡터로 바라보면 카메라에서 물체를 향한 벡터가 됩니다. 이걸 eyeDir 이라고 부릅니다.
+그런데 우리가 구하고 싶던 벡터는 물체에서 카메라로 가고 있는 벡터 cameraDir 을 구하고 싶었으니깐 eyeDir에 - 를 곱해주면 됩니다.
+이제 specularRatio에 -eyeDir와 reflectionDir 의 내적으로 값을 구해주고 있습니다.
+여기까지가 정반사광을 계산한 것인데 그 밑에 pow 를 사용한 계산이 하나 더 있습니다. 이부분은 옵션같은건데 
+pow 가 무슨함수이냐면 제곱을 해주는 함수인데 즉 위의 코드는 내적을 통해 구한 specularRatio를 2제곱 해준 것입니다.
+specular 값이 cos 값이다 보니 파동 모양으로 되어 있을건데 보다 가파르게 표현하고 싶어서 이런 처리를 해줬다고 할 수 있습니다.
+specularRatio 값 자체가 내적을 한 결과물이다 보니 0~1 사이의 값인데 이걸 제곱한다면 가장 밝을 1일때를 제외하고 나머지 범위의 값들은 더욱 어두워지는 효과가 있습니다. 
+이 제곱을 하지않으면 반사광을 표현하는 부분이 너무 넓게 퍼져있을수 있는데 이걸 좀더 그럴듯하게 다듬어 주는겁니다.
+
+이렇게 디렉셔널 라이트에서의 diffuse, ambient, specular 를 구했고 
+다른 빛타입인 포인트 라이트, 스포트 라이트의 경우 viewLightDir, diffuseRatio, distanceRatio 를 각각 알맞게 구해줄겁니다. 
+
+포인트 라이트의 경우 디렉셔널 라이트와 다르게 광원이 어디있는지가 중요했고 빛의 방향도 빛과 물체간의 위치에 따라 달라졌습니다. 거기에 빛에서 멀어질수록 빛의 세기가 
+약해지기도 하고 일정 범위를 넘어가면 아예 빛이 닿지 않는 성질도 있습니다.
+        // Point Light
+        float3 viewLightPos = mul(float4(g_light[lightIndex].position.xyz, 1.f), g_matView).xyz;
+        viewLightDir = normalize(viewPos - viewLightPos);
+        diffuseRatio = saturate(dot(-viewLightDir, viewNormal));
+
+        float dist = distance(viewPos, viewLightPos);
+        if (g_light[lightIndex].range == 0.f)
+            distanceRatio = 0.f;
+        else
+            distanceRatio = saturate(1.f - pow(dist / g_light[lightIndex].range, 2));
+첫줄부터 view 스페이스에서의 빛의 위치를 받아주고 있습니다.
+그리고 viewLightDir 을 구하고 있는데 디렉셔널에서는 direction을 따로 가지고 있던것과 다르게 viewPos 에서 viewLightPos를 빼준 벡터의 단위벡터로 구합니다.
+지금구한 viewLightDir 을 이용해 diffuseRatio를 구해줍니다. 이 구하는 방법은 나중에 스포트 라이트와 같은 방법입니다.
+다음으로 diffuseRatio를 구하는 과정인데 먼저 물체와 광원사이의 스칼라값을 구하는 distance 라는 함수를 사용했고 if else 문으로 예외 처리를 해주는데 
+light의 range가 0이면 distanceRatio를 0을 줘서 아무런 밝기가 없게 하고있습니다. 여기서 light.range는 광원의 빛이 닿는 범위인데 
+이 범위가 0이라는것은 광원에서 빛이 나지않는다는이야기 일겁니다.
+else 에서는 range가 0이 아닐테니까 광원에서 빛이 나오고 있는중입니다. 실제 거리/ 광원의 최대 범위 를 이용해서 distanceRatio를 구해주고 있습니다.
+이때 혹시 dist 가 range 보다 크다면 어떻게 될까요 이 말의 의미는 물체가 광원의 최대거리 밖에 있다는 의미이고 수식으로 보면 saturate 안의 값이 
+음수로 나올것이기 때문에 saturate에 의해 0으로 보정이 돠고 결국 distanceRatio = 0.f 라는 결과가 나옵니다. 
+distanceRatio는 거리에 의한 밝기 라는 의미도 있지만 또 빛이 비추는 범위에 있는가를 알수 있는값이기도 한겁니다.
+
+마지막 스포트 라이트를 살펴보면 좀 더 복잡하긴 하지만 사실 포인트 라이트에서 광원의 각도가 추가된 개념입니다.
+        // Spot Light
+        float3 viewLightPos = mul(float4(g_light[lightIndex].position.xyz, 1.f), g_matView).xyz;
+        viewLightDir = normalize(viewPos - viewLightPos);
+        diffuseRatio = saturate(dot(-viewLightDir, viewNormal));
+
+        if (g_light[lightIndex].range == 0.f)
+            distanceRatio = 0.f;
+        else
+        {
+            float halfAngle = g_light[lightIndex].angle / 2;
+
+            float3 viewLightVec = viewPos - viewLightPos;
+            float3 viewCenterLightDir = normalize(mul(float4(g_light[lightIndex].direction.xyz, 0.f), g_matView).xyz);
+
+            float centerDist = dot(viewLightVec, viewCenterLightDir);
+            distanceRatio = saturate(1.f - centerDist / g_light[lightIndex].range);
+
+            float lightAngle = acos(dot(normalize(viewLightVec), viewCenterLightDir));
+
+            if (centerDist < 0.f || centerDist > g_light[lightIndex].range) // 최대 거리를 벗어났는지
+                distanceRatio = 0.f;
+            else if (lightAngle > halfAngle) // 최대 시야각을 벗어났는지
+                distanceRatio = 0.f;
+            else // 거리에 따라 적절히 세기를 조절
+                distanceRatio = saturate(1.f - pow(centerDist / g_light[lightIndex].range, 2));
+        }
+내용을 보면 viewLightPos, viewLightDir, diffuseRatio를 구하는 방법이 포인트 라이트와 같습니다. 거기에 light.range 가 0일때 예외 처리해주는 부분까지도 같고 
+그 다음내용인 distanceRatio를 구하는 부분이 다른데
+우선 halfAngle 을 구하고 있습니다 광원의 최대각도의 절반입니다. viewLightVec는 view 스페이스에서 광원에서 물체까지의 벡터입니다. 비슷한 viewLightDir은 normalize 해준값이다 
+보니 그냥 다시 구해줬습니다. 
+다음 변수인 viewCenterLightDir 는 무슨 의미냐면 빛 오브젝트 자체가 바라보고있는 방향을 말하는데 비슷한 viewLightDir는 광원에서 물체 까지의 방향을 말한다면 지금이
+viewCenterLightDir는 물체 상관없이 빛 오브젝트의 방향입니다.
+centerDist 라는 변수는 viewLightVec 와 viewCenterLightDir 를 내적한 값인데 물체가 viewCenterLightDir 방향으로 얼마나 갔느냐에 대한 값입니다.
+이 centerDist 를 사용해서 1차적으로 distanceRatio 를 구해줄수 있는데 이 값이 최종값은 아닙니다. 
+lightAngle 은 viewCenterLightDir 에서 물체 로의 벡터 사이 각도가 얼마인지를 말하는데 viewLightvec를 단위벡터화 하고 (즉 viewLightDir)
+viewCenterLightDir 을 내적하면 그사이 각도의 cosθ 값이 나오고 코사인을 가지고 각도를 알수 있는 아크 코사인 함수 acos 으로 각도를 가져옵니다.
+
+그 다음 if else 문은 물체가 빛의 범위를 벗어났는지를 체크하는 부분입니다. 
+centerDist < 0.f 이부분은 물체가 광원에 뒷방향에 있는상태이고  centerDist > g_light[lightIndex].range 는 물체가 광원의 최대 범위 밖에 있는 상황입니다. 
+lightAngle > halfAngle 여기는 위에서 구했던 물체와 광원의 centerDir 사이의 각도가 광원의 최대 각도 밖에 있을경우입니다. 
+위 의 경우는 distanceRatio 를 모두 0으로 밀어서 빛이 닿지 않는걸 표현합니다. 
+이외의 상황 else 에서는 물체가 빛이 비추는 범위 안에 있으니 거리에 따라 세기를 조절해줍니다.
+
+
+
+이렇게 쉐이더 까지 완료 되었으니까 Light 클래스가 잘 작동하는지를 테스트해보고 싶어집니다. 
+
+먼저 환경설정을 좀 할건데 이전 프로그램보다 직관적이게 카메라를 0, 0, 0 원점에 두고 싶습니다. 
+카메라 같은 오브젝트들을 SceneManager::LoadTestScene에서 해주고 있었습니다. 
+다음으로 이번 실습에서는 큐브는 사용하지 않고 구만 하나 사용해줄겁니다. 구가 역시 normal의 변화를 보기 더 좋을거 같습니다. 
+구의 스케일은 그대로 (100.f, 100.f, 100.f) 고 position 을 (0.f, 0.f, 150.f) 정도로 세팅했습니다.
+
+다음은 오늘의 주제인 조명을 3가지 타입으로 세팅해줄겁니다.
+#pragma region Green Directional Light
+	{
+		shared_ptr<GameObject> light = make_shared<GameObject>();
+		light->AddComponent(make_shared<Transform>());
+		//light->GetTransform()->SetLocalPosition(Vec3(0.f, 150.f, 150.f));
+		light->AddComponent(make_shared<Light>());
+		light->GetLight()->SetLightDirection(Vec3(0.f, -1.f, 0.f));
+		light->GetLight()->SetLightType(LIGHT_TYPE::DIRECTIONAL_LIGHT);
+		light->GetLight()->SetDiffuse(Vec3(0.1f, 1.f, 0.1f));
+		light->GetLight()->SetAmbient(Vec3(0.f, 0.1f, 0.f));
+		light->GetLight()->SetSpecular(Vec3(0.1f, 0.1f, 0.1f));
+
+		scene->AddGameObject(light);
+	}
+
+#pragma endregion
+초록색 디렉셔널 라이트 입니다. Position 부분은 주석처리되어있는데 디렉셔널 라이트 자체가 광원 위치가 의미가 없기 때문이고 LightDirection 은 지면에 수직으로 쭉 
+내리쬐는 방향입니다. 3속성을 보면 diffuse 는 green은 만땅인 1.f 고 나머지 red, blue는 0.1f 씩 쪼금씩만 설정해줬습니다. ambient는 green만 0.1f 만큼 쬐금
+초록색을 줬습니다. specular 값은 약한 흰색으로 0.1f 씩 주었습니다.
+
+
+#pragma region Red Point Light
+	{
+		shared_ptr<GameObject> light = make_shared<GameObject>();
+		light->AddComponent(make_shared<Transform>());
+		light->GetTransform()->SetLocalPosition(Vec3(150.f, 150.f, 150.f));
+		light->AddComponent(make_shared<Light>());
+		//light->GetLight()->SetLightDirection(Vec3(0.f, -1.f, 0.f));
+		light->GetLight()->SetLightType(LIGHT_TYPE::POINT_LIGHT);
+		light->GetLight()->SetDiffuse(Vec3(1.f, 0.1f, 0.1f));
+		light->GetLight()->SetAmbient(Vec3(0.1f, 0.f, 0.f));
+		light->GetLight()->SetSpecular(Vec3(0.1f, 0.1f, 0.1f));
+		light->GetLight()->SetLightRange(10000.f);
+		//light->GetLight()->SetLightAngle(XM_PI / 4);
+		scene->AddGameObject(light);
+	}
+#pragma endregion
+빨간색 포인트 라이트 입니다. 포인트 라이트 부터는 광원의 위치가 필요하고 또 디렉셔널 라이트와 달리 LightRange 라는 값을 설정해야 합니다. 위치는 구의 오른쪽 위에 위치할것이고 
+
+#pragma region Blue Spot Light
+	{
+		shared_ptr<GameObject> light = make_shared<GameObject>();
+		light->AddComponent(make_shared<Transform>());
+		light->GetTransform()->SetLocalPosition(Vec3(-150.f, 0.f, 150.f));
+		light->AddComponent(make_shared<Light>());
+		light->GetLight()->SetLightDirection(Vec3(1.f, 0.f, 0.f));
+		light->GetLight()->SetLightType(LIGHT_TYPE::SPOT_LIGHT);
+		light->GetLight()->SetDiffuse(Vec3(0.f, 0.1f, 1.f));
+		//light->GetLight()->SetAmbient(Vec3(0.f, 0.f, 0.1f));
+		light->GetLight()->SetSpecular(Vec3(0.1f, 0.1f, 0.1f));
+		light->GetLight()->SetLightRange(10000.f);
+		light->GetLight()->SetLightAngle(XM_PI / 4);
+		scene->AddGameObject(light);
+	}
+#pragma endregion
+파란색 스포트 라이트입니다. 구의 왼쪽에 위치해 있을것이고 포인트 라이트와 거의 비슷 하지만 LightAngle 이라는 각도를 설정해줍니다.
+
+여기까지 했으면 아마 실행해도 괜찮을것 같아서 실행해보니까 
+
+쉐이더를 불러오지 못했다고 에러메세지가 뜨네요 
+아마도 쉐이더 파일들쪽에서 문제가 있는것 같은데 디버깅을 할때 쉐이더 쪽에서 문제가 생기면 해결하기가 좀더 어렵습니다.
+문제는 우리가 이번강의에서 처음으로 쉐이더 파일들을 헤더처럼 분리해서 관리하고 있었는데 params.hlsli 파일은 include해줬는데 CalculateLightColor 함수를 utils 에 만들고는
+막상 default.hlsli 에 include 해주지 않았었습니다.
+
+쉐이더 쪽에서 버그가 났을때 디버깅 팁으로 큰 기능 마다 주석 처리를 해보면서 실행을 해본다고 합니다. 그러면 어느 부분을 주석 했을때 잘 돌아 간다면 주석한 부분이 문제인것이고 
+거기서 또 조금씩 범위를 줄여가면서 주석하는 방법으로 버그를 잡는다고 합니다.
+
+아무튼 이렇게 쉐이더 쪽 버그를 잡고 나서 다시 디버깅으로 실행해보면
+TableDescriptorHeap::CommitedTable 에서 CMD_LIST->SetGraphicsRootDescriptorTable(0, handle) 에서 엑세스 위반이 일어났다는 에러메세지가 떴습니다.
+이 엑세스 위반 에러는 실제 서비스에서 서버쪽에 발생하면 정말 무서운 에러라고 합니다.
+문제의 원인은 RootSignature 에서 서명부분이 문제라고 합니다.
+RootSignature::CreateRootSignature 에서 
+    CD3DX12_ROOT_PARAMETER param[2];
+	param[0].InitAsConstantBufferView(static_cast<uint32>(CBV_REGISTER::b0)); // b0
+	param[1].InitAsDescriptorTable(_countof(ranges), ranges);
+이 코드인데 이전에는 param을 1개짜리 배열로 0번 인덱스만 사용했다가 지금은 0,1 인덱스 두개로 사용하고 있습니다.
+0번 인덱스는 그냥 ConstantBuffer 용으로 1번 인덱스를 TableDescriptorHeap 용도로 변경했는데 
+void TableDescriptorHeap::CommitTable()
+{
+	D3D12_GPU_DESCRIPTOR_HANDLE handle = _descHeap->GetGPUDescriptorHandleForHeapStart();
+	handle.ptr += _currentGroupIndex * _groupSize;
+	CMD_LIST->SetGraphicsRootDescriptorTable(0, handle);
+
+	_currentGroupIndex++;
+}
+SetGraphicsRootDescriptorTable의 첫번째 인자가 RootParameterIndex 인데 0번인 채 입니다 이부분을 1로 변경해줘야 합니다.
+
+이렇게 까지 버그를 잡아주었지만 빌드 통과후 실행해보니 예상한대로 빛의 효과가 나타나지 않고 있습니다. 
+아직 고쳐야 할 부분이 있습니다. 
+
+그런제 잠시 현재 프로그램의 배경색이 하늘색인것을 검은색으로 바꿔야 빛 효과가 더 두드러지게 보일것 같아서 변경해주려고 합니다. 
+이걸 어느 부분에서 하고 있었는지를 찾아보니까 일단 Engine::RenderBegin 에서 _cmdQueue->RenderBegin(&_viewport, &_scissorRect);를 해주고 있습니다. 
+또 이걸 타고 들어가니 이 함수 내에서 
+_cmdList->ClearRenderTargetView(backBufferView, Colors::LightSteelBlue, 0, nullptr);
+이부분에 LightSteelBlue 를 Black 으로 바꿔 주었습니다. 
+
+이제 다시 디버깅으로 돌아와서 지금처럼 빌드는 통과하지만 원하는결과가 나오지 않을때의 디버깅 하는방법은 
+아까 쉐이더 파일 디버깅 방법처럼 각 부품들을 하나씩 꺼보는겁니다. 
+
+의심되는 부분이 혹시 Light::FinalUpdate 에서 Transform 이 제대로 전달이 된것인지를 체크해봤습니다. 중단점을 설정하고 Transform 값을 체크해보니 이상한 값을 가지고 있습니다.
+
+Transform.h 로 가서 
+    cosnt Vec3& GetWorldPosition() { return _matWorld.Translation(); }
+
+	Vec3 GetRight() { return _matWorld.Right(); }
+	Vec3 GetUp() { return _matWorld.Up(); }
+	Vec3 GetLook() { return _matWorld.Backward(); }
+이런 부분이 있는데 
+밑의 부분은 _matWorld의 성분들을 복사 방식으로 꺼내고 있는데 _matWorld.Translation() 은 const & 방법으로 꺼내오고 있습니다. 
+이전에 배웠었는데 SimpleMath 에서 이 함수들은 임시값을 만들어서 그대로 리턴하는 방식이었고 이 임시값들은 스택 메모리에 있는 변수들이다 보니 참조를 하면 엉뚱한 메모리를 
+참조 하고 있게 되었었습니다.
+이 GetWorldPosition 의 반환타입을 Vec3 로 복사방식으로 바꿔 주겠습니다.
+
+이러면 의도한대로 결과물이 나왔습니다.
