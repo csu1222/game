@@ -1,0 +1,396 @@
+
+
+        24. Skybox
+
+
+스카이 박스가 무엇일까요 
+
+일반적인 3D 게임을 생각해보면 게임 화면에서 카메라를 위쪽을 보게하면 하늘이 보일겁니다. 지금까지 배운건 오브젝트와 카메라, 빛 같은걸 배웠고 
+이번에는 게임에서 하늘을 어떻게 표현할것인가에 대한 내용입니다. 
+
+하늘을 어떻게 표현할 것인가? 지금까지 배운 내용으로 생각해보면 우선 게임 오브젝트들이 있는 공간을 모두 커버할 커다란 구 형태 메쉬를 만들어서 
+거기에 하늘이 그려진 이미지파일을 텍스쳐로 매핑하면 이 커다란 구 안에 있는 오브젝트 에서 보기에 하늘처럼 보일것 같습니다.
+이런 아이디어는 지금까지 배운 내용안에서 매우 합리적인 방법입니다. 
+
+하지만 보통 게임에서 플레이어는 이동을 합니다. 그러다보면 결국 하늘 텍스쳐가 매핑된 구에 닿거나 아주 근접하게 될수 있고 이건 매우 어색한 상황입니다.
+
+이 예시에 카메라라는 개념을 더해보겠습니다. 원래 게임은 카메라 오브젝트가 있고 카메라가 찍는 범위의 월드를 2D 이미지로 투영시켜서 출력합니다. 
+카메라는 Direction 라고 보는 방향이 있고 pov 라는 값 만큼의 각도로 보고 또 near, far 라는 최소거리와 최대거리를 가지고 이 안의 물체들을 투영했습니다.
+이번 가정에서는 카메라가 월드 중앙에 있고 하늘텍스쳐의 구가 감싸고 있는데 카메라가 이 하늘 구 를 출력하려면 
+구가 카메라로부터 near 와 far 사이의 거리 안에 있어야 합니다. 거기에 하늘 구 너머에도 게임 오브젝트가 있다고 할때 카메라 시점에서 하늘 구가 그 뒤에 있는
+오브젝트보다 앞에 있기 때문에 뒤에 오브젝트는 가려져서 출력이 안될겁니다. 이걸 방지하기위해서는 이 하늘 구가 카메라의 최대거리를 항상 유지되게끔 해야 
+해결이 될겁니다.
+
+이 하늘 구가 오늘의 주제인 스카이 박스인데 위에서 말한 몇가지 문제점을 해결하면서 구현을 해보겠습니다.
+
+
+우선 오랜만에 변환에 대한 내용을 다시 한번 복습해보겠습니다. 
+게임오브젝트는 처음에 자신이 중심인 로컬 스페이스에 있습니다. 로컬스페이스에서 회전이나 스케일을 키우는게 편리했습니다. 
+다음으로 월드 스페이스라고 가상의 게임 공간에 배치되서 공용 스페이스 기준으로 각각 오브젝트들이 좌표를 변환 하고 
+카메라 오브젝트의 좌표를 원점으로한 뷰 스페이스로 윌드 스페이스에 있던 오브젝트들을 다시 변환하는데 왜냐면 결국 카메라가 보는 관점에서 게임화면이 출력되기 때문입니다. 
+뷰 스페이스에서 이제 카메라의 Direction, pov, near, far 를 고려해서 딱 범위에 들어오는 오브젝트들을 2D로 쫙 땡겨서 투영하는 변환이 Projection 변환입니다. 
+프로젝션 변환의 결과에서는 -1 ~ 1 사이의 비율로 물체들을 표현하는데 실제 우리가 보는 모니터나 윈도우 창의 크기는 1:1 비율이 아닙니다. 
+그래서 다시 Screen 변환으로 화면 비율에 맞춰 각 픽셀에 색상으로 표시하게 됩니다.
+
+    Local -> World -> View -> Projection -> Screen
+
+이제 다시 스카이 박스로 돌아와서 스카이박스 자체도 오브젝트로써 로컬스페이스가 있을것이고 이걸 다시 변환을 할텐데 어떻게 변환을 해야 할지를 생각해보겠습니다. 
+먼저 스카이박스와 카메라가 따로 움직이게 되면 카메라가 일정방향으로가면 스카이박스가 가까이서 보이거나 아예 접촉을 하게 되기때문에 
+카메라가 움직일때 스카이박스도 같이 따라 움직이게 해줘야합니다. 
+그래서 스카이박스를 로컬에서 월드로 변환을 해줄때 카메라 오브젝트의 좌표에 딱 맞게 변환을 해주면 될겁니다. 이러면 다음 변환들인 뷰 변환에서도 카메라의 위치에 같이 
+있을거고 프로젝션, 스크린 변환에서도 유지될겁니다.
+매 프레임마다 카메라의 월드 포지션을 가져와서 이 스카이 박스의 위치를 계속 업데이트하는 방식으로 구현될것 같습니다. 
+CPP 차원에서 코드를 추가해서 관리하는 방법이겠습니다. 
+
+또 한가지 방법으로 쉐이더 차원에서 한번에 처리하는 방법이 있습니다.
+우선 다시 처음부터 변환 단계를 밟아보면 로컬스페이스의 스카이박스가 월드 스페이스로 변환이 되면서 위치는 카메라의 위치에 위치하고 그다음으로 뷰스페이스로 변환될겁니다.
+이때 잘 생각해보면 로컬좌표에서는 원점에 있을거고 뷰스페이스에서고 카메라와 같은 위치에 있을것이기 때문에 또 원점에 있을겁니다. 
+월드 변환이라는 단계만 건너 뛰면 계속 원점에 있어도 될것같습니다.
+
+스페이스 변환도 그 요소를 보면 SRT 의 단계를 거치는데 각각을 보자면 Scale 오브젝트의 크기를 변경하는 단계입니다. Rotation 오브젝트를 어떤 축을 기준으로 회전시키는 단계입니다.
+Translation은 오브젝트의 위치를 이동하는 단계입니다. 
+이렇게 세가지 단계의 연산을 합쳐놓은게 스페이스 변환 행렬입니다. 여기서 우선 스카이 박스의 크기는 변경할 일이 없을것 같기때문에 제외하고 
+RT 두가지중에서 다시 스카이 박스는 뷰 스페이스에서 원점에만 있을것이니 Translation 도 신경안써도 될것입니다. 그런데 Translation 을 신경쓰지 않을 수 있는 방법을 이미 
+알고 있습니다. 좌표벡터를 표현하는 (x, y, z, w) 값들 중에 w를 0으로 하면 자연적으로 Translation 값이 적용되지 않는데 이게 방향벡터들이 변환할때 사용하는 방법이었습니다.
+이런 성질을 이용해서 스카이 박스는 방향 벡터가 아니지만 좌표를 계속 원점으로 가져가기위해 이런 방법을 사용합니다.
+
+정리해보자면 스카이박스를 월드 변환을 거치지 않고 바로 뷰 변환을 해줄것인데 원점에 계속 있게 하기 위해 w 를 0으로 두고 변환을 할겁니다. 
+그런데 게임상에서 카메라를 돌리면 하늘이미지도 같이 돌아가는게 정상이기 때문에 회전은 유지 해주는게 좋겠습니다.
+
+
+코드로 가서 실습해보겠습니다.
+
+먼저 준비물이 필요한데 스카이 박스에 붙힐 텍스쳐가 필요할겁니다. 구글에 스카이 박스 텍스쳐라고 검색해서 나오는 이미지를 보면 6개의 이미지가 주사위 형태로 붙어있는게 나오는데
+이런 큐브형 스카이 박스를 써고 되지만 지금 우리 프로그램에서는 텍스쳐를 배열식으로 여러 텍스쳐를 한번에 받아주는 방식이 아닌 한번에 하나의 텍스쳐만 받아주는 방식이라서 
+호환 되지 않습니다. 물론 코드를 수정해서 텍스쳐를 배열식으로 여러개를 한번에 받아주는걸로 바꿀수 있지만 일단 지금은 한장의 텍스쳐로 가능한 
+구 형태의 스카이박스를 구현해보겠습니다. high resolution space hdri 라는 검색어로 이미지를 받았습니다.
+
+이어서 본격적으로 코드로 들어가기전에 몇가지 고쳐야 할 부분이 당연히 있습니다. 
+첫번째 고쳐야 할 부분은 쉐이더 클래스로 가야 합니다. 지금까지 언급한적없는 부분인데 
+쉐이더를 init 할때 이런저런 부분을 선택할수 있었습니다.
+CreateVertexShader 나 CreatePixelShader 같은 건 default.hlsli 파일에서 가져왔지만 사실 다른 쉐이더를 설정할 수도 있습니다.
+밑을 보면 _pipelineDesc 라는 D3D12_GRAPHICS_PIPELINE_STATE_DESC 스트럭트 에 내용들을 채워주고 있었는데 
+
+	_pipelineDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	_pipelineDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	_pipelineDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+이 부분들을 기본설정으로 해주고 있었고 지금은 이중에 RasterizerState 와 DepthStencilState 를 수정해줘야 합니다. 
+
+먼저 RasterizerState 를 보겠습니다. 채워주고 있는 내용이 CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT); 인데 이걸 f12 로 타고 들어가보면 
+{
+        FillMode = D3D12_FILL_MODE_SOLID;
+        CullMode = D3D12_CULL_MODE_BACK;
+        FrontCounterClockwise = FALSE;
+        DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
+        DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+        SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+        DepthClipEnable = TRUE;
+        MultisampleEnable = FALSE;
+        AntialiasedLineEnable = FALSE;
+        ForcedSampleCount = 0;
+        ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+이렇게 윗부분에 이런 내용이 있는데 이중 CullMode 가 중요합니다. D3D12_CULL_MODE_BACK 이 뭔지 다시 타고 들어가면 enum D3D12_CULL_MODE 라는 이넘에 
+NONE, FRONT, BACK 세가지 내용이 있는데 그중 BACK 이 선택된 상태이고 
+
+그밑에 FrontCounterClockwise = FALSE 가 무슨 말이냐면 Clockwise 가 시계 방향인지를 묻는거고 Counter 가 붙었으니깐 반시계 방향 또 그앞에 Front 가 반시계 방향이냐고 묻고 있고
+값이 FALSE 니까 Front 가 시계방향이라는 뜻이 됩니다. 그래서 또 이게 무슨 의미냐면 CubeMesh 의 코드를 잠깐 가져오면 
+vec[0] = Vertex(Vec3(-w2, -h2, -d2)
+vec[1] = Vertex(Vec3(-w2, +h2, -d2)
+vec[2] = Vertex(Vec3(+w2, +h2, -d2)
+vec[3] = Vertex(Vec3(+w2, -h2, -d2)
+큐브의 앞면 pos 정보만 가져왔습니다. 0 번부터 왼쪽 아래에 위치해 있고 시계방향으로 1,2,3 번 정점들이 있습니다. 거기에 더해 앞면의 인덱스 설정을 할때 
+idx[0] = 0; idx[1] = 1; idx[2] = 2;
+idx[3] = 0; idx[4] = 2; idx[5] = 3;
+012, 023 각 삼각형을 시계 방향으로 설정해주고 있습니다.
+
+그래서 이 내용들이 무슨 상관인가 싶을텐데 이때 위에서 말했던 CULL 의 뜻이 스킵을 하겠다라는 의미입니다. CullMode 가 Back Mode 라는건 Back 이 반시계니까 (?) 반시계인것은 
+스킵을 해라라는 내용(?)이라는데 설명을 들어도 잘 모르겠습니다. 
+
+그래서 한번더 이해해보려고 프로젝트를 실행했습니다. 프로젝트를 실행하면 가죽 텍스쳐의 큐브가 출력되는것 까지가 지난시간의 내용이었습니다. 
+큐브를 볼때 이게 눈에 보인다는것 자체가 Culling 이 되지 않았기 때문에 보이는 것이라고 합니다. 레스터라이저라는 단계가 언제 개입하는지를 생각해보면 먼저 정점 단위로 
+Vertex 셰이더를 거쳤고 다음 Pixel 셰이더로 넘어가기전에 레스터라이저 단계에서 정점들 사이의 모든 픽셀들을 찾아준 다음 정점들 사이의 비율대로 보간을 해준다음
+ 그걸 픽셀 셰이더 에게 넘겨주었습니다. 
+이런 레스터라이저 단계에서 해주는 일중 하나가 이 정점 자체를 스킵할것인지를 골라주는 역할을 합니다. 이게 무슨 말이냐면 우리가 큐브를 만들때 모든 정점과 인덱스를 
+시계 방향으로 만들어서 화면에 보이고 있는겁니다. 지금 CullMode를 Cull_MODE_BACK 으로 해 놨으니까 정점들을 반시계 방향으로 했다면 안보이게 되는겁니다.
+
+왜 Cull 이라는게 필요한지를 알아보겠습니다. 프로젝트의 큐브를 향해 카메라를 계속 가면 일정 순간에 아무것도 안보이게 됩니다. 
+카메라의 최소 촬영거리 보다 가까워져서 큐브 내부를 보는것인데 그러면 일반적으로 보면 아무것도 안보이는게 아니라 내부가 보여야 할것 같지만 안보이는게 이상합니다.
+
+어떻게 된 일이냐면 큐브의 앞면만 출력했다고 치고 평소처럼 큐브가 보이는 곳에 카메라가 있어서 그 메쉬를 봅니다. 이 앞에 카메라의 입장에서는 이 큐브 앞면을 이루는 정점들이
+시계방향으로 되어있습니다. 이때 또하나의 카메라를 만드는데 큐브 앞면을 두고 첫번째 카메라의 맞은 편에서 마주보고 있다고 해보겠습니다. 이러면 이 큐브 앞면 
+메쉬를 이루는 정점들이 두번째 카메라 입장에서는 반시계 방향으로 만들어져있는겁니다.그러면 이 면은 뒷면이구나 하고 그냥 표현을 안해버리는겁니다.
+
+보통 오브젝트의 바깥면을 시계방향으로 만들어두면 이제 각 면들이 오브젝트를 감싸서 내부가 보이지 않게 되고 레스터라이저 단계에서 어짜피 보이지 않을 뒷면은 생략을 해버립니다.
+가장 단순한 삼각형의 메쉬라고 해도 레스터라이즈 단계에서는 각 정점들사이의 픽셀들을 모두 계산해야 하니까 많은 부하가 걸리기 때문에 생략해도 되는 부분은 생략하면 
+성능적으로 좋은 결과를 낼수 있을겁니다.
+
+이런 이유로 Culling 옵션이 필요하다는걸 알수 있었습니다.
+
+
+여기서 다시 오늘의 주제였던 스카이박스 혹은 스카이스피어는 오브젝트 안에 들어가서 보게 될텐데 큐브를 만들때 처럼 만들면 카메라에 스카이스피어의 텍스쳐가 안보이게 될겁니다.
+그래서 이 옵션을 조금 수정해야 합니다.
+
+Shader.h 로 가서 enum class 들을 조금 추가해주겠습니다.
+enum class RASTERIZER_TYPE
+{
+	CULL_NONE,
+	CULL_FRONT,
+	CULL_BACK,
+	WIREFRAME,
+};
+
+enum class DEPTH_STENCIL_TYPE
+{
+	LESS,
+	LESS_EQUAL,
+	GREATER,
+	GREATER_EQUAL,
+};
+
+struct ShaderInfo
+{
+	RASTERIZER_TYPE rasterizerType = RASTERIZER_TYPE::CULL_BACK;
+	DEPTH_STENCIL_TYPE depthStencilType = DEPTH_STENCIL_TYPE::LESS;
+};
+
+RASTERIZER_TYPE 에서 CULL_BACK을 고르면 반시계 방향인 면을 스킵하겠다, CULL_FRONT는 시계방향인 면을 스킵하겠다, CULL_NONE은 두면 모두 출력하겠다라는 의미이겠습니다.
+WIREFRAME 은 조금 특이한 옵션인데 일단 나중에 알아보고 
+다음 DEPTH_STENCIL_TYPE 을 보겠습니다. 이건 깊이 테스터와 관련된 부분인데 우리가 앞에서 말했던 이론중에 스카이스피어의 면이 카메라의 최대거리에 딱 붙어있어야 혹시 다른 
+오브젝트들을 가리지 않게 할수 있었는데 스카이박스를 Projection 했을때 깊이 값이 딱 1이어야합니다. 그런데 기본 상태일때는 깊이가 1이면 그려지지않을겁니다. 
+Depdh Stencil 버퍼를 만들어 줄때 그 값보다 작을경우 그려주게끔 되어 있는게 기본 상태입니다. 즉 1 미만의 물체들만 그려주는게 기본상태입니다.
+그런데 이제는 스카이박스를 1에 두고 이것까지 그리고 싶기 때문에 이 옵션을 변경해줘야합니다.
+
+그래서 enum class DEPTH_STENCIL_TYPE 에서 LESS_EQUAL 이라는 옵션으로 바꾸게 되면 1이하의 오브젝트들을 출력할수 있게 될겁니다.
+
+이렇게 enum class 두개를 파줬고 struct ShaderInfo 같은경우는 두가지 옵션을 한번에 세팅해주는 구조체인데 나중에 Shader::Init 에서 사용해서 세팅을 해주게될겁니다.
+void Init(const wstring& path, ShaderInfo info = ShaderInfo()); 
+이 두번째 인자는 ShaderInfo 를 인자로 줄건데 만약 인지를 주지않으면 기본적으로 CULL_BACK 과 DEPTH_STENCIL_TYPE::LESS 로 설정된 ShaderInfo 를 주겠다는 말입니다.
+
+그리고 Shader::Init 함수내에 인자로 받은 ShaderInfo로 실제 _pipelineDesc 의 설정을 해줘야합니다.
+이부분은 switch case 문으로 처리했습니다.
+	switch (info.rasterizerType)
+	{
+	case RASTERIZER_TYPE::CULL_BACK:
+		_pipelineDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+		_pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
+		break;
+	case RASTERIZER_TYPE::CULL_FRONT:
+		_pipelineDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+		_pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_FRONT;
+		break;
+	case RASTERIZER_TYPE::CULL_NONE:
+		_pipelineDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+		_pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+		break;
+	case RASTERIZER_TYPE::WIREFRAME:
+		_pipelineDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
+		_pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+		break;
+	}
+
+	switch (info.depthStencilType)
+	{
+	case DEPTH_STENCIL_TYPE::LESS:
+		_pipelineDesc.DepthStencilState.DepthEnable = TRUE;
+		_pipelineDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+		break;
+	case DEPTH_STENCIL_TYPE::LESS_EQUAL:
+		_pipelineDesc.DepthStencilState.DepthEnable = TRUE;
+		_pipelineDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+		break;
+	case DEPTH_STENCIL_TYPE::GREATER:
+		_pipelineDesc.DepthStencilState.DepthEnable = TRUE;
+		_pipelineDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER;
+		break;
+	case DEPTH_STENCIL_TYPE::GREATER_EQUAL:
+		_pipelineDesc.DepthStencilState.DepthEnable = TRUE;
+		_pipelineDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+		break;
+	}
+
+ShaderInfo 인자인 Info 의 각 성분의 상태에 따라 _pipelineDesc 의 옵션을 바꿔줍니다.
+CullMode 를 설정하는 곳에서 FillMode 가 Solid 인부분과 WIREFRAME 인 부분이 있는걸 볼수 있는데 자세한건 나중에 설명할것이고 간단히 보면 WIREFRAME 은 외각선만 보는 옵션입니다.
+
+이 옵션들을 이제 스카이박스를 만들면 수정을 해주면 됩니다. 
+
+이제 ScenManager 로 가면 LoadTestScene 에서 실습에 필요한 오브젝트들을 관리해주고 있었습니다. 
+여기에 새로 스카이박스를 만들어주겠습니다.
+#pragma region SkyBox
+	{
+		shared_ptr<GameObject> skybox = make_shared<GameObject>();
+		skybox->AddComponent(make_shared<Transform>());
+		shared_ptr<MeshRenderer> meshRenderer = make_shared<MeshRenderer>();
+		{
+			shared_ptr<Mesh> sphereMesh = GET_SINGLE(Resources)->LoadSphereMesh();
+			meshRenderer->SetMesh(sphereMesh);
+		}
+		{
+			shared_ptr<Shader> shader = make_shared<Shader>();
+			shared_ptr<Texture> texture = make_shared<Texture>();
+			shader->Init(L"..\\Resources\\Shader\\skybox.hlsli",
+				{ RASTERIZER_TYPE::CULL_NONE, DEPTH_STENCIL_TYPE::LESS_EQUAL });
+			texture->Init(L"..\\Resources\\Texture\\Sky01.jpg");
+			shared_ptr<Material> material = make_shared<Material>();
+			material->SetShader(shader);
+			material->SetTexture(0, texture);
+			meshRenderer->SetMaterial(material);
+		}
+		skybox->AddComponent(meshRenderer);
+		scene->AddGameObject(skybox);
+	}
+#pragma endregion
+
+해석해보면 먼저 skydox 라는 이름의 게임 오브젝트를 make_shared로 생성해주었습니다. 모든 오브젝트가 기본으로 가지고 있을 Transform 컴포넌트를 바로 추가 해주었고 
+그렇지만 Transform 을 딱히 따로 설정하주지 않고 기본상태로 놔두고 있습니다.
+큐브나 카메라의 경우에는 Transform 을 추가해준다음 바로 LocalScale, LocalPosition 등을 설정해주던 것과 다른 점입니다.
+다음 추가할 컴포넌트인 MeshRenderer 를 만들어 주고 있는데 그 중 메쉬는 Resources::LoadSphereMesh 로 구 메쉬를 일단 가져왔습니다. 
+다음은 셰이더와 텍스쳐를 Init 해주고 있는데 이중 셰이더를 Init 할때 아직 만들지 않은 skybox.hlsli 경로와 두번째 인자로 컴모드와 뎁스 스텐실 모드를 설정해주고 있습니다.
+텍스쳐의 경우에는 준비물로 준비한 이미지를 넣어주었습니다.
+
+이제 skybox용 셰이더를 만들어주겠습니다. default.hlsli 가 있는 상위 폴더를 열어서 default 를 그대로 복사하고 이름을 skybox 라고 변경하겠습니다. default를 기본으로 
+몇몇 부분만 수정하면됩니다. 그리고 VS 의 프로젝트 로 드래그 드롭으로 포함시켰습니다.
+
+우선 skybox.hlsli 에서 공용파라미터는 동일하게 사용할것이기 때문에 params 는 그대로 include 해주고 utils 는 쉐이더에서 개별 함수를 사용할것이기 때문에 삭제 해줬습니다. 
+
+그 밑에 VS_IN 에서 Vertex Shader Main 함수에 인자로 들어갈 Input 값들중에 normal 과 tangent 는 사용하지 않을 것이기 때문에 지워주고, 포지션인자인 pos도 
+로컬스페이스에서의 포지션이라는걸 명확히 해주기 위해 이름을 LocalPos 로 바꿔주었습니다.
+struct VS_IN
+{
+    float3 localPos : POSITION;
+    float2 uv : TEXCOORD;
+};
+VS_OUT 도 normal, tangent와 관련된 아웃풋 인자들을 모두 날려주었습니다.
+struct VS_OUT
+{
+    float4 pos : SV_Position;
+    float2 uv : TEXCOORD;
+};
+
+PS_Main 부터 보면 다른 오브젝트를 표현하기위해 여러가지 있던 함수들을 모두 날려주고 가장 먼저 사용했던 기본적인 텍스쳐 매핑 코드만 남겨주었습니다.
+float4 PS_Main(VS_OUT input) : SV_Target
+{
+    flaot4 color = g_tex_0.Sample(g_sam_0, input.uv);
+    
+    return color;
+}
+
+여기까지 매우 단순하게 내용들을 줄여줬고 이제 VS_Main 에서 할일이 있습니다. 우선 코드를 먼저 보자면 이렇게 되어있습니다.
+VS_OUT VS_Main(VS_IN input)
+{
+    VS_OUT output = (VS_OUT)0;
+
+    // Translation은 하지 않고 Rotation만 적용한다
+    float4 viewPos = mul(float4(input.localPos, 0), g_matView);
+    float4 clipSpacePos = mul(viewPos, g_matProjection);
+
+    // w/w=1이기 때문에 항상 깊이가 1로 유지된다
+    output.pos = clipSpacePos.xyww;
+    output.uv = input.uv;
+
+    return output;
+}
+일단 첫줄은 리턴해줄 output을 기본상태로 생성해주고 있고  그 밑 코드부터 수정된 코드인데 viewPos 는 월드를 거치지 않고 바로 view 스페이스로 변환된 skybox의 포지션 값입니다.
+이번 강의 개론 부분에서 스카이박스가 카메라의 포지션을 자신의 포지션으로 삼는 방법으로 로컬 포지션에서 바로 뷰 포지션으로 변환되면 된다고 했는데 그걸 구현한 코드입니다. 
+이때 mul(float4(input.localPos, 0.f), g_matView) 에서 localPos 다음의 값인 w를 0으로 설정함으로써 변환 행렬에 Translation의 영향을 받지않고 0,0 로 가만히 있을수 있습니다.
+Translation은 무시하지만 Rotation은 적용된 상태로 돌아가게 됩니다.
+viewPos 다음에 clipSpacePos 라는 변수에 Projection 변환까지 한다음 담아주고 있습니다.
+벡터를 Projection 변환을 해주면 바로 Projection 변환이 되는게 아니라 동차 클립 스페이스로 변환된다고 했습니다. 
+이 동차 클립 변환은 Projection 변환을 할때 각 좌표를 계산하면서  
+X = x / (z * r * tan(D/2)) 
+Y = y / (z * tan(D/2))
+이런 식으로 계산을 해줘야 스크린 변환을 할때와 pov의 보정값도 적용해서 오브젝트를 왜곡 시키지 않고 의도한 비율대로 보일수 있게 합니다. 
+그런데 이때 각 좌표 계산에 들어갈 미지수가 x, z 나 y, z 처럼 두개가 들어가는건 행렬로 표현할수 없습니다. 이걸 행렬하나로 어떤 값을 얻기위해서는 선형식이어야 한다고 합니다. 
+그래서 변환 행렬 하나로 이 Projection 변환을 한번에 표현할 수는 없고 그래서 우선 z값은 그대로 두고 나머지 x / (r * tan(D/2)), y / tan(D/2) 처럼 z 계산을 제외한 행렬부터 
+연산을 합니다.
+그렇게 연산을 한다면 (x,y,z,1) 인 벡터가 첫	번째 행렬과 곱하면( x /(r*tan(D/2), y/tan(D/2), z, 1) 이런 벡터값이 나오게 될겁니다. 
+여기에 바로 z 값을 나눠주는 행렬을 곱해주면 ( x/(z*r*tan(D/2) , y/(z*tan(D/2)), 1, 1) 이렇게 x, y 성분은 원하는결과가 나오지만 z값이 1이 되어 버립니다. 
+오브젝트들을 투영해주면 각각의 깊이 값이 있고 거기에 따라 뎁스 스텐실 작업을 해줘야하는데 이 깊이 값이 사라지는겁니다. 
+그래서 첫번째 행렬에서 w 성분에 이전 z값을 들고 있게 하고 z성분 자리에는 투영후 깊이 값을 계산해줄 식을 넣어주면 되겠습니다.
+1 / (r * tan(D/2))         0            0    0
+        0              1/(tan(D/2)      0    0
+        0                    0          A    1
+        0                    0          B    0
+이런행렬이 있다고 치고 이제 A 와 B에 들어갈 내용을 구해야 하는데 이 행렬을 거친 벡터 (x,y,z,1) 은 (x/(r*tan(D/2)), y/tan(D/2), Az + B, z) 이렇게 됩니다. 
+이걸 Rasterize에게 건내주면 w 자리의 z값으로 모든 성분들을 나눠서 ( x/(z*r*tan(D/2) , y/(z*tan(D/2)), A + B/z, 1) 이렇게 변환되는게 최종적인 투영후 비율이 될겁니다.
+여기서 near 와 far 값을 적절히 사용해서 A와 B의 값을 구할수 있는데 이걸 구한다음의 행렬은 이렇습니다.
+1 / (r * tan(D/2))         0                  0                   0
+        0              1/(tan(D/2)            0                   0
+        0                    0          far/(far-near)            1
+        0                    0          -(far*near)/(far-near)    0
+이게 Projection 변환 행렬입니다. 변환의 결과물이 진짜 Projection 스페이스 변환된 결과는 아니고 Rasterize 로 넘겨서 한번더 4번째 원소인 z값으로 나눠줘야 진짜 Projection변환 
+일겁니다.
+
+이렇게 Projection 변환에 대해 다시한번 복습을 했고 왜 이게 필요했는지 를 보자면 
+    output.pos = clipSpacePos.xyww;
+이부분에서 넘겨줄 좌표를 clipSpacePos.xyww 로 주고 있습니다. 세번째 성분을 z로 주는게 아니라 w로 주고 있는걸 볼수 있는데 왜냐면 스카이박스는 실제 깊이를 구하고 싶은게 아니라
+항상 깊이 1일때라고 보이고 싶은겁니다. 그래서 실제 z값을 줘서 실제 깊이값을 받는게 아니라 w 값을 주면 Rasterize 에서 w 로 나눠져서 항상 깊이가 1인 상태가 되기때문에 
+3번째 성분에 w 값으로 조작을 하고 있습니다. 이러면 실제 스카이 박스가 스케일이 얼마든간에 항상 카메라의 far 값에 투영될수 있습니다.
+
+
+여기 까지 하고 빌드후 실행해보면 정상적으로 실행되어야 합니다. 
+
+저의 경우는 PS_Main 에서 텍스쳐를 매핑 해줄때 color 를 타입 지정해주지 않고 
+color = g_tex_0.Sample(g_sam_0, input.uv);
+이렇게만 작성 했다가 에러가 떴습니다. 앞에 float4 를 적어서 해결했습니다.
+flaot4 color = g_tex_0.Sample(g_sam_0, input.uv);
+
+
+* 추가 
+실행한 프로그램에서 카메라를 위,아래로만 돌릴 수 있었는데 여기에 좌우로도 돌릴수 있게 추가하고 싶습니다. 
+Input 클래스에서 사용할 키를 추가해줍니다. Q,E 는 위아래 Z,C는 좌우용도로 사용할겁니다.
+enum class KEY_TYPE
+{
+	UP = VK_UP,
+	DOWN = VK_DOWN,
+	LEFT = VK_LEFT,
+	RIGHT = VK_RIGHT,
+
+	W = 'W',
+	A = 'A',
+	S = 'S',
+	D = 'D',
+
+	Q = 'Q',
+	E = 'E',
+	Z = 'Z',
+	C = 'C',
+};
+
+카메라를 움직이는 부분은 Input 클래스가 아니라 TestCameraScript 에서 관리하고 있었습니다. 여기서 Q,E를 관리하는 코드를 복사해서 수정했습니다.
+	if (INPUT->GetButton(KEY_TYPE::Q))
+	{
+		Vec3 rotation = GetTransform()->GetLocalRotation();
+		rotation.x += DELTA_TIME * 0.5f;
+		GetTransform()->SetLocalRotation(rotation);
+	}
+
+	if (INPUT->GetButton(KEY_TYPE::E))
+	{
+		Vec3 rotation = GetTransform()->GetLocalRotation();
+		rotation.x -= DELTA_TIME * 0.5f;
+		GetTransform()->SetLocalRotation(rotation);
+	}
+
+	if (INPUT->GetButton(KEY_TYPE::Z))
+	{
+		Vec3 rotation = GetTransform()->GetLocalRotation();
+		rotation.y += DELTA_TIME * 0.5f;
+		GetTransform()->SetLocalRotation(rotation);
+	}
+
+	if (INPUT->GetButton(KEY_TYPE::C))
+	{
+		Vec3 rotation = GetTransform()->GetLocalRotation();
+		rotation.y -= DELTA_TIME * 0.5f;
+		GetTransform()->SetLocalRotation(rotation);
+	}
+
+	Z,C 부분에서 rotation.x를 rotation.y 로 y축 회전을 해주었습니다.
+
+
+
+이렇게 해서 결국은 게임에서 하늘을 표현할 스카이박스를 구현했습니다. 
+지금은 스카이박스를 구형태로 만들었지만 보통은 큐브 형태로 만드는게 더 일반적이라고 합니다.
+실제로 SceneManager 에서 스카이박스의 메쉬를 Sphere가 아니라 Cube로 변경하면 현재 텍스쳐로는 조금 어색한 하늘이 표현되는데 이부분은 큐브용 텍스쳐를 사용할수 있게 
+텍스쳐를 한번에 배열로 받는 방식을 사용하면 되겠습니다. 
+그래도 실행자체는 잘되고 있으니 텍스쳐 부분만 수정해주면 됩니다.
