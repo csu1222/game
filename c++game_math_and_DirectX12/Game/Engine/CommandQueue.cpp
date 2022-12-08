@@ -3,12 +3,16 @@
 //#include "SwapChain.h"
 #include "Engine.h"
 
-CommandQueue::~CommandQueue()
+// ************************
+// GraphicsCommandQueue
+// ************************
+
+GraphicsCommandQueue::~GraphicsCommandQueue()
 {
 	::CloseHandle(_fenceEvent);
 }
 
-void CommandQueue::Init(ComPtr<ID3D12Device> device, shared_ptr<SwapChain> swapChain)
+void GraphicsCommandQueue::Init(ComPtr<ID3D12Device> device, shared_ptr<SwapChain> swapChain)
 {
 	_swapChain = swapChain;
 
@@ -43,7 +47,7 @@ void CommandQueue::Init(ComPtr<ID3D12Device> device, shared_ptr<SwapChain> swapC
 
 
 
-void CommandQueue::WaitSync()
+void GraphicsCommandQueue::WaitSync()
 {
 	// Advance the fence value to mark commands up to this fence point.
 	_fenceValue++;
@@ -66,7 +70,7 @@ void CommandQueue::WaitSync()
 
 
 
-void CommandQueue::RenderBegin(const D3D12_VIEWPORT* vp, const D3D12_RECT* rect)
+void GraphicsCommandQueue::RenderBegin(const D3D12_VIEWPORT* vp, const D3D12_RECT* rect)
 {
 	_cmdAlloc->Reset();
 	_cmdList->Reset(_cmdAlloc.Get(), nullptr);
@@ -78,16 +82,16 @@ void CommandQueue::RenderBegin(const D3D12_VIEWPORT* vp, const D3D12_RECT* rect)
 		D3D12_RESOURCE_STATE_PRESENT, // 화면 출력
 		D3D12_RESOURCE_STATE_RENDER_TARGET); // 외주 결과물
 
-	_cmdList->SetGraphicsRootSignature(ROOT_SIGNATURE.Get());
+	_cmdList->SetGraphicsRootSignature(GRAPHICS_ROOT_SIGNATURE.Get());
 
 	// 렌더링시작시 상수버퍼를 밀어줍니다.
 	GEngine->GetConstantBuffer(CONSTANT_BUFFER_TYPE::TRANSFORM)->Clear();
 	GEngine->GetConstantBuffer(CONSTANT_BUFFER_TYPE::MATERIAL)->Clear();
 
 	// 위와 같은이유로 TableDescriptorHeap의 인덱스도 밀어줍니다.
-	GEngine->GetTableDescHeap()->Clear();
+	GEngine->GetGraphicsDescHeap()->Clear();
 
-	ID3D12DescriptorHeap* descHeap = GEngine->GetTableDescHeap()->GetDescriptorHeap().Get();
+	ID3D12DescriptorHeap* descHeap = GEngine->GetGraphicsDescHeap()->GetDescriptorHeap().Get();
 	_cmdList->SetDescriptorHeaps(1, &descHeap);
 
 
@@ -98,7 +102,7 @@ void CommandQueue::RenderBegin(const D3D12_VIEWPORT* vp, const D3D12_RECT* rect)
 	_cmdList->RSSetScissorRects(1, rect);
 }
 
-void CommandQueue::RenderEnd()
+void GraphicsCommandQueue::RenderEnd()
 {
 	int8 backIndex = _swapChain->GetBackBufferIndex();
 
@@ -124,7 +128,7 @@ void CommandQueue::RenderEnd()
 	_swapChain->SwapIndex();
 }
 
-void CommandQueue::FlushResourceCommandQueue()
+void GraphicsCommandQueue::FlushResourceCommandQueue()
 {
 	_resCmdList->Close();
 
@@ -135,4 +139,60 @@ void CommandQueue::FlushResourceCommandQueue()
 
 	_resCmdAlloc->Reset();
 	_resCmdList->Reset(_resCmdAlloc.Get(), nullptr);
+}
+
+// ************************
+// ComputeCommandQueue
+// ************************
+
+ComputeCommandQueue::~ComputeCommandQueue()
+{
+	::CloseHandle(_fenceEvent);
+}
+
+void ComputeCommandQueue::Init(ComPtr<ID3D12Device> device)
+{
+	D3D12_COMMAND_QUEUE_DESC computeQueueDesc = {};
+	computeQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+	computeQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+	device->CreateCommandQueue(&computeQueueDesc, IID_PPV_ARGS(&_cmdQueue));
+
+	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&_cmdAlloc));
+	device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, _cmdAlloc.Get(), nullptr, IID_PPV_ARGS(&_cmdList));
+
+	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_fence));
+
+	// CreateFence
+	// - CPU와 GPU의 동기화 수단으로 쓰인다
+	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_fence));
+	_fenceEvent = ::CreateEvent(nullptr, FALSE, FALSE, nullptr);
+}
+
+void ComputeCommandQueue::WaitSync()
+{
+	_fenceValue++;
+
+	_cmdQueue->Signal(_fence.Get(), _fenceValue);
+
+	if (_fence->GetCompletedValue() < _fenceValue)
+	{
+		_fence->SetEventOnCompletion(_fenceValue, _fenceEvent);
+		::WaitForSingleObject(_fenceEvent, INFINITE);
+	}
+}
+
+void ComputeCommandQueue::FlushComputeCommandQueue()
+{
+	_cmdList->Close();
+
+	ID3D12CommandList* cmdListArr[] = { _cmdList.Get() };
+	auto t = _countof(cmdListArr);
+	_cmdQueue->ExecuteCommandLists(_countof(cmdListArr), cmdListArr);
+
+	WaitSync();
+
+	_cmdAlloc->Reset();
+	_cmdList->Reset(_cmdAlloc.Get(), nullptr);
+
+	COMPUTE_CMD_LIST->SetComputeRootSignature(COMPUTE_ROOT_SIGNATURE.Get());
 }
