@@ -4,6 +4,17 @@
 class Mesh;
 class Material;
 
+// [32][32]
+union InstanceID
+{
+	struct
+	{
+		uint32 meshID;
+		uint32 materialID;
+	};
+	uint64 id;
+};
+
 class MeshRenderer : public Component
 {
 public:
@@ -17,7 +28,9 @@ public:
 
 
 	void Render();
+	void Render(shared_ptr<class InstancingBuffer>& buffer);
 
+	uint64 GetInstanceID();
 
 
 private:
