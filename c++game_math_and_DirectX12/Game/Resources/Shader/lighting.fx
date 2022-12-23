@@ -26,13 +26,17 @@ struct PS_OUT
 // g_int_0 : Light index
 // g_tex_0 : Position RT
 // g_tex_1 : Normal RT
+// g_tex_2 : Shadow RT
+// g_mat_0 : ShadowCamera VP
 // Mesh : Rectangle
 
 VS_OUT VS_DirLight(VS_IN input)
 {
     VS_OUT output = (VS_OUT)0;
 
-    output.pos = float4(input.pos * 2.f, 1.f);
+    output.pos = float4(input.pos * 2.f, 1.f);  
+    // input.pos 에 2.f 를 곱해주는 이유는 Directional Light 가 화면을 꽉 채우는 Rectangle Mesh 인데 
+    // Resources 에서 만들어둔 Rectangle Mesh 는 가로,세로 0.5f 씩을 가진 메쉬이기 때문에 Projection 좌표계의 크기인 -1 ~ 1 을 맞춰주기 위함
     output.uv = input.uv;
 
     return output;
@@ -49,6 +53,33 @@ PS_OUT PS_DirLight(VS_OUT input)
     float3 viewNormal = g_tex_1.Sample(g_sam_0, input.uv).xyz;
 
     LightColor color = CalculateLightColor(g_int_0, viewNormal, viewPos);
+
+    // 그림자
+    if (length(color.diffuse) != 0)
+    {
+        matrix shadowCameraVP = g_mat_0;
+
+        float4 worldPos = mul(float4(viewPos.xyz, 1.f), g_matViewInv);
+        float4 shadowClipPos = mul(worldPos, shadowCameraVP);
+        float depth = shadowClipPos.z / shadowClipPos.w;
+
+        // x [-1 ~ 1] -> u [0 ~ 1]
+        // y [1 ~ -1] -> v [0 ~ 1]
+        float2 uv = shadowClipPos.xy / shadowClipPos.w;
+        uv.y = -uv.y;
+        uv = uv * 0.5 + 0.5;
+
+        if (0 < uv.x && uv.x < 1 && 0 < uv.y && uv.y < 1)
+        {
+            float shadowDepth = g_tex_2.Sample(g_sam_0, uv).x;
+            if (shadowDepth > 0 && depth > shadowDepth + 0.00001f)
+            {
+                color.diffuse *= 0.5f;
+                color.specular = (float4) 0.f;
+            }
+        }
+    }
+
     output.diffuse = color.diffuse + color.ambient;
     output.specular = color.specular;
 

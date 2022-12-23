@@ -1,0 +1,1155 @@
+
+
+        35. Shadow Mapping
+
+
+그림자를 어떻게 만들지에 대한내용입니다. 
+
+일상생활에서 그림자가 생기는 이유가 무엇인지 모두 알겁니다. 빛이 광원으로 부터 오는데 물체에 닿으면 그 표면에서 반사가 될겁니다. 
+그러면 이 물체의 뒤편에는 비교적 어두운 부분이 생깁니다. 이 것이 그림자인데 
+
+이걸 코드에서도 똑같이 생각하면 될겁니다. 어떤 광원 예를 들어 위쪽에서 비추는 Directional Light 라고 하고 화면 가운데에는 구 형태의 매쉬를 가진 
+게임오브젝트가 있고 그 구 밑에는 바닥같은 Rectangle 메쉬로 이루어진 게임오브젝트가 있다고 하겠습니다. 
+이때 위에 있는 구 오브젝트때문에 바닥은 빛을 못받아서 생기는게 그림자 현상입니다.
+
+그러면 우리가 픽셀 셰이더에서 물체들의 색상을 정할 때 앞에 물체가 있는지 없는지만 알 수 있으면 그림자처럼 색을 칠해줄 수 있을겁니다.
+말로는 쉬워보이는데 지금까지 그려지는걸 생각해보면 물체마다 따로 그려지기 때문에 서로 물체끼리 앞에 있는지 뒤에있는지 알기는 늦습니다.
+
+그래서 오늘 배울 Shadow Mapping 이라는게 개입을 해야합니다. 
+여기서 오늘의 미션은 게임 세상을 그리는데 빛을 기준으로 물체가 앞에 있느냐 뒤에있느냐를 판별해 내는게 오늘의 미션입니다. 
+
+먼저 카메라는 상관없이 빛을 기준으로 앞에 있는 물체가 무었인지 아는 것 부터 시작 해보겠습니다. 
+
+우리는 이미 깊이 버퍼에 대한 이야기를 했었습니다.깊이 버퍼는 카메라를 기준으로 어떤 물체가 더 깊은지 더 깊어서 카메라로 부터 가려진다면 그 물체가 그려져야 할지 
+아닐지를 판별했었습니다. 
+
+그러면 가상의 카메라 하나를 빛의 위치에 곂쳐서 위치해보겠습니다. 이 카메라는 화면을 찍기위한 용도의 카메라는 아니고 말그대로 
+빛을 기준으로한 깊이를 판별하기 위해서 임시적으로 배치한 카메라라고 생각하면 되겠습니다.
+
+어찌 됐건 이 카메라도 카메라다 보니깐 기존에 만들었던 기능들을 모두 사용할수 있을겁니다.
+이 카메라는 절두체 영역을 촬영하고 있을것이고 지금까지 깊이 버퍼를 이용해서 물체를 그려줘야할지 안그려야 할지 만 판별하고 있었지만
+이것도 별도의 텍스쳐로 결과물을 남겨놓으면 어떨까요 
+그러니까 지금은 Deferred 셰이더로 넘겨주는 G_BUFFER 의 세가지 버퍼를 1,2,3 번 UI에 매핑 해줬고 그리고 4,5 번 UI 에는 Deffuse Light, Specular Light 를
+매핑해주고 있습니다. 여기에 더해서 깊이 버퍼도 추가한다는 겁니다. 
+
+깊이 텍스쳐가 그리는것은 조명을 기준으로 모든 물체들의 깊이를 그립니다. 말하자면 해를 기준으로 가장 가까이 있는 물체의 깊이는 얼마 입니까? 라는걸 그리고 있습니다. 
+
+광원의 Direction 빛의 방향으로 카메라의 방향도 맞춘다음 그 카메라에서 찍히는 깊이 값을 저장해 두는게 첫번째 단계라고 합니다.
+
+그러면 이 깊이 단계를 왜 기억하는가? 결국 우리가 화면을 그릴때는 빛오브젝트의 카메라로 찍은 화면을 보는게 아니라 메인카메라에서 찍은 화면을 볼것입니다. 
+그때 픽셀들의 색을 정할때 그 위치에 그림자가 있는지를 판별해야하는데 아까 빛 오브젝트의 카메라가 저장해둔 깊이 버퍼를 참고해서 픽셀의 색을 그려줄겁니다. 
+
+다시 한번 설명하자면 
+지금 월드 스페이스에 카메라가 두개가 배치 되어 있습니다. 하나는 결과 화면을 찍는 메인카메라이고 나머지 하나는 빛오브젝트에 소속되어있는 깊이를 찍기 위한 카메라입니다.
+실제로 코드로 적용시킬때는 라이트 컴포넌트 안에 카메라컴포넌트에서 필요한 기능을 넣어줄겁니다. 
+이제 1단계로 쉐도우 맵(빛 오브젝트에서 깊이 버퍼를 저장해놓은것) 이 쉐도우 맵은 라이팅 연산이 들어가기 전에 먼저 찍게 될겁니다.
+이부분의 단계를 자세히 보면 빛오브젝트의 카메라가 월드를 바라볼건데 이때 월드의 색상을 남기는게 아니라 각 픽셀의 깊이 값을 남기게 됩니다.
+물론 물체에 따라가지고 그 물체가 그림자에 영향을 줄것이냐 안줄것이냐를 선택할 수 있을건데 오늘 테스트 결과물에서는 바닥역할을 하는 오브젝트는 그림자에 영향을 주지 않게 
+만들었습니다. 그래서 결과물의 쉐도우 맵에는 구체 오브젝트의 깊이값만 보일것입니다. 
+
+그러면 깊이값을 어떻게 계산하는가 를 보면 
+1- 빛 오브젝트 기준으로 월드를 찍어 볼겁니다.
+2- 로컬 좌표에 있던 게임 오브젝트들을 빛오브젝트 기준의 WVP 행렬을 곱해줍니다. 그러면 클립 포지션으로 넘어갑니다.
+3- 행렬을 곱한 벡터의 4번째 원소인 w 를 전체에 나눠줘야 비로소 Projection Position 으로 넘어옵니다. 그러면 가로세로 -1 ~ 1 사이의 값 그리고 깊이로 0 ~ 1 사이의 값을 가집니다.
+4- 이제 Depth = ProjPos.z  가 깊이 값입니다.
+
+이렇게 쉐도우 맵을 만드는 것은 생각보다 단순했습니다. 이 쉐도우 맵을 활용해서 메인카메라가 세상을 그릴 때 어느 픽셀에 그림자를 그릴지 안 그릴지를 판별해주게 됩니다.
+
+다음으로 쉐도우 맵을 LIGHTING 셰이더를 그릴 때 넘겨주게 되고 빛이 모든 픽셀마다 그림자가 있어야 하는지 체크해볼겁니다.
+어떻게 체크하는지를 예시로 들어보겠습니다.
+임의의 점 하나를 체크한다고 해보겠습니다. 이 시점에서 메인카메라의 ViewPos 를 구할 수 있을겁니다. G_BUFFER 에서 PS 의 output.position 이 ViewPos 입니다. 
+이걸 이용해서 카메라의 ViewInverseMatrix 를 이용해서 WorldPos로 넘어갈겁니다. 
+(ViewInverseMatrix 는 지금까지 만든적은 없지만 셰이더에서 구현을 해도 되고 아니면 CPU 에서 함수로 계산을 하고 넘겨줘도 될것입니다.)
+이제 이 임의의 점이 월드 포지션으로 왔는데 이걸 이제 빛오브젝트의 카메라 시점으로 변환을 해줄겁니다. 
+빛 오브젝트의 ViewProjection 변환 행렬을 구해서 곱해주면 다시 빛오브젝트의 ClipPos 이고 다시 w 값으로 나눠주면 빛오브젝트의 ProjPos 까지 옵니다. 
+그러면 이 점은 -1 ~ 1 사이의 x,y 값이 나오고 이걸 uv 좌표계로 환산을 해줄겁니다.
+(투영좌표계는 -1 ~ 1 사이의 값인 반면, uv 좌표계는 0 ~ 1 사이의 값입니다. 즉 결과값에 +1 을 한 후 2로 나누면 uv 좌표계로 환산이 됩니다.)
+이제 uv 좌표를 알게되었으면 쉐도우 맵의 같은 좌표에서 Depth 값을 비교 해주면 됩니다. 
+
+메인카메라와 빛오브젝트 카메라 사이의 공통된 스페이스인 world 스페이스 까지 거슬러 올라 간다음 빛 오브젝트 시점의 투영자표계까지 오고 이제 그 해당 점의 
+z 값과 쉐도우 맵의 Depth 값을 비교 한다는 이야깁니다. 
+
+또 한번 더 정리하면 깊이를 측정하는 두가지 방법이 있는겁니다. 
+1 - 메인카메라에서 찍은 어떤 점을 ViewInverseMatrix 를 사용해 WorldPos로 변환 후 빛 오브젝트 기준의 ViewProjection 변환을 진행해서 ProjPos - uv 좌표계 까지 
+    변환한 다음 변환된 점의 좌표의 z값이 최종 화면의 어떤 점을 빛 오브젝트 시점의 깊이값을 나타냅니다.
+2 - 두번째 방법은 쉐도우 맵이라는 텍스쳐가 무엇을 의미하는지를 뜻하는 겁니다. 위에서 설명했듯이 처음부터 빛 오브젝트의 시선에서 월드를 찍는것인데 
+    빛 카메라에 찍히는 물체들을 빛 카메라의 uv 좌표까지 변환을 진행시켜서 각 픽셀들이 가지고 있는 z 값을 저장하는 텍스쳐 입니다. 이때의 Depth 값은 
+    DepthStencile 기법으로 가장 가까이 있는 물체의 픽셀을 저장하고 그 뒤에 곂쳐있는 물체들은 그려주지 않기 때문에 빛 카메라와 가장 가까이 있는 
+    픽셀의 깊이값만을 저장하게 됩니다.
+
+그림자를 표현한다는 것은 물체를 더욱 사실적으로 표현할 수 있다는 장점과 그림자를 표현하려면 깊이를 비교해야 하기 때문에 카메라 연산을 두번 해줘야 한다는 
+단점이 있습니다.
+
+마지막으로 쉐도우 맵의 크기를 어떻게 해야할지를 고민이 됩니다. 
+지금까지 최종 화면에 표현되는 것들은 메인 카메라가 찍는 800 x 600 크기의 윈도우창 안에서 표현되고 그것에 맞게끔 텍스쳐를 잡아 줬었는데
+같은 크기의 쉐도우 맵을 사용하면 그림자가 많이 각지고 안이쁘게 나올겁니다. 그래서 쉐도우 맵의 경우 기존의 해상도보다 큰 해상도의 텍스쳐를 사용해야 합니다.
+
+이제 이 내용들을 코드로 구현해보겠습니다. 
+
+
+- 코드 
+
+1) 셰이더 파일 
+
+1-1) shadow.fx 
+셰이더 파일 부터 시작할건데 일단 shadow 라는 이름의 새 셰이더 파일을 만들어 주었습니다. 
+
+먼저 VS 에서 인풋과 아웃풋 의 구조체입니다.
+struct VS_IN
+{
+    float3 pos : POSITION;
+};
+
+struct VS_OUT
+{
+    float4 pos : SV_Position;
+    float4 clipPos : POSITION;
+};
+
+쉐도우 셰이더 에서는 어떤 점의 깊이 값을 알고 싶은 것이기 때문에 인풋으로 포지션만 받습니다. 그런데 아웃풋은 SV_Position 과 clipPos 라는 값 두개를 들고 있습니다. 
+왜그런지 알기 위해서 VS_Main 함수의 코드도 보겠습니다.
+VS_OUT VS_Main(VS_IN input)
+{
+    VS_OUT output = (VS_OUT)0.f;
+
+    output.pos = mul(float4(input.pos, 1.f), g_matWVP);
+    output.clipPos = output.pos;
+
+    return output;
+}
+
+코드가 간단합니다. 반환할 아웃풋.pos 에는 input.pos 에 w 값 1 을 추가하고 WVP 변환까지 해서 넘겨줍니다. 그리고 같은 값을 output.clipPos 에 받아주고 있습니다. 
+왜 똑같은 값을 두번 받아주는지 의아하지만 차이는 VS_OUT 에 있습니다. 
+
+VS_OUT 의 pos 는 SV_Position 으로 되어있습니다. 이 타입은 나중에 픽셀셰이더로 넘어갈때 자동으로 픽셀 좌표가 되어버립니다. 이걸 uv 좌표계로 변환하기 위해 
+화면의 width, height 를 따로 받아서 나눠 변환해줘야 했었는데 그 방법 대신 그냥 클립 포지션 그대로 넘어가는 clipPos 라는 데이터를 저장해서 픽셀 셰이더로 넘기고 있습니다.
+
+float4 PS_Main(VS_OUT input) : SV_Target
+{
+    return float4(input.clipPos.z / input.clipPos.w, 0.f, 0.f, 0.f);
+}
+
+이렇게 PS_Main 에서 SV_Position 의 값은 안쓰고 클립 포지션의 z 값을 w 로 나눠줘서 투영 좌표계에서의 z 값을 얻고 이 값은 uv 에서도 똑같기 때문에 
+픽셀의 색중 빨간색 성분에 담아주고 있습니다. 
+값이 리턴이 되면 SV_Target 에 담아주게 됩니다. 쉐도우 셰이더에서 계산한 값을 SV_Target 에 담아서 다른 LIGHTING 연산 같은데에서 사용될 수 있게 해줍니다.
+
+깊이 값을 일부러 저장하지 않으면 쥐도 새도 모르게 넘겨지는 데이터지만 일부러 쉐도우 맵 텍스쳐로 남기면서 그림자를 연산하는데 사용할 수 있습니다. 
+
+이게 쉐도우 셰이더의 끝이고 이게 렌더링전에 그림자가 적용되는 모든 물체에 적용이 될겁니다. 
+
+1-2) lighting.fx
+다음은 라이팅 셰이더입니다. 
+일단 그림자를 모든 조명에 넣으면 너무 느리니까 Directional Light 에게만 넣어줘 보겠습니다. 
+
+// 기존의 Directional Lignt PS_Main 입니다.     
+PS_OUT PS_DirLight(VS_OUT input)
+{
+    PS_OUT output = (PS_OUT)0;
+
+    float3 viewPos = g_tex_0.Sample(g_sam_0, input.uv).xyz; // 물체의 픽셀을 View Space 에서의 Position 을 샘플링해서 받습니다.
+    if (viewPos.z <= 0.f)   // 해당 픽셀의 ViewPos 중 z 값 깊이가 0 이하인지 체크하는건 이 픽셀이 카메라 뒤쪽에 있는지를 체크합니다. 
+        clip(-1);           // 카메라 뒤에 있다면 스킵하는 코드입니다.
+
+    float3 viewNormal = g_tex_1.Sample(g_sam_0, input.uv).xyz;
+
+    LightColor color = CalculateLightColor(g_int_0, viewNormal, viewPos);   // 이전에 utils.fx 에 만들었던 함수 CalculateLightColor 입니다. 
+    output.diffuse = color.diffuse + color.ambient;
+    output.specular = color.specular;
+
+    return output;
+}
+
+색을 계산하는 부분은 CalculateLightColor 함수를 호출하는 부분입니다. 
+
+    LightColor color = CalculateLightColor(g_int_0, viewNormal, viewPos);
+
+lighting 셰이더에 넘겨주는 파라미터중 g_int_0 이 지금 계산하는 빛의 lightIndex 였고 Deferred 에서 계산한 ViewPos, viewNormal 도 넘겨줍니다. (아마도?)
+
+이 부분을 한번 과정을 넣어서 그림자 연산을 할지를 체크하겠습니다.
+
+    // 그림자
+    if (length(color.diffuse) != 0) // diffuse 가 0 이라면 애초에 아무것도 보이지 않는점일것입니다. 
+    {
+        matrix shadowCameraVP = g_mat_0;    // ShadowCamera VP 를 받아줍니다. 
+
+        float4 worldPos = mul(float4(viewPos.xyz, 1.f), g_matViewInv);  // ViewPos 에 ViewInverse 를 곱해주고 있습니다. 그러면 worldPos 죠
+        float4 shadowClipPos = mul(worldPos, shadowCameraVP);   // worldPos 에 shadowCameraVP 를 곱하면 빛 오브젝트 시점의 클립 스페이스로 갑니다.
+        float depth = shadowClipPos.z / shadowClipPos.w;    // Rasterize 단계를 거치지 않고 바로 투영좌표계에서의 깊이를 가져옵니다.
+
+        // x [-1 ~ 1] -> u [0 ~ 1]  여기서는 투영 좌표계의 x,y 범위를 -1 ~ 1 에서 uv 좌표계의 범위 0 ~ 1 로 변환하고 있습니다. 
+        // y [1 ~ -1] -> v [0 ~ 1]
+        float2 uv = shadowClipPos.xy / shadowClipPos.w;
+        uv.y = -uv.y;
+        uv = uv * 0.5 + 0.5;
+
+        if (0 < uv.x && uv.x < 1 && 0 < uv.y && uv.y < 1)   // 해석하자면 이 점이 빛 오브젝트에서 볼때 uv 좌표계 안에 있는가를 체크
+        {
+            float shadowDepth = g_tex_2.Sample(g_sam_0, uv).x;  // shadow.fx 에서 만든 쉐도우 맵에서 같은 좌표의 깊이값을 가져옵니다. 
+            if (shadowDepth > 0 && depth > shadowDepth + 0.00001f)  
+            // 깊이를 비교해서 쉐도우 맵의 깊이값보다 깊으면 그림자 처리를 해줍니다.
+            // 이때 0.00001f 라는 값을 더해주는 이유는 float 가 컴퓨터에서 처리되는데 오차가 나기 쉬워서 확실히 하려고 일정 값을 더해주었습니다.    
+            {
+                color.diffuse *= 0.5f;      // diffuse 값을 절반으로 설정했습니다. 0.2 나 0.3 으로 더 낮추면 그림자가 그만큼 더 짙어집니다.
+                color.specular = (float4) 0.f;  // 직반사광을 0으로 밀어줬습니다.
+            }
+        }
+    }
+
+/*
+이 코드를 해석하기 전에 먼저 lighting.fx 가 받을 파라미터가 두개 더 추가 되었는데 Shadow RT 와 ShadowCamera VP 입니다.
+// g_tex_2 : Shadow RT
+// g_mat_0 : ShadowCamera VP
+
+g_tex_2 은 shadow.fx 에서 저장한 텍스쳐 쉐도우 맵을 받아줄것이고 g_mat_0 에서는 메인카메라에서 이 점이 그림자가 있는가를 판별할때 필요한 
+빛 오브젝트의 카메라 기준 View, Projection 변환행렬입니다. 
+여태까지 Material Params 에서 행렬 타입 파리미터를 넘겨준적이 없는데 종종 사용할 수도 있으니까 추가해줄겁니다. 
+
+// params.fx
+cbuffer MATERIAL_PARAMS : register(b2)
+{
+    // 생략
+    row_major float4x4 g_mat_0;
+    row_major float4x4 g_mat_1;
+    row_major float4x4 g_mat_2;
+    row_major float4x4 g_mat_3;
+}
+이부분과 CPP 코드를 연결하는 부분은 나중에 해주겠습니다.
+*/
+
+worldPos 를 계산할때 사용한 g_matViewInv 행렬은 View 행렬의 역행렬인데 이걸 셰이더 코드에서 간편하게 계산하는 방법이 없기 때문에 
+직접 만들던가 아니면 CPU에서 이미 있는 함수를 사용해 계산한다음 셰이더로 넘기던가 해야하는데 우리 프로젝트에서는 CPU에서 계산해서 넘기는 방법으로 하겠습니다. 
+
+계산하는 CPP 코드는 나중에 만들어주고 일단은 셰이더 코드에서 구색을 맞춰주겠습니다. 이것도 params.fx 에서 추가해줄겁니다. 
+cbuffer TRANSFORM_PARAMS : register(b1)
+{
+    row_major matrix g_matWorld;
+    row_major matrix g_matView;
+    row_major matrix g_matProjection;
+    row_major matrix g_matWV;
+    row_major matrix g_matWVP;
+    row_major matrix g_matViewInv;  // 추가된 코드: 이 뷰의 역행렬을 추가로 받아줄겁니다. 
+};
+
+이렇게가 그림자를 표현하는데 셰이더 코드에서의 내용입니다. Deferred 코드가 안나오는데 그림자는 shadow.fx 와 liging.fx 에서 관여하는 것입니다. 
+
+이제 CPP 코드를 수정할건데 무엇부터 할거냐면
+params.fx 에서 이번에 새로 추가했지만 CPP 코드에는 적용되지않은 것들을 보겠습니다. 
+
+
+2) EnginePch.h
+우선 parmas -> TRANSFORM_PARAMS 에 추가된 g_matViewInv 행렬을 적용시켜줄겁니다. 
+
+EnginePch 에서 struct TransformParams 를 관리하고 있었습니다.
+// EnginePch.h
+struct TransformParams
+{
+	Matrix matWorld;
+	Matrix matView;
+	Matrix matProjection;
+	Matrix matWV;
+	Matrix matWVP;
+	Matrix matViewInv;
+};
+
+이거 말고도 cbuffer MATERIAL_PARAMS 에 행렬도 넘겨주는 부분도 있었는데 그건 나중에 수정해줄겁니다.
+
+
+3) Light
+오늘의 주인공이라고 할 수 있는 Light 컴포넌트입니다. 
+여기서 할 작업은 맨처음 배웠던 개론을 떠올려보면 이제 빛 오브젝트에서 깊이를 찍을 카메라를 들고 있어야 합니다. 모든 빛오브젝트마다 카메라 컴포넌트를 들고 있게 하는게 아닌 
+그 기능을 그냥 추가하면 되겠습니다.
+
+멤버 변수를 추가했습니다.
+	shared_ptr<GameObject> _shadowCamera;
+
+이 GameObject 타입 스마트 포인터만 들고 있어봤자 사용할수가 없습니다. make_shared 는 Light 의 생성자에서 해주겠습니다. 
+이러면 항상 들고 있을것입니다. 
+
+Light::Light() : Component(COMPONENT_TYPE::LIGHT)
+{
+	_shadowCamera = make_shared<GameObject>();
+	_shadowCamera->AddComponent(make_shared<Transform>());
+	_shadowCamera->AddComponent(make_shared<Camera>());
+	uint8 layerIndex = GET_SINGLE(SceneManager)->LayerNameToIndex(L"UI");
+	_shadowCamera->GetCamera()->SetCullingMaskLayerOnOff(layerIndex, true); // UI는 안 찍음
+}
+
+이 카메라는 Scene에 add 되서 렌더링때 불리는게 아니고 Light 컴포넌트가 몰래 간직하고 있을겁니다. 
+그리고 이 카메라도 Transform 을 들고 있는데 광원과 같은 위치 같은 방향을 가진다고 했습니다. 그러면 이걸 어디서 정해주느냐 하면 
+기존 Light 클래스 코드를 보면 Light::FinalUpdate 에서 _lightInfo.position = GetTransform()->GetWorldPosition() 을 해주고 있습니다. 
+
+여기서 같이 _shadowCamera 의 Transform 도 업데이트 해주겠습니다. 
+
+void Light::FinalUpdate()
+{
+	_lightInfo.position = GetTransform()->GetWorldPosition();
+
+	_shadowCamera->GetTransform()->SetLocalPosition(GetTransform()->GetLocalPosition());
+	_shadowCamera->GetTransform()->SetLocalRotation(GetTransform()->GetLocalRotation());
+	_shadowCamera->GetTransform()->SetLocalScale(GetTransform()->GetLocalScale());
+
+	_shadowCamera->FinalUpdate();
+}
+
+이제 빛과 카메라가 호출되는 순서로 분석을 해보겠습니다.
+일단 빛 렌더를 해주기 전에 쉐도우를 렌더 해줄겁니다. 셰이더 코드에서도 shadow.fx 부터 연산하고 만든 쉐도우 맵으로 빛연산에서 그림자를 표현했듯이 
+
+void Light::RenderShadow()
+{
+	_shadowCamera->GetCamera()->SortShadowObject();
+	_shadowCamera->GetCamera()->Render_Shadow();
+}
+
+이때 사용되는 Camera 클래스의 멤버 함수들이 처음 보는 것들입니다. 그래도 일단 이 함수들이 하는 역할을 생각하면 
+아마 SortShadowObject 에서 그림자의 영향을 받는 물체와 받지 않는 물체를 정렬해주고 Render_Shadow 에서 그림자의 영향을 받는 물체들을 그려주는것 같습니다.
+
+이 함수들을 구현해주는 것 부터 하고 오겠습니다. 
+
+    3-1) Camera
+    지금까지 카메라에서 SortGameObject 라는 함수에서 물체가 사용하는 셰이더에 따라 forward, deferred, particle 로 분류를 해줬습니다.
+
+    이것과 비슷하게 그림자에도 적용을 해줄건데 분류를 해서 넣어줄 vector 부터 만들어 주겟습니다.
+
+        vector<shared_ptr<GameObject>>	_vecShadow;
+
+    그리고 그림자 분류 함수입니다. 
+    void Camera::SortShadowObject()
+    {
+        shared_ptr<Scene> scene = GET_SINGLE(SceneManager)->GetActiveScene();
+        const vector<shared_ptr<GameObject>>& gameObjects = scene->GetGameObjects();   
+        // 활성화된 Scene 의 게임 오브젝트들을 꺼내고 있습니다.
+
+        _vecShadow.clear();  // 분류 시작하기 전에 이전 프레임의 데이터를 날려줍니다. 
+
+        for (auto& gameObject : gameObjects)
+        {
+            if (gameObject->GetMeshRenderer() == nullptr)   // 게임 오브젝트가 메쉬 렌더러를 들고 있어야 화면에 그려질것이기 때문에 가장 먼저 체크
+                continue;
+
+            if (gameObject->IsStatic()) // static, 정적인지를 물어봅니다. 정적인 물체라는것은 유니티에서 게임 상황에 맞춰 동적으로 움직이는 그림자가 아닌 
+                                        // 정적인 그림자를 가지고 있는지를 물어보는 내용인데 지금은 일단 그림자의 영향을 받는지를 물어보는 용도로 사용합니다.
+                continue;
+
+            if (IsCulled(gameObject->GetLayerIndex()))  // 컬링되었으면 스킵
+                continue;
+
+            if (gameObject->GetCheckFrustum())
+            {
+                if (_frustum.ContainsSphere(
+                    gameObject->GetTransform()->GetWorldPosition(),
+                    gameObject->GetTransform()->GetBoundingSphereRadius()) == false)
+                {
+                    continue;
+                }
+            }
+
+            _vecShadow.push_back(gameObject);   // 여기까지 통과했으면 화면에 그려질 오브젝트이고 그림자의 영향을 받는 오브젝트입니다.
+        }
+    }
+
+        3-1-1) 
+        이 코드를 추가하고 생기는 에러 IsStatic 을 해결하기위해서 GameObject 에서 관련 내용을 추가해줄겁니다.
+        // GameObject
+
+            void SetStatic(bool flag) { _static = flag; }
+            bool IsStatic() { return _static; }
+            
+            bool _static = true;
+        
+        이러면 기본적으로는 static 인 물체들이 되고 동적인 물체가 되려면 따로 SetStatic 으로 설정해줘야 하겠습니다.
+    
+    3-1) Camera
+    이제 SortShadowObject 은 됐고 분류된 _vecShadow 를 그려주는 Render_Shadow 를 만들 차례입니다.
+    
+    void Camera::Render_Shadow()
+    {
+        S_MatView = _matView;
+        S_MatProjection = _matProjection;
+
+        for (auto& gameObject : _vecShadow)
+        {
+            gameObject->GetMeshRenderer()->RenderShadow();
+        }
+    }
+
+    _shadowCamera 도 카메라이다 보니까 그릴때 자신을 기준으로 그려져야 하니까 Static 행렬들에 자신의 행렬을 덮어 씌우고 있습니다. 
+    그리고 나서 MeshRenderer 에 RenderShadow 라는 함수를 또 파줬습니다.
+
+        3-1-2) MeshRenderer
+        MeshRenderer 에는 원래 두가지 Render 버전이 있었습니다. 가장 처음에 만들었던 인자없는 Render 버전 이건 게임 오브젝트의 MeshRenderer가 직접 들고 있는 
+        material 과 mesh 를 사용하는 Render 였고 
+        두번째 Render는 InstancingManager 에서 InstancingBuffer 를 인자로 받는 Render 입니다. mesh 를 Render 할때 인자를 넘겨줍니다. 
+
+        이번에 만들 RenderShadow 는 material을 넘길때 Resources 에서 가져와서 넘깁니다.  (지금 쉐도우는 인스턴싱 버전을 만들지 않을겁니다. 지금은 쉐도우에 집중하기 위해)
+        
+        void MeshRenderer::RenderShadow()
+        {
+            GetTransform()->PushData();
+            GET_SINGLE(Resources)->Get<Material>(L"Shadow")->PushGraphicsData();
+            _mesh->Render();
+        }
+
+        왜 따로 Resources 에서 마테리얼을 부르냐면 마테리얼안의 셰이더를 아까 만든 shadow.fx 로 부르기 위해서입니다. 
+        아직 Resources 에서 default material을 만들지 않았지만 일단 Light로 돌아가 보겠습니다.
+
+3)Light
+
+void Light::RenderShadow()
+{
+	_shadowCamera->GetCamera()->SortShadowObject();
+	_shadowCamera->GetCamera()->Render_Shadow();
+}
+이제 이 함수안의 내용물을 만들었습니다. 그림자의 영향을 받는 오브젝트들을 모아서 렌더링을 해주는데 그때 사용할 셰이더를 shadow.fx 로 지정하는 코드인 것입니다.
+
+그러면 이 Light::RenderShadow 를 어디서 호출할 것인가를 생각해보겠습니다. 
+
+오브젝트들이 실행되는 곳은 Scene 에서 였으니 그쪽을 보겠습니다. 
+
+
+4) Scene 
+
+Scene 에서 오브젝트들을 그려주는곳은 역시 Scene::Render 입니다.
+
+void Scene::Render()
+{
+	PushLightData();
+
+	// SwapChain Group 초기화
+	int8 backIndex = GEngine->GetSwapChain()->GetBackBufferIndex();
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::SWAP_CHAIN)->ClearRenderTargetView(backIndex);
+	// Deferred Group 초기화
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::G_BUFFER)->ClearRenderTargetView();
+	// Lighting Group 초기화
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::LIGHTING)->ClearRenderTargetView();
+
+
+	// Deferred OMSet
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::G_BUFFER)->OMSetRenderTargets();
+
+	shared_ptr<Camera> mainCamera = _cameras[0];
+	mainCamera->SortGameObject();
+	mainCamera->Render_Deferred();
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::G_BUFFER)->WaitTargetToResource();
+
+	RenderLights();
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::LIGHTING)->WaitTargetToResource();
+
+	RenderFinal();
+
+	mainCamera->Render_Forward();
+
+	for (auto& camera : _cameras)
+	{
+		if (camera == mainCamera)
+			continue;
+
+		camera->SortGameObject();
+		camera->Render_Forward();
+	}
+}
+
+지금까지 이런저런 기능들을 추가하다 보니 코드가 너무 길어졌습니다.  이번 기회에 정리도 하면서 Light::RenderShadow 도 추가 해주겠습니다.
+
+위의 코드를 역할로 구분하면 먼저 렌더 타겟 그룹들을 clear 해주는 부분이 있습니다. 
+
+그다음은 Deferred 를 렌더링하고 있습니다. 이 부분부터 물체들을 그리기 시작하는데 그림자를 적용시키려면 물체를 그릴때 이미 쉐도우 맵 텍스쳐가 있어야합니다. 
+그러므로 Clear 하는 다음 코드는 RenderShadow 입니다.
+사실 shadow 를 deferred 다음에 해줘도 됩니다. Light 이전에만 하면 됩니다.
+
+이제 RenderDeferred, RenderLight, RenderFinal, RenderForward 순으로 정리할수 있습니다.
+// 정리 후 
+void Scene::Render()
+{
+	PushLightData();
+
+	ClearRTV();
+
+	RenderShadow(); 
+	
+	RenderDeferred();
+
+	RenderLights();	
+
+	RenderFinal();
+
+	RenderForward();
+}
+
+이렇게 함수로 정리하는것은 코드에 기능향상을 위한 것 뿐만이 아니라 코드의 가독성을 좋게 하기 위해서도 사용하는게 권장이 됩니다.
+순서대로 함수들의 내용을 채워주겠습니다.
+
+void Scene::ClearRTV()
+{
+	// SwapChain Group 초기화
+	int8 backIndex = GEngine->GetSwapChain()->GetBackBufferIndex();
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::SWAP_CHAIN)->ClearRenderTargetView(backIndex);
+	// Shadow Group 초기화
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::SHADOW)->ClearRenderTargetView();     // 이부분이 추가됨
+	// Deferred Group 초기화
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::G_BUFFER)->ClearRenderTargetView();
+	// Lighting Group 초기화
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::LIGHTING)->ClearRenderTargetView();
+}
+새로운 렌더 타겟 그룹인 SHADOW가 등장했는데 지금 만들지는 않고 나중에 하겠습니다.
+Shadow 를 파이프라인 중간에 저장해 놓기 위해 추가된 겁니다.
+
+void Scene::RenderShadow()
+{
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::SHADOW)->OMSetRenderTargets();
+
+	for (auto& light : _lights)
+	{
+		if (light->GetLightType() != LIGHT_TYPE::DIRECTIONAL_LIGHT)
+			continue;
+
+		light->RenderShadow();
+	}
+
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::SHADOW)->WaitTargetToResource();
+}
+이 함수가 하는 일도 단순한데 shadow 타입의 렌더 타겟 그룹을 OMSetRenderTargets(렌더 타겟 뷰 를 Output Merge 단계의 렌더 타겟으로 설정) 을 하고 
+가지고 있는 _lights 를 체크하는데 Directional Light 가 아니면 그냥 통과시키고 맞다면 RenderShadow 합니다. 
+마지막으로 resource barrier 로 동기화를 합니다.
+
+
+void Scene::RenderDeferred()
+{
+	// Deferred OMSet
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::G_BUFFER)->OMSetRenderTargets();
+
+	shared_ptr<Camera> mainCamera = _cameras[0];
+	mainCamera->SortGameObject();
+	mainCamera->Render_Deferred();
+
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::G_BUFFER)->WaitTargetToResource();
+}
+다음 렌더 디퍼드입니다. OMSetRenderTargets 하고 Deferred 오브젝트를 그려줄 메인 카메라를 찾아서 Render_Deferred 합니다. 동기화도 합니다.
+
+
+void Scene::RenderLights()
+{
+	shared_ptr<Camera> mainCamera = _cameras[0];
+	Camera::S_MatView = mainCamera->GetViewMatrix();
+	Camera::S_MatProjection = mainCamera->GetProjectionMatrix();
+
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::LIGHTING)->OMSetRenderTargets();
+
+	// 광원을 그린다.
+	for (auto& light : _lights)
+	{
+		light->Render();
+	}
+
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::LIGHTING)->WaitTargetToResource();
+}
+여기서는 다시 메인 카메라를 가져오고 전역 행렬들을 다시 덮어쓰고 있습니다. 왜냐면 RenderShadow 를 호출하면서 쉐도우 맵을 그리기 위해 빛오브젝트 기준의 행렬로 
+한번 덮어쓴 상태이기 때문에 메인카메라 시점의 행렬로 바꾸는겁니다.
+그 밑 코드로는 비슷하게 OMSet, Render, WaitTargetToResource 을 해주고 있습니다.
+    4-1) Camera
+    Scene::RenderLight 에서 GetViewMatrix, GetProjectionMatrix 이 없어서 에러가 뜨고 있습니다. 간단하기 때문에 추가해주고 넘어가겠습니다.
+	class Camera
+    {
+    Matrix& GetViewMatrix() { return _matView; }
+	Matrix& GetProjectionMatrix() { return _matProjection; }
+    }
+
+4) Scene
+
+void Scene::RenderFinal()
+{
+	// Swapchain OMSet
+	int8 backIndex = GEngine->GetSwapChain()->GetBackBufferIndex();
+	GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::SWAP_CHAIN)->OMSetRenderTargets(1, backIndex);
+
+	GET_SINGLE(Resources)->Get<Material>(L"Final")->PushGraphicsData();
+	GET_SINGLE(Resources)->Get<Mesh>(L"Rectangle")->Render();
+}
+RenderLight 다음은 RenderFinal 인데 기존의 모든 부품들을 조립해줍니다.
+
+이렇게 Scene에서 Render 의 코드를 정리하면서 RenderShadow 도 추가해줬습니다.
+
+
+5) Camera 
+아까 Camera에 변환행렬을 꺼내는 함수를 추가한 김에 더 추가할것이 남았는데 마저 추가하겠습니다.
+지금까지 카메라는 프로그램 해상도인 800x600 으로 찍었었는데 앞서 알아본 대로 쉐도우도 800x600 으로 찍으면 너무 투박하게 나옵니다. 
+쉐도우는 원래 화면 크기보다 훨씬 크게 그려야 하기 때문에 카메라에서 조절을 해줘야합니다.
+
+	float _near = 1.f;
+	float _far = 1000.f;
+	float _fov = XM_PI / 4.f;
+	float _scale = 1.f;
+	float _width = 0.f;     // 추가
+	float _height = 0.f;    // 추가
+
+이 멤버 변수들을 수정할수 있도록 Set 함수들을 추가해주겠습니다. 
+
+	void SetNear(float value) { _near = value; }
+	void SetFar(float value) { _far = value; }
+	void SetFOV(float value) { _fov = value; }
+	void SetScale(float value) { _scale = value; }
+	void SetWidth(float value) { _width = value; }
+	void SetHeight(float value) { _height = value; }
+
+
+이제 다음으로 추가할 코드는 렌더 타겟 그룹입니다. 위에 Scene 에서도 사용하고 있었는데 아직 만들지는 않았었습니다.
+
+6) RenderTargetGroup
+
+enum class RENDER_TARGET_GROUP_TYPE : uint8
+{
+	SWAP_CHAIN, // BACK_BUFFER, FRONT_BUFFER
+	SHADOW, // SHADOW       추가된 코드
+	G_BUFFER, // POSITION, NORMAL, COLOR
+	LIGHTING, // DIFFUSE LIGHT, SPECULAR LIGHT	
+	END,
+};
+
+그리고 여기에 관련된 내용들도 추가해줍니다.
+
+enum
+{
+	RENDER_TARGET_SHADOW_GROUP_MEMBER_COUNT = 1, // 추가된 코드
+	RENDER_TARGET_G_BUFFER_GROUP_MEMBER_COUNT = 3,
+	RENDER_TARGET_LIGHTING_GROUP_MEMBER_COUNT = 2,
+	RENDER_TARGET_GROUP_COUNT = static_cast<uint8>(RENDER_TARGET_GROUP_TYPE::END)
+};
+
+이제 Scene에서 렌더 타겟 그룹을 가져올때 GEngine 에서 가져왔었습니다. 즉 Engine 에서 Shadow 타입의 렌더 타겟 그룹을 추가해 줘야합니다.
+
+
+7) Engine
+
+void Engine::CreateRenderTargetGroups()  이 함수인데 지금까지 Lighting Group 까지 만들어져 있습니다.
+
+추가될 Shadow Group 코드입니다.
+
+// Shadow Group
+{
+    vector<RenderTarget> rtVec(RENDER_TARGET_SHADOW_GROUP_MEMBER_COUNT); // 하나 짜리 vector 로 만들어 줬습니다.
+
+    rtVec[0].target = GET_SINGLE(Resources)->CreateTexture(L"ShadowTarget",
+        DXGI_FORMAT_R32_FLOAT, 4096, 4096,  // (4096,4096) 해상도로 만들고 있습니다.
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+        D3D12_HEAP_FLAG_NONE, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET, Vec4(1.f, 0.f, 0.f,0.f));   
+        // clear Value 를 x 에 1 로 설정해주고 있습니다. 이 x가 쉐도우 맵에서 깊이를 의미하는 값이었습니다. 깊이가 가장 깊다는 의미에서 1로 밀어주고 있는것 같습니다.
+        // 이 인자가 OptimizeClearValue 라고 해서 밀어줄때 더 빨리 동작 하게끔 해주는 역할을 합니다.
+    
+    rtVec[0].clearColor[0] = 1.f;   // 여기서 실질적으로 클리어되는 색상을 넣어주고 있습니다.
+
+    shared_ptr<Texture> shadowDepthTexture = GET_SINGLE(Resources)->CreateTexture(L"ShadowDepthStencil",    // 그림자용 깊이 텍스쳐를 만듭니다. 
+        DXGI_FORMAT_D32_FLOAT, 4096, 4096,                                                                 
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+        D3D12_HEAP_FLAG_NONE, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
+
+    _rtGroups[static_cast<uint8>(RENDER_TARGET_GROUP_TYPE::SHADOW)] = make_shared<RenderTargetGroup>();
+    _rtGroups[static_cast<uint8>(RENDER_TARGET_GROUP_TYPE::SHADOW)]->Create(RENDER_TARGET_GROUP_TYPE::SHADOW, rtVec, shadowDepthTexture);
+}
+그림자용 깊이 텍스쳐를 만들어놨습니다. 지금가지 다른 렌더 타겟 그룹에서는 CreateRenderTargetGroups 윗부분에서 만든 dsTexture 를 같이 사용했었습니다.
+	// DepthStencil
+	shared_ptr<Texture> dsTexture = GET_SINGLE(Resources)->CreateTexture(L"DepthStencil",
+		DXGI_FORMAT_D32_FLOAT, _window.width, _window.height,
+		CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+		D3D12_HEAP_FLAG_NONE, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
+하지만 그림자용 깊이 텍스쳐는 화면의 크기가 4096 씩으로 기존것과 다르기 때문에 따로 파주고 또 이걸 다른 렌더타겟그룹에서 사용할 것도 아니기 때문에 
+전용 깊이 텍스쳐를 만들어 줬습니다.
+
+그리고 또 한가지 포멧을 설정할때 R32_FLOAT 으로 되어있는데 다른 렌더 타겟 그룹들을 만들때는 R,G,B 세가지 다 들어가 있는 포멧으로 했었습니다.
+왜 이 포멧을 쓰냐면 문서에 나와있는데 32bit float in red channel 이라고 되어 있는데 이 포멧을 사용하면 red channel 말고 어떤 값이 있어도 색이 안바뀔겁니다.
+
+그리고 이 렌더타겟 그룹만 만들어 놓으면 문제가 생깁니다. 
+
+
+8) Shader
+셰이더 클래스에서는 CreateGraphicsShader 할때 셰이더 타입에 따라 이것 저것 세팅을 해주고 있습니다. 그중에 RTVFormat 을 설정하는 옵션들중 지금까지는
+R32_FLOAT 같은 옵션은없었습니다. 이부분을 수정해주겠습니다.
+
+// Shader.h
+enum class SHADER_TYPE : uint8
+{
+	DEFERRED,
+	FORWARD,
+	LIGHTING,
+	PARTICLE,
+	COMPUTE,
+	SHADOW,
+};
+
+// Shader::CreateGraphicsShader 
+{
+    // 생략  
+	case SHADER_TYPE::COMPUTE:
+		_graphicsPipelineDesc.NumRenderTargets = 0;
+		break;
+	case SHADER_TYPE::SHADOW:
+		_graphicsPipelineDesc.NumRenderTargets = 1;
+		_graphicsPipelineDesc.RTVFormats[0] = DXGI_FORMAT_R32_FLOAT;
+		break;
+}
+
+컴퓨트는 이전에 추가해주지 않았지만 사용하는 렌더 타겟이 0개 라서 괜찮았던것 같고 
+
+쉐도우는 이제 셰이더 클래스에서도 포멧을 맞춰줬습니다. 이 렌더타겟의 포멧과 셰이더의 포멧이 맞지 않으면 에러가 뜬다고 합니다.
+
+다음으로 고칠 부분은 Scene에 있습니다. Scene::RenderShadow 에서 _lights 중에 Directional Light 에만 light->RenderShadow 를 호출하고 있는데 
+이 light의 타입을 가져오는 코드인 light->GetLightType 이 아직 없습니다.
+
+
+9) Light 
+Light 에는 _lightInfo 라고 빛의 정보를 구조체에 가지고 있었고 여기에 lightType 을 int32 로 받아주고 있었습니다. 
+
+이걸 반환하는 함수를 만들었습니다.
+
+	LIGHT_TYPE GetLightType() { return static_cast<LIGHT_TYPE>(_lightInfo.lightType); }
+
+그리고 추가해줄 내용이 더있는데 지금까지 광원을 만들때 빛의 방향인 LightDirection 을 설정하는 함수 SetLightDirection 으로 빛의 방향을 설정했습니다. 
+그런데 이 함수는 실제 광원이 가지고 있는 Transform의 Direction을 바꿔주지는 않고 있었습니다.
+그런데 _shadowCamera 같은경우에는 Transform 의 Direciton 이 실제 찍는 방향이기 때문에 빛의 방향과 쉐도우 카메라의 방향이 같아야 정확한 쉐도우 맵을 만들 수 있을겁니다.
+
+이전에는 SetLightDirection 함수는 조금 단순했는데 수정해주겠습니다.
+
+void Light::SetLightDirection(Vec3 direction)
+{
+	direction.Normalize();
+
+	_lightInfo.direction = direction;
+
+	GetTransform()->LookAt(direction);
+}
+
+이전에는 _lightInfo.direction 에 인자를 넣어주는 부분 밖에 없었는데 이제는 먼저 단위 원자로 변환하고, lightInfo 설정, Transform 에 새로 만들어줄 LookAt 이라는 함수에
+도 인자를 넘겨주고 있습니다.
+
+
+10) Transform 
+빛의 Direciton 을 수정하는 함수인 LookAt 함수를 만듭니다. 그런데 생각보다 이 함수가 구현하기가 어려운데 도와줄 헬프 함수가 두개 더 필요합니다. 
+그래서 만들 이번에 추가할 함수는 총 3개입니다.
+
+	void LookAt(const Vec3& dir);
+
+	static bool CloseEnough(const float& a, const float& b, const float& epsilon = std::numeric_limits<float>::epsilon());
+	static Vec3 DecomposeRotationMatrix(const Matrix& rotation);
+
+함수들의 정의부도 살펴보겠습니다. 우선 LookAt 입니다.
+
+void Transform::LookAt(const Vec3& dir)
+{
+	Vec3 front = dir;   // 바라보고 싶은 방향을 front 라고 하는 패턴이 많습니다.
+	front.Normalize();
+
+	Vec3 right = Vec3::Up.Cross(dir);   // 이때 Vec3::Up 은 SimpleMath 에 기본 내장된 (0.f, 1.f, 0.f) 벡터입니다.
+	if (right == Vec3::Zero)    // Vec3::Up 과 인자 dir 가 일치할때의 예외처리
+		right = Vec3::Forward.Cross(dir);
+
+	right.Normalize();
+
+	Vec3 up = front.Cross(right);
+	up.Normalize();
+
+	Matrix matrix = XMMatrixIdentity();
+	matrix.Right(right);
+	matrix.Up(up);
+	matrix.Backward(front);
+    // 구함 front right up 을 담아주고 있습니다. 
+    // 그런데 forward가 아닌 backward 에 front 를 담아주고 있는건 SimpleMath 가 기본적으로 오른손 좌표계를 사용하고있고 우리 프로젝트는 왼손 좌표계를
+    사용하기 때문에 뒤집어 준겁니다.
+
+	_localRotation = DecomposeRotationMatrix(matrix);   // 헬퍼 함수로 _localRotation 에 값을 넣어주고 있습니다.
+}
+예전에 변환 행렬을 배울때 Look, Up, Right 라는 서로 수직된 방향 벡터들에 대해 배웠습니다. 어떤 물체가 로컬스페이스의 이 세 단위 벡터가 있다고 하면 
+이 물체를 월드 스페이스로 변환할때 원래 기저 벡터가 월드 스페이스에서 어떤 벡터인지를 각각 곱해주면 변환이 된다고 했었습니다. 
+
+지금 하려는것은 Direction 을 설정해주면 실제 물체의 Transform 의 Direction 도 설정되는걸 하고 싶은겁니다. 
+일단 보려는 방향은 알았고 나머지 Up, Right 를 구해줘야 하는데 이 것들을 구하는 방법중에 × 외적을 이용하는 방법이 있습니다. 
+
+우선 보려는 단위 벡터와 임의의 단위 벡타가 있다고 하겠습니다. 이때 임의의 단위 벡터는 보려는 방향과 수직이라는 보장이 없습니다. 
+이 두 벡터를 외적하게 되면 두 벡터와 수직인 벡터가 나오고 이 외적한 벡터와 기존의 보려는 방향 단위 벡터를 다시 외적하게되면 
+보려는 방향과 서로 수직인 벡터 두개가 구해집니다.
+
+헬퍼 함수들은 자세히 살펴보진않을겁니다. 짐벌락을 고려해서 값을 만들어주는 함수들이라고 합니다. 
+
+bool Transform::CloseEnough(const float& a, const float& b, const float& epsilon)
+{
+	return (epsilon > std::abs(a - b));
+}
+
+Vec3 Transform::DecomposeRotationMatrix(const Matrix& rotation)
+{
+	Vec4 v[4];
+	XMStoreFloat4(&v[0], rotation.Right());
+	XMStoreFloat4(&v[1], rotation.Up());
+	XMStoreFloat4(&v[2], rotation.Backward());
+	XMStoreFloat4(&v[3], rotation.Translation());
+
+	Vec3 ret;
+	if (CloseEnough(v[0].z, -1.0f))
+	{
+		float x = 0;
+		float y = XM_PI / 2;
+		float z = x + atan2(v[1].x, v[2].x);
+		ret = Vec3{ x, y, z };
+	}
+	else if (CloseEnough(v[0].z, 1.0f))
+	{
+		float x = 0;
+		float y = -XM_PI / 2;
+		float z = -x + atan2(-v[1].x, -v[2].x);
+		ret = Vec3{ x, y, z };
+	}
+	else
+	{
+		float y1 = -asin(v[0].z);
+		float y2 = XM_PI - y1;
+
+		float x1 = atan2f(v[1].z / cos(y1), v[2].z / cos(y1));
+		float x2 = atan2f(v[1].z / cos(y2), v[2].z / cos(y2));
+
+		float z1 = atan2f(v[0].y / cos(y1), v[0].x / cos(y1));
+		float z2 = atan2f(v[0].y / cos(y2), v[0].x / cos(y2));
+
+		if ((std::abs(x1) + std::abs(y1) + std::abs(z1)) <= (std::abs(x2) + std::abs(y2) + std::abs(z2)))
+		{
+			ret = Vec3{ x1, y1, z1 };
+		}
+		else
+		{
+			ret = Vec3{ x2, y2, z2 };
+		}
+	}
+
+	return ret;
+}
+
+이제 이렇게 해서 Light::SetLightDirection 으로 세팅을 하면 _lightInfo.direction 과 Transform._localRotation 도 같이 세팅이 되게 되었습니다.
+
+기능은 이제 다 만들어 진 것 같고 
+
+다음으로 할것은 Resources 에 가서 오늘 테스트에 필요한 부품들을 만들어 주겠습니다.
+
+
+11) Resources
+
+먼저 새로운 Default Material 을 만들어주겠습니다.
+
+// CreateDefaultShader
+
+	// Shadow
+	{
+		ShaderInfo info =
+		{
+			SHADER_TYPE::SHADOW,
+			RASTERIZER_TYPE::CULL_BACK,
+			DEPTH_STENCIL_TYPE::LESS,
+		};
+
+		shared_ptr<Shader> shader = make_shared<Shader>();
+		shader->CreateGraphicsShader(L"..\\Resources\\Shader\\shadow.fx", info);
+		Add<Shader>(L"Shadow", shader);
+	}
+
+// CreateDefaultMaterial
+
+	// Shadow
+	{
+		shared_ptr<Shader> shader = GET_SINGLE(Resources)->Get<Shader>(L"Shadow");
+		shared_ptr<Material> material = make_shared<Material>();
+		material->SetShader(shader);
+		Add<Material>(L"Shadow", material);
+	}
+
+이렇게 만들어 놓으면 MeshRenderer::RenderShadow 에서 "Shadow" 마테리얼을 가져와 렌더링하면서 shadow.fx를 불러와 쉐도우 맵을 만들어 주게 됩니다.
+
+이제 다음으로 할것은 테스트를 하기 위해 환경을 만들어 주겠습니다. 
+
+
+12) SceneManager
+LoadTestScene 으로 와서 환경을 만들어 줄것인데요 
+우선 광원이었던 Directional Light 를 조금 수정해주겠습니다. 방향을 아래를 바라보게 해주고 오늘 만들 물체들의 바로 위쪽에 위치하도록 해주겠습니다.
+
+#pragma region Directional Light
+	{
+		shared_ptr<GameObject> light = make_shared<GameObject>();
+		light->AddComponent(make_shared<Transform>());
+		light->GetTransform()->SetLocalPosition(Vec3(0, 1000, 500));    // 변경점
+		light->AddComponent(make_shared<Light>());
+		light->GetLight()->SetLightDirection(Vec3(0, -1, 0.f));         // 변경점
+		light->GetLight()->SetLightType(LIGHT_TYPE::DIRECTIONAL_LIGHT);
+		light->GetLight()->SetDiffuse(Vec3(1.f, 1.f, 1.f));
+		light->GetLight()->SetAmbient(Vec3(0.1f, 0.1f, 0.1f));
+		light->GetLight()->SetSpecular(Vec3(0.1f, 0.1f, 0.1f));
+
+		scene->AddGameObject(light);
+	}
+#pragma endregion
+
+UI 에서도 이전시간에 인스턴싱을 추가하면서 매핑했던 UI에 이번에는 쉐도우 맵을 매핑해보겠습니다.
+			shared_ptr<Texture> texture;
+			if (i < 3)
+				texture = GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::G_BUFFER)->GetRTTexture(i);
+			else if (i < 5)
+				texture = GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::LIGHTING)->GetRTTexture(i - 3);
+			else
+				texture = GEngine->GetRTGroup(RENDER_TARGET_GROUP_TYPE::SHADOW)->GetRTTexture(0);   // 변경점
+
+
+Object 도 50개나 그려주던걸 1개만 그려주고 수정할 부분들도 바꿔주겠습니다.
+
+#pragma region Object
+	{
+		shared_ptr<GameObject> obj = make_shared<GameObject>();
+		obj->AddComponent(make_shared<Transform>());
+		obj->GetTransform()->SetLocalScale(Vec3(100.f, 100.f, 100.f));      // 변경점
+		obj->GetTransform()->SetLocalPosition(Vec3(0, 0.f, 500.f));         // 변경점
+		obj->SetStatic(false);                                              // 변경점 static을 false로 하면 그림자 적용을 받는걸로 됩니다.
+		shared_ptr<MeshRenderer> meshRenderer = make_shared<MeshRenderer>();
+		{
+			shared_ptr<Mesh> sphereMesh = GET_SINGLE(Resources)->LoadSphereMesh();
+			meshRenderer->SetMesh(sphereMesh);
+		}
+		{
+			shared_ptr<Material> material = GET_SINGLE(Resources)->Get<Material>(L"GameObject");
+			meshRenderer->SetMaterial(material->Clone());                   // 변경점 인스턴싱이 아니니까 Clone 해줍니다.
+		}
+		obj->AddComponent(meshRenderer);
+		scene->AddGameObject(obj);
+	}
+#pragma endregion
+
+그리고 오브젝트를 하나 더 추가해줄건데 그림자가 표현되는걸 받아줄 바닥입니다.
+
+#pragma region Plane
+	{
+		shared_ptr<GameObject> obj = make_shared<GameObject>();
+		obj->AddComponent(make_shared<Transform>());
+		obj->GetTransform()->SetLocalScale(Vec3(1000.f, 1.f, 1000.f));
+		obj->GetTransform()->SetLocalPosition(Vec3(0.f, -100.f, 500.f));
+		obj->SetStatic(true);   // 그림자 영향을 받지않습니다.
+		shared_ptr<MeshRenderer> meshRenderer = make_shared<MeshRenderer>();
+		{
+			shared_ptr<Mesh> mesh = GET_SINGLE(Resources)->LoadCubeMesh();
+			meshRenderer->SetMesh(mesh);
+		}
+		{
+			shared_ptr<Material> material = GET_SINGLE(Resources)->Get<Material>(L"GameObject")->Clone();
+			material->SetInt(0, 0);
+			meshRenderer->SetMaterial(material);
+		}
+		obj->AddComponent(meshRenderer);
+		scene->AddGameObject(obj);
+	}
+#pragma endregion
+
+
+추가해줄 내용이 더 있습니다. 화면 크기에 대한것인데 지금까지 800x600 크기로 화면을 그려왔는데 그림자만 4096, 4096 크기로 그렸었습니다.
+이걸 Shadow Render Target Group 에 설정은 해놨지만 작동하게끔 고쳐놓지는 않았습니다. 
+이부분을 추가해주기 위해서 다시 Camera로 가겠습니다.
+
+
+13) Camera
+아까 위에서도 카메라에 이것저것 추가해줬었습니다. RenderShadow 관련 코드들과 width, height를 직접 세팅할 수 있는 코드였는데 
+이걸가지고 쉐도우 맵을 찍는 카메라를 세팅해주는 부분은 Light::SetLightType 입니다. 
+
+    13-1) Light
+    Light 클래스도 오늘 코드를 많이 추가했지만 빼먹은 부분이 있었습니다. 빛의 타입을 세팅하는 함수 SetLightType 에서 타입을 세팅하면서 
+    Directional Light 라면 그림자도 표현할것이기 때문에 Light 를 생성하면서 같이 세팅된 _shadowCamera 의 초기 값을 같이 세팅해주겠습니다.
+    
+	case LIGHT_TYPE::DIRECTIONAL_LIGHT:
+		_volumeMesh = GET_SINGLE(Resources)->Get<Mesh>(L"Rectangle");
+		_lightMaterial = GET_SINGLE(Resources)->Get<Material>(L"DirLight");
+
+		_shadowCamera->GetCamera()->SetScale(1.f);
+		_shadowCamera->GetCamera()->SetFar(10000.f);
+		_shadowCamera->GetCamera()->SetWidth(4096);
+		_shadowCamera->GetCamera()->SetHeight(4096);
+
+		break;
+
+    그리고 실질적으로 렌더링을 하는 부분에서 LightType 에 따라 Point 나 Spot 라이트같은경우에는 range의 2배가 되는 scale 로 설정해주고 하는 부분이 
+    있는데 Directional 타입일때 도 무언가 해주는 부분을 추가하겠습니다.
+        
+    void Light::Render()
+    {
+        assert(_lightIndex >= 0);
+
+        GetTransform()->PushData();
+
+        if (static_cast<LIGHT_TYPE>(_lightInfo.lightType) == LIGHT_TYPE::DIRECTIONAL_LIGHT) // 추가된 Direction 일때 내용
+        {
+            shared_ptr<Texture> shadowTex = GET_SINGLE(Resources)->Get<Texture>(L"ShadowTarget");   // Engine::CreateRenderTargetGroup 에서 만들어준 텍스쳐
+            _lightMaterial->SetTexture(2, shadowTex);
+
+            Matrix matVP = _shadowCamera->GetCamera()->GetViewMatrix() * _shadowCamera->GetCamera()->GetProjectionMatrix();
+            _lightMaterial->SetMatrix(0, matVP);    // SetMatrix 란 메소드는 아직 추가되지 않았습니다.
+        }
+        else    // 기존 Point, Spot 타입일경우 코드
+        {
+            float scale = 2 * _lightInfo.range;
+            GetTransform()->SetLocalScale(Vec3(scale, scale, scale));
+        }
+
+        _lightMaterial->SetInt(0, _lightIndex);
+        _lightMaterial->PushGraphicsData();
+
+        _volumeMesh->Render();
+    }
+
+    13-2) Material
+    SetMatrix 함수를 만들어주겠습니다. 이 부분은 처음 셰이더 코드를 만들때도 이제부터 행렬도 GPU에 넘겨서 사용한다고 했던 부분입니다. 
+
+    // class Material
+    {
+	    void SetMatrix(uint8 index, Matrix& value) { _params.SetMatrix(index, value); }
+    }
+
+    struct MaterialParams
+    {
+        void SetMatrix(uint8 index, Matrix& value) { matrixParams[index] = value; }
+
+        array<Matrix, MATERIAL_MATRIX_COUNT> matrixParams;
+    }
+    
+    enum
+    {
+        MATERIAL_INT_COUNT = 4,
+        MATERIAL_FLOAT_COUNT = 4,
+        MATERIAL_TEXTURE_COUNT = 4,
+        MATERIAL_VECTOR2_COUNT = 4,
+        MATERIAL_VECTOR4_COUNT = 4,
+        MATERIAL_MATRIX_COUNT = 4
+    };
+
+
+
+14) RenderTargetGroup
+길고 길었는데 이젠 정말 마지막 코드 추가이길 바라면서 가보겠습니다. 
+
+그림자 텍스쳐 이전에는 프로그램 윈도우 크기 기준으로 다 맞춰줬는데 그림자에서 더욱 큰 크기의 해상도를 가지도록 세팅해주고 있습니다. 
+이게 무슨말이냐면 이제 텍스쳐의 사이즈가 왔다갔다 달라지게 될겁니다. 그것을 이용해서 뭘 처리 해줘야 하냐면
+
+OMSetRenderTargets 하는 부분에서 지금까지는 SetViewport 하는 부분이 일정하도록 만들어져 있습니다. 그런데 이게 아니라 다시 계산을 하도록 만들어줘야합니다.
+렌더 타겟 벡터에다가 실제 width, height 를 가져와서 Viewport 와 Rect 를 다시 설정하는 코드를 추가해줘야합니다.
+
+void RenderTargetGroup::OMSetRenderTargets(uint32 count, uint32 offset)
+{
+	D3D12_VIEWPORT vp = D3D12_VIEWPORT{ 0.f, 0.f, _rtVec[0].target->GetWidth() , _rtVec[0].target->GetHeight(), 0.f, 1.f };
+	D3D12_RECT rect = D3D12_RECT{ 0, 0, static_cast<LONG>(_rtVec[0].target->GetWidth()),  static_cast<LONG>(_rtVec[0].target->GetHeight()) };
+
+	GRAPHICS_CMD_LIST->RSSetViewports(1, &vp);
+	GRAPHICS_CMD_LIST->RSSetScissorRects(1, &rect);
+
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(_rtvHeapBegin, offset * _rtvHeapSize);
+	GRAPHICS_CMD_LIST->OMSetRenderTargets(count, &rtvHandle, FALSE/*1개*/, &_dsvHeapBegin);
+}
+void RenderTargetGroup::OMSetRenderTargets()
+{
+	D3D12_VIEWPORT vp = D3D12_VIEWPORT{ 0.f, 0.f, _rtVec[0].target->GetWidth() , _rtVec[0].target->GetHeight(), 0.f, 1.f };
+	D3D12_RECT rect = D3D12_RECT{ 0, 0, static_cast<LONG>(_rtVec[0].target->GetWidth()),  static_cast<LONG>(_rtVec[0].target->GetHeight()) };
+
+	GRAPHICS_CMD_LIST->RSSetViewports(1, &vp);
+	GRAPHICS_CMD_LIST->RSSetScissorRects(1, &rect);
+
+	GRAPHICS_CMD_LIST->OMSetRenderTargets(_rtCount, &_rtvHeapBegin, TRUE/*다중*/, &_dsvHeapBegin);
+}
+
+그런데 이 코드를 추가하니 텍스쳐 쪽에서 또 누락한게 있는거 같습니다.
+
+    14-1) Texture
+    텍스쳐가 자신의 넓이, 높이를 외부로 꺼내주기 위해서는 그 값들을 기억하고 있어야 하는데 Load 나 Create 나 Decription 이란게 있습니다. 
+    이걸 기억해 뒀다가 꺼내 주면 될것 같습니다.
+    
+	D3D12_RESOURCE_DESC				_desc;
+	float GetWidth() { return static_cast<float>(_desc.Width); }
+	float GetHeight() { return static_cast<float>(_desc.Height); }
+
+    물론 이 멤버 변수를 들고 있기만하는게 아니라 실제 텍스쳐를 읽거나 만들때의 desc를 멤버변수에 저장해줘야 겠습니다.
+    기존 정의 부에서 스택 변수 desc 였던 부분을 모두 멤버변수 _desc 로 바꿔줍니다.
+
+
+14) RenderTargetGroup
+이제 RenderTargetGroup::OMSetRenderTargets 에서 누락된 텍스쳐 메소드가 완성되었습니다. 
+그렇게 받은 Viewport, Rect 를 커맨드 리스트->RSSetViewports, RSSetScissorRects 에 넘겨줄겁니다.
+
+그런데 이 뷰포트, 렉트를 설정하는것은 이번 수정 전에는 어디서 하고 있었는지가 궁금해집니다.
+CommandQueue::RenderBegin 중 마지막 줄 부근에 있엇습니다. 이때 인자로 들어가는 뷰포트, 렉트는 Engine 이 들고 있는 값들로 넘겨지는데 이것은 또 
+클라이언트에서 받은 WindowsInfo 의 값들입니다. 즉 프로그램이 실행되는 화면 크기를 항상 받아서 사용하고 있던겁니다. 
+
+이렇게 설정되는것 대신 이제는 렌더 타겟 그룹에서 OMSetRenderTargets 를 할때 받는 값으로 설정해준다는 것입니다. 그렇기 때문에 이제 커맨드 큐 렌더 비긴의 
+RSSetScissorRects,RSSetViewports 는 이제 없애줘도 괜찮다는 의미입니다.
+
+이때 까지 사용하던 윈도우 창의 크기는 아직까지 Engine 쪽에서 관리를 하고 있지만 항상 가져다 사용하는것이 아니고 필요할때 사용하게 되었습니다.
+
+
+15) Camera 
+이제 width 와 height 를 필요에 따라 설정해서 사용할 수 있기는 하지만 많은 상황에서 이전 처럼 윈도우의 화면크기를 받아서 사용하는게 더 편할겁니다. 
+
+카메라에서 넓이 높이를 세팅할 수 있게 만들었었는데 카메라의 생성자에 기본 넓이 높이를 받아오도록 해주겠습니다. 
+
+Camera::Camera() : Component(COMPONENT_TYPE::CAMERA)
+{
+	_width = static_cast<float>(GEngine->GetWindow().width);
+	_height = static_cast<float>(GEngine->GetWindow().height);
+}
+
+
+
+- 테스트 
+
+
+
+프로젝트를 실행해보면 크래쉬나지 않고 실행은 됩니다. 그런데 카메라를 움직여 보니 물체에 그림자가 생겼던게 아니고 카메라를 따라옵니다.
+
+그림자 색을 칠할 때 쉐도우 맵과 화면의 픽셀의 깊이를 비교할텐데 이 두 점을 비교할때 화면의 점이 ViewPos 로 넘겨집니다. 이걸 다시 ViewInverse 를 곱해서 
+월드 스페이스부터 다시 _shadowCamera 의 View,Projection 변환행렬을 곱해 비교했어야하는데 
+
+우리가 cpp 코드중 Transform::PushData 에 ViewInverse 를 추가해주지 않았습니다.
+
+void Transform::PushData()
+{
+	TransformParams transformParams = {};
+	transformParams.matWorld = _matWorld;
+	transformParams.matView = Camera::S_MatView;
+	transformParams.matProjection = Camera::S_MatProjection;
+	transformParams.matWV = _matWorld * Camera::S_MatView;
+	transformParams.matWVP = _matWorld * Camera::S_MatView * Camera::S_MatProjection;
+	transformParams.matViewInv = Camera::S_MatView.Invert();		// 추가된 코드 
+
+	CONST_BUFFER(CONSTANT_BUFFER_TYPE::TRANSFORM)->PushGraphicsData(&transformParams, sizeof(transformParams));
+}
+
+이러면 제대로 작동합니다.
+
+
+그런데 결과물에서 6번째 UI 텍스쳐가 전체가 빨간색입니다. 왜냐하면 Engine::CreateRenderTargetGroups -> Shadow Group 을 만들때 
+기본 OptimizeClearValue 를 (1.f, 0, 0, 0) 으로 설정했기 때문인데 이 부분은 꼭 이렇게가 아니더라도 여러 방법이 있을 수 있습니다. 
+기본 깊이가 1 이라고 설정한다면 아무것도 걸리는 일 없는 부분의 깊이는 1.f 라는 최대한의 깊이 입니다. 그리고 물체의 깊이와 비교하는 부분에는 
+쉐도우 맵의 깊이에 0.00001f 라도 더해서 비교하기때문에 그림자 영향을 받는 물체가 없는곳은 쉐도우 맵보다 깊이 있을 수 없습니다. 
+
+그래도 보기에 쉐도우 맵 텍스쳐가 새빨간것 보다 어디에 그림자 영향을 받는 물체가 있는지 확인하고 싶다면 
+OptimizeClearValue 를 없애주면 됩니다. 그러면 아무 물체도 없는 부분의 깊이는 0.f 가 되는데 쉐도우 맵 텍스쳐는 까맣게 되서 알아보기는 쉽지만 
+픽셀과 쉐도우 맵의 깊이 비교를 하게되면 왠만한 부분에 다 그림자자가 질것입니다. 이걸 방지하기위해 조건문을 추가해야하는데
+// lighting.fx -> PS_DirLight 
+
+            if (shadowDepth > 0 && depth > shadowDepth + 0.00001f)
+            {
+                color.diffuse *= 0.5f;
+                color.specular = (float4) 0.f;
+            }
+이렇게 쉐도우 맵 깊이가 아예 0 이면 안되게 조건을 추가하면되겠습니다.
+
+
+- 정리 
+
+한번 정리를 하겠습니다. 
+
+이번에 빛 오브젝트에 _shadowCamera 라는걸 배치하고 많은 기능들을 추가해줬습니다. 이 쉐도우 카메라는 빛 오브젝트의 FinalUpdate 때 같은 위치 같은 방향을 
+바라보도록 업데이트 됩니다. 
+
+그리고 물체들을 렌더 하기 전에 쉐도우 렌더가 먼저 호출이 됩니다. 그러면 물체들이 그려지기 전에 먼저 쉐도우 카메라가 쉐도우 맵 부터 만들게 됩니다. 
+그 텍스쳐는 이제 Shadow Group 에 담겨서 넘겨질겁니다. 
+
+다음으로 물체들을 렌더 하면서 중간 버퍼인 G_BUFFER 에 담기고 빛연산을 할때 최종 결과물의 색이 결정 되는데 이때 쉐도우 맵을 참조해서 각 픽셀들의 
+깊이값과 쉐도우 맵의 해당 위치의 깊이값을 비교하게 됩니다. 
+
+이 두 깊이값은 찍는 카메라 자체가 다른데도 비교를 할 수 있는건 아예 월드 스페이스 단계 까지 거슬러 올라가 다시 쉐도우 카메라의 뷰 프로젝션 변환행렬을 
+곱해줘서 두 깊이 값을 동등하게 비교 할 수 있습니다.
+
+중요 포인트는 이렇게 입니다.
