@@ -1,0 +1,485 @@
+
+
+        36. Tessellation (모자이크)
+
+
+이번주제는 Tessellation 입니다. 이 용어도 처음 보는 용어입니다. 그런데 지금까지 계속 다뤘던 내용에 연관된 용어인데
+
+DirectX 파트를 시작하면서 처음 배웠던 그래픽 렌더링 파이프라인의 과정중에서 유일하게 들어보지 못한 부분입니다. 
+
+InputAssembler -> VertexShader -> [         ] -> GeometryShader -> RasterizerStage -> PixelShader -> OutputMerge 
+
+이런 과정을 거치는데 각각의 용어들을 조금 배웠거나 본적이 있습니다. 
+
+그중 빈칸의 내용이 오늘의 주제인 Tessellation 인데 이 부분에는 3가지 스테이지가 있습니다. 
+
+Hull Shader Stage , Tessellator Stage , Domain Shader Stage 
+이렇게 세가지가 Tessellation 이라는 부분을 이루고 있습니다.
+
+
+그러면 Tessellation 이란 무엇인가를 알아보겠습니다.
+Tessellation 는 GeometryShader 와 비슷하게 정점을 추가하는 단계입니다. 그러면 둘다 정점을 추가하는 단계인데 왜 나눠 놨을까 의문이 듭니다.
+GeometryShader 가 일단 먼저 등장했었습니다. 그리고 파티클 시스템에서 했듯이 정점을 대량으로 생성하는 단계가 아닙니다.
+Tessellation은 좀 더 큰 규모의 정점을을 만들어 주는 단계라고 할 수 있습니다.
+
+그리고 Tessellation 을 사용할때 가장 큰 효과를 얻을 수 있는 부분이 동적 LOD 를 만들때 인데 
+
+LOD(Level Of Detail) 이란 용어가 처음 나왔으니까 한번 집고 넘어가보겠습니다.
+예시로 로봇 모양의 메쉬가 있다고 해보겠습니다. 이 로봇 메쉬를 여러개를 만들어 둘 건데 각각의 차이가 뭐냐면 로봇 메쉬의 폴리곤들을 점점 줄이면서 몇개를 만들어 둘겁니다.
+그리고 로봇 오브젝트가 카메라에서 멀어질수록 폴리곤이 적은 버전의 로봇 메쉬를 사용합니다.
+폴리곤 갯수가 늘어날수록 물체를 정밀하고 사실적으로 볼수 있는 반면 컴퓨터가 처리해야할 작업도 늘어나게 될겁니다. 
+폴리곤이 적어지면 그 반대의 효과가 날것인데 
+그래도 애당초 카메라에서 멀수록 물체를 정밀하게 그릴 이유가 없을겁니다. 가까이 있는 물체에 시선이 대부분 가 있을것이기 때문입니다.
+이렇게 메쉬를 바꿔치기 하는것이 LOD 기법이라고 합니다.
+
+이런 LOD 기법을 사용하는 방법중 위에 예시가 미리 여러개의 메쉬를 만들어 두고 상황에따라 필요한 메쉬를 가져다 사용하는건데 
+미리 만들어두는게 아니라 동적으로 그때 그때 정점들을 만들어 내거나 없애는 방법도 있을겁니다. 
+
+이 LOD 를 사용하는 대표적인 방법이 Terrain 입니다. 터레인은 게임에서 지형을 말하는데 지형도 폴리곤으로 되있습니다. 
+땅도 가까이 있는 땅은 세밀하게 표현할 수록 실감나겠지만 저 멀리 있는 땅은 아무리 세밀하게 표현해봣다 눈으로 구별할 수 없을겁니다.
+그래서 터레인도 LOD를 적용시켜서 가까이 있는 땅은 세밀하게 멀리 있는땅은 적은 폴리곤으로 표현한 터레인을 사용하면 좋겠습니다.
+이때 터레인은 지형을 나타내는데 LOD를 정적인 방법으로 표현하기 위해서 몇개의 지형 데이터를 가지고 있는것 보다 
+동적 LOD 를 사용해서 실시간으로 정점들을 조절해주는게 좋아 보입니다. 
+
+그리고 이때 Tessellation 단계에서 이 작업을 해줄 수 있습니다.
+
+터레인에 대해 배우기 전에 테셀레이션 부터 배우는 시간인겁니다. 
+
+
+Tessellation 은 3가지 단계로 이루어 져있다고 했는데 그중 Hull Shader, Domain Shader 단계를 어떻게 만들어 주는지가 주요 내용입니다. 
+중간의 Tessellator Stage 는 사람이 직접 건드리는 단계가 아니라 중간에 하드웨어에서 자동으로 처리해주는 단계입니다. 
+
+Tessellation 을 도입하게 되면 이전에 세팅했던 Topology 타입이 수정되야합니다. 
+지금까지는 Topology 를 Triangle 같이 완성된 물체로 넘겨줬지만 이제 Tessellation 이 개입하는 순간 다른 타입으로 넘겨줘야합니다.
+
+        D3D_PRIMITIVE_TOPOLOGY_(1~32)_CONTROL_POINT_PATCHLIST
+
+중간의 괄호에는 1 ~ 32 까지의 숫자가 각각 들어가는 32 개의 타입 중에 하나를 선택해서 넘겨줘야 합니다.
+
+앞으로 Control Point 와 Patch 라는 용어가 계속 등장하게 될겁니다. 
+
+Control Point 는 제어점을 의미합니다. 어떤 삼각형을 넘겨준다고 할 때 각 꼭지점을 제어점 Control Point 라고 할 수 있습니다. 정점같은걸 말하는것 같습니다. 
+Patch 는 이 제어점들 세개가 모여서 있는 이 세트 자체가 Patch 라는 용어로 부르게 됩니다. 즉, Patch 는 Control Point 의 그룹 이라고 볼 수 있습니다.
+
+왜 Vertex(정점) 라는 용어가 있는데 그걸 안 쓰고 Control Point(제어점) 라는 용어를 만들어서 사용하나면 비슷한 용어긴 하지만 컨트롤 포인트 같은 경우에는 제어를 한다는 
+뉘앙스가 강합니다. 
+
+예를들어서 베지에 곡선이라는 알고리즘이 있습니다. 이 알고리즘은 곡선을 부드럽게 그리기 위한 알고리즘인데 몇가지 기준점을 잡고 그 위를 등속 운동하는 점들을 이용해
+곡선을 그리는 방법입니다. 
+여기서 처음에 기준점 몇개를 움직이는대로 곡선의 모양이 바뀌게 되는데 이렇게 점을 조정하는 것 제어하는 것을 Control Point 제어점이라고 합니다.
+이 제어점들을 이용해서 그 사이에 다른 정점들을 만들어 주기 위해 사용할 수 있다는 말입니다.
+여기까지 컨트롤 포인트에 대한 설명이었습니다.
+
+이번에는 자주 설명하던 그래픽스 렌더링 파이프라인을 떠올려 보겠습니다. 
+이전까지는 Vertex Shader Stage 에서 Tessellation 단계를 건너뛰고 GeometryShader 나 PixelShader 단계로 넘어갔습니다. 
+그런데 이제는 Tessellation 옵션을 추가할것이다 보니까 달라지는 점이 있는데 
+
+지금까지 VertexShader 에서 정점들을 넘겨받고 World, View, Projection 변환 행렬을 곱해줘서 투영 좌표계로 넘겨주기 위한 사전 작업들을 다 해줬었습니다. 
+그런데 이제 Tessellation 단계가 들어가게되면 여기서 정점을 추가해서 조작을 해줄것이기 때문에 앞으로 VertexShader 에서는 받은 정점데이터에 별 다른 작업을 하지 않고 
+토스를 해주게 될겁니다.
+
+- HullShader
+
+토스를 받는것을 HullShader 단계인데 여기서는 두가지 함수로 이루어져있습니다. 먼저 Patch Constant Function 이라는것이 있습니다.
+그리고 컨트롤 포인트와 관련된 헐 셰이더라고 해서 ControlPoint HullShader 라는 함수가 있습니다. 이게 일반적으로 셰이더 코드에서 사용된는 HS_Main 이라고 볼 수 있고 
+PatchConstantFuntion 은 별도의 두번째 함수라고 볼 수 있습니다.
+이 두개의 함수는 동시에 실행되기 때문에 같이 만들어져 있어야 한다고 합니다.
+
+이중에 ControlPoint HullShader 함수의 위에는 처음보는 힌트 같은것들이 붙어 있는데 패치의 옵션들을 설정해주고 있는것 같습니다. 
+HS_Main 은 인풋으로 패치를 넘겨받게 된다는걸 알 수 있는데 그래서 가장 달라지게 되는 부분이 어떤것이냐면 
+지금까지 사용했던 VertexShader 의 경우에는 삼각형 정점을 넘겨 줬다면 정점 1, 2, 3 에 대해 VertexShader 가 호출이 되었었습니다. 
+그런데 이제 작업할 Tessellation 같은 경우에는 각 정점들이 제어를 할 제어점 이라고 했었고 제어점 자체는 하나만 있다고 해서 제어를 할 수 있는게 아니라 
+서로 상호작용을 하면서 제어를 합니다. 아까 예시를 들었던 베지에 곡선 같은 경우에도 제어점 하나씩만 가지고 곡선을 만들던게 아니라 제어점 4개 정도를 가지고 
+각 위치에 따라 곡선을 만들었습니다.
+
+왜 이런 이야기를 하냐면 HullShader 의 함수들이 인자로 InputPatch<VS_OUT, 3> 이런식으로 배열같이 넘겨 받습니다. 이 배열은 VertexShader 에서 넘겨준 
+정점 3개 짜리로 이루어져 있습니다. 이경우에는 처음에 설정을 할 때 제어점 3개 로 이루어진 패치라고 설정을 했기 때문에 VS_OUT 을 3개 받아서 패치로 사용하는것입니다. 
+그래서 HullShader 단계에서는 하나의 제어점 뿐만이 아니라 같은 패치의 제어점들을 모두 한번에 조작하고 있는걸 알 수 있습니다.
+
+다음으로 알아볼 것은 PatchConstantFuntion 과 ControlPoint HullShader 함수 사이의 차이점을 알아보겠습니다.
+
+- 1) ControlPoint HullShader : 먼저 컨트롤 포인트 3개를 받았고 그 것을을 포괄한게 패치였습니다. 여기서 ControlPoint HullShader 의 경우에는 Patch 기준이 아니라 
+        컨트롤 포인트 갯수만큼 호출이 됩니다. 현재 패치가 컨트롤 포인트 0번, 1번, 2번으로 이뤄져 있으면 각각 한번씩 3번 호출이 된다는 말입니다.
+        그런데 0번 컨트롤 포인트를 호출하게되면 나머지 1번, 2번 컨트롤 포인트도 연관되어 있기 때문에 같은 패치를 이루고 있는 컨트롤 포인트에 대한 정보를
+        InputPatch<VS_OUT, 3> 이라고 같이 넘겨 받고 있습니다. 그러니까 ControlPoint HullShader 라는 함수가 컨트롤 포인트 마다 호출이 되지만 나머지 2개의 정보도 
+        같이 들고 있다는 말입니다. 이 배열 속에서 지금 호출한 컨트롤 포인트가 0번인지 1번인지 2번인지를 알아야 하니까 
+        또 다른 인자인 int vertexIdx : SV_OutputControlPointID 라고 시스템 벨류로 넘겨 받고 있습니다. 이 vertexIdx 에 따라 함수를 호출한 컨트롤 포인트 가 몇번인지 
+        알수 있게 되었습니다. 그리고 또 패치가 다수 있을 수 있는데 지금 패치를 구분 하기 위해 다시 패치 아이디도 인자로 받습니다. 
+        int patchID : SV_PrimitiveID 라는 인자로 받습니다.
+        인자를 이렇게 되고 함수 내용을 보면 컨트롤 포인트에대해서 좌표를 조작하고 싶다거하 하면 함수안에서 조작 할 수도 있지만 보통 그냥 다음 단계로 넘길 수도 있다고 합니다.
+        넘길때는 인풋의 배열에서 현재 조작중인 컨트롤 포인트의 인덱스를 사용해 output으로 넘겨줍니다.
+- 2) Constant HS : 컨스턴트 헐 셰이더의 경우에는 패치단위로 호출이 됩니다. 이 패치가 3개의 제어점으로 이루어져 있다고 해도 각각 3번 호출되는게 아니라 소속되어 있는 
+        패치 단위로 한번만 호출이 된다는 말입니다. 이 Constant HS 가 중요한데 위에서 알아본 ControlPoint HS 에서는 각 제어점을 그대로 반환해도 된다고 했는데 
+        Constant HS 에서는 이제 삼각형을 어떻게 늘려줄것인지를 정책을 정합니다. 
+        이 함수의 아웃풋 타입은 PatchTess 라는 이름의 struct 로 넘겨줄건데 float edgeTess[3] : SV_TessFactor, float insideTess : SV_InsideTessFactor 라는 두가지 
+        데이터로 이루어져 있습니다. 지금은 우리가 삼각형으로 이루어진 패치를 사용하기 때문에 edgeTess 를 3개 짜리 배열로 만듭니다.
+        함수 내에서 이걸 어떤 식으로 정책을 정해주냐면 
+        PatchTess output = (PatchTess)0.f;
+        output.edgeTess[0] = 1;
+        output.edgeTess[1] = 2;
+        output.edgeTess[2] = 3;
+        output.insideTess = 1; 
+        return output; 
+        이런식으로 되어 있다고 해보겠습니다. 이때 edgeTess[0] 이라는것은 제어점으로 만들어진 삼각형중 어떤 변을 0번 edge 라고 하고 이 엣지를 몇개의 삼각형으로 나눌 것인지
+        를 정하는겁니다. 0번 엣지는 1개라고 정했는데 이미 1개로 이루어져 있으니 그대로이고 1번엣지는 두개의 삼각형, 2번 엣지는 3개의 삼각형으로 나눠주도록 조작이 됩니다. 
+        패치의 삼각형 중점을 기준으로 0번 엣지와 중점이 1개의 삼각형, 1번 엣지와 중점은 2개의 삼각형, 2번 엣지와 중점에는 3개의 삼각형이 생깁니다.
+        insideTess 는 무엇을 의미하냐면 위에서 중점 1개에 모인다고 했는데 insideTess 가 값이 늘면 중점하나가 아니라 삼각형 안에 또 여러개의 점을 기준으로 삼각형이 
+        나눠질것입니다. 
+        이런 삼각형을 어떻게 나눌 것인지에 대한 정책을 자세히 알 필요는 없지만 이걸 이용해서 아까 동적 LOD 방식을 적용할때 어느정도 의 거리에서 얼마나 많은 삼각형을 
+        추가해줄 것인지를 적용할수 있는겁니다.
+        추가로 알아둘것이 만약 삼각형 하나도 아니고 아예 아무것도 안그리고 싶다 Culling 해버리고 싶다고 한다면 위의 값들 모두 0으로 설정해주면 이 패치는 아무것도 안그리고 
+        넘어가게 됩니다.
+
+이렇게 HullShader 에 대해 알아보고 있는데 패치, 컨트롤 포인트, TessFactor 같은게 생소하다 뿐이지 내용자체가 어렵지는 않았습니다. 여기 까지 해주면 HullShader 단계는 넘어가고 
+Tessllator 단계로 넘어가고 여기서 하드웨어가 알아서 처리를 해준다음 DomainShader 단계로 넘겨줍니다. 
+
+- DomainShader
+도메인 셰이더에서는 처음에 VertexShader 에서 받아준 처음에 세팅햇던 컨트롤 포인트 말고도 HullShader 에서 TessFactor 로 추가된 삼각형들의 정점들 까지도 
+받아준다는게 큰 차이점입니다.
+
+Tessellation 1단계 HullShader 에서 추가된 정점들과 기존의 제어점들 모두를 대상으로 
+DomainShader 가 호출이 됩니다. 그리고 각 정점들을 대상으로 기존에 VertexShader 에서 해주던 WVP 변환 행렬을 곱해주고 있습니다. 
+이제야 그려줄 모든 정점들이 확보가 되었으니 필요한 연산을 해주는것입니다.
+첫번째로 HullShader 에서 추가된 정점들 까지 전부 각각 변환행렬 연산을 한다.
+두번째로 유의 깊게 볼 부분은 DomainShader 가 받는 정점들이 각각 로컬 스페이스 좌표로 들어오는것이 아니라
+const OutputPatch<HS_OUT, 3> input, float location : SV_DomainLocation 이라는 패치와 로케이션이라는 데이터로 들어옵니다.
+여기서 패치 정보는 처음의 제어점 3개를 말하는것이고 이 3총사 제어점을 기준으로 한 각각의 비율을 location 이라는 걸로 전달해주게 됩니다.
+이 비율, location 이란게 어떤의미인지 좀 더 설명하자면 제어점 0,1,2 번을 기준으로 그 사이의 거리 비율로 어디정도의 위치인지를 알 수 있는 데이터라고 볼 수 있겠습니다.
+예를들어서 0번 제어점의 location 은 (1,0,0) 인데 0번 제어점이 100 퍼센트고 나머지 1번 2번 제어점의 비율을 0퍼센트이니까 그냥 0번 제어점을 가리키고 있습니다.
+그런데 삼각형의 중점 같은 경우에는 각 제어점으로 부터 같은 거리에 위치하게 되니까 location 이 (0.33f, 0.33f, 0.33f) 이런 식으로 되어 있을겁니다.
+그래서 DomainShader 에서 각 정점들이 자신의 위치를 알고 싶으면 제어점들이 가지고 있는 로컬 포지션에다가 location 비율을 각각 섞어서 알아내야합니다.
+이런식으로 로컬 포지션과 uv 좌표를 location 으로 얻어내고 output에는 로컬 포지션에 WVP변환행렬을 곱해서 다음 단계로 넘겨주고 있습니다.
+
+
+DomainShader 까지 끝났으면 이제 필요에 따라 GeometryShader 로 넘어가거나 아니면 RasterizerStage -> PixelShader 로 넘어가면됩니다. 이부분들은 기존에 배웠던 대로 
+작동할것입니다.
+
+
+이제 코드에서 수정 해주겠습니다.
+
+
+- 코드 
+
+이번에는 코드 작업이 많지 않고 Tessellation 이 적용된 새로운 셰이더 파일을 만들어서 그 파일이 제대로 작동하는지만 체크해보겠습니다.
+
+
+1 ) 셰이더 코드 (tessellation.fx)
+Shader 폴더와 필터에 tessellation.fx 를 만들어 주고 예제 프로젝트에 있는 코드들을 복사 했습니다. 내용은 위에서 설명한 내용 대로 인데 
+
+// --------------
+// Vertex Shader
+// --------------
+
+struct VS_IN
+{
+    float3 pos : POSITION;
+    float2 uv : TEXCOORD;
+};
+
+struct VS_OUT
+{
+    float3 pos : POSITION;
+    float2 uv : TEXCOORD;
+};
+
+VS_OUT VS_Main(VS_IN input)
+{
+    VS_OUT output = input;
+
+    return output;
+}
+VertexShader 부분은 CPU 로 부터 정점들 을 받아서 그것 그대로 반환해서 넘기고 있습니다.
+
+// --------------
+// Hull Shader
+// --------------
+
+struct PatchTess
+{
+    float edgeTess[3] : SV_TessFactor;
+    float insideTess : SV_InsideTessFactor;
+};
+
+struct HS_OUT
+{
+    float3 pos : POSITION;
+    float2 uv : TEXCOORD;
+};
+
+// Constant HS
+PatchTess ConstantHS(InputPatch<VS_OUT, 3> input, int patchID : SV_PrimitiveID)
+{
+    PatchTess output = (PatchTess)0.f;
+
+    output.edgeTess[0] = 1;
+    output.edgeTess[1] = 2;
+    output.edgeTess[2] = 3;
+    output.insideTess = 1;
+
+    return output;
+}
+
+// Control Point HS
+[domain("tri")] // 패치의 종류 (tri, quad, isoline)
+[partitioning("integer")] // subdivision mode (integer 소수점 무시, fractional_even, fractional_odd)
+[outputtopology("triangle_cw")] // (triangle_cw, triangle_ccw, line)
+[outputcontrolpoints(3)] // 하나의 입력 패치에 대해, HS가 출력할 제어점 개수
+[patchconstantfunc("ConstantHS")] // ConstantHS 함수 이름
+HS_OUT HS_Main(InputPatch<VS_OUT, 3> input, int vertexIdx : SV_OutputControlPointID, int patchID : SV_PrimitiveID)
+{
+    HS_OUT output = (HS_OUT)0.f;
+
+    output.pos = input[vertexIdx].pos;
+    output.uv = input[vertexIdx].uv;
+
+    return output;
+}
+
+HullShader 에서는 두가지 함수로 이루어져 있습니다. 그래서 두가지 output 타입이 있는데 HS_OUT 이라는 struct 는 컨트롤 포인트 하나씩의 데이터를 담는 
+HS_Main 함수에서 사용되는 sturct 이고 PatchTess 라는 struct 는 패치 단위에서 각 컨트롤 포인트 사이에 얼마나 삼각형들을 늘려줄지 정책을 담는 struct 로써 
+Conatant HS 함수에서 사용합니다. 이 함수의 내용은 위에서 예시를 들었던 수치대로 진행하겠습니다.
+ControlPoint HS 함수 위에 [] 안의 내용들은 이 HS 에서 필요한 옵션들을 설정하는 부분입니다. 내용은 주석으로 설명되어 있습니다. 
+
+// --------------
+// Domain Shader
+// --------------
+
+struct DS_OUT
+{
+    float4 pos : SV_Position;
+    float2 uv : TEXCOORD;
+};
+
+[domain("tri")] 
+DS_OUT DS_Main(const OutputPatch<HS_OUT, 3> input, float3 location : SV_DomainLocation, PatchTess patch)
+{
+    DS_OUT output = (DS_OUT)0.f;
+
+    float3 localPos = input[0].pos * location[0] + input[1].pos * location[1] + input[2].pos * location[2];
+    float2 uv = input[0].uv * location[0] + input[1].uv * location[1] + input[2].uv * location[2];
+
+    output.pos = mul(float4(localPos, 1.f), g_matWVP);
+    output.uv = uv;
+
+    return output;
+}
+
+DomainShader 입니다. 여기서는 HullShader 에서 제어점 외에 추가된 정점들 까지 전부 한번씩 호출이 되는데 이전 VertexShader 에서 IA 때 받은 정점들에 대해 
+WVP 변환행렬을 연산해주던 부분을 여기서 해줍니다. 
+이중에서 제어점 말고 추가된 정점들은 로컬 좌표같은게 없습니다. 그 대신 각 제어점 을 기준으로 어느정도 비율 location 을 가지고 있는지 정보도 같이 넘어오기 때문에 
+그걸 이용해서 로컬 포지션과 uv 좌표를 얻고 있습니다. 
+
+
+// --------------
+// Pixel Shader
+// --------------
+
+float4 PS_Main(DS_OUT input) : SV_Target
+{
+    return float4(1.f, 0.f, 0.f, 1.f);
+}
+
+#endif
+
+이번 테스트에서는 텍스쳐를 바로 붙히지 않고 Tessellation 이 잘 적용됐는지 보기 위해 일단 Red 색상으로 모두 칠해주고 있습니다.
+
+
+2) Shader 
+다음으로 셰이더 cpp 코드로 가서 tessellation.fx 를 사용할 수 있도록 수정 해주겠습니다. 
+
+지금까지 Shader::CreateGraphicsShader 에서 인자로 셰이더 파일의 경로, 셰이더 인포 라는 struct, 셰이더 파일 내에서 사용할 각 셰이더 단계의 메인함수 이름들로 
+vs, ps, gs 세가지를 주었습니다. 
+그런데 여기서 hs 와 ds 두개를 또 늘리기에는 부담스럽다 보니까 이 사용할 함수의 이름을 별도의 인자로 빼주는 작업도 해보겠습니다. 
+이전에 두번째 인자로 ShaderInfo 라는 struct 를 묶어서 한번에 설정해줄 셰이더 옵션들을 정리했던것 처럼 해주면 좋을것 같습니다. 
+
+struct ShaderArg
+{
+	const string vs = "VS_Main";
+	const string hs;
+	const string ds;
+	const string gs;
+	const string ps = "PS_Main";
+};
+
+기본적으로 VS 랑 PS 는 호출할것이기 때문에 기본값으로 함수이름을 적어 줬고 다른 단계들은 필요에 따라 이름을 적어준다음 인자로 넘겨주면 되겠습니다. 
+이걸 적용시킨 Shader::CreateGraphicsShader 의 시그니쳐입니다.
+
+	void CreateGraphicsShader(const wstring& path, ShaderInfo info = ShaderInfo(), ShaderArg arg = ShaderArg());
+
+기본 생성자가 기본값이므로 세번째 인자로 아무것도 넘겨주지 않으면 VS_Main, PS_Main 을 사용하는 버전으로 생성될겁니다. 
+cpp 의 정의부도 같이 보겠습니다. 초반부만 때서 보자면 
+
+void Shader::CreateGraphicsShader(const wstring& path, ShaderInfo info, ShaderArg arg)
+{
+	_info = info;
+
+	CreateVertexShader(path, vs, "vs_5_0");
+	CreatePixelShader(path, ps, "ps_5_0");
+
+	if (gs.empty() == false)
+		CreateGeometryShader(path, gs, "gs_5_0");
+// 밑으로 생략
+VS와 PS는 기본으로 만들어줄것이기 때문에 바로 생성해주고 밑에 GeometryShader 는 파티클 시스템같은 경우처럼 사용 할 때만 따로 만들어 줄것입니다. 
+오늘 배운 HullShader, DomainShader 도 비슷하게 처리 해줄겁니다. 
+
+그러면 Create 함수들을 만들어 줄건데 
+private:
+	void CreateShader(const wstring& path, const string& name, const string& version, ComPtr<ID3DBlob>& blob, D3D12_SHADER_BYTECODE& shaderByteCode);
+	void CreateVertexShader(const wstring& path, const string& name, const string& version);
+	void CreateHullShader(const wstring& path, const string& name, const string& version);
+	void CreateDomainShader(const wstring& path, const string& name, const string& version);
+	void CreateGeometryShader(const wstring& path, const string& name, const string& version);
+	void CreatePixelShader(const wstring& path, const string& name, const string& version);
+이렇게 추가 선언부는 수정이 되었고 
+
+정의부는 이렇습니다.
+void Shader::CreateHullShader(const wstring& path, const string& name, const string& version)
+{
+	CreateShader(path, name, version, _hsBlob, _graphicsPipelineDesc.HS);
+}
+
+void Shader::CreateDomainShader(const wstring& path, const string& name, const string& version)
+{
+	CreateShader(path, name, version, _dsBlob, _graphicsPipelineDesc.DS);
+}
+지금 _hsBlob, _dsBlob 에 빨간줄이 그어져 있는데 헤더 파일에 멤버 변수로 추가 해주지 않아서 입니다. 
+	ComPtr<ID3DBlob>					_hsBlob;
+	ComPtr<ID3DBlob>					_dsBlob;
+
+이제 여기까지 맞춰놨으면 위에 CreateGraphicsShader 의 인자로 바꿔놓은 부분도 수정해주겠습니다. 
+
+
+void Shader::CreateGraphicsShader(const wstring& path, ShaderInfo info, ShaderArg arg)
+{
+	_info = info;
+
+	CreateVertexShader(path, arg.vs, "vs_5_0");
+	CreatePixelShader(path, arg.ps, "ps_5_0");
+
+	if (arg.hs.empty() == false)
+		CreateHullShader(path, arg.hs, "hs_5_0");
+
+	if (arg.ds.empty() == false)
+		CreateDomainShader(path, arg.ds, "ds_5_0");
+
+	if (arg.gs.empty() == false)
+		CreateGeometryShader(path, arg.gs, "gs_5_0");
+// 밑에는 생략 
+
+이렇세 바뀐 인자 arg를 사용하고 HS, DS 도 필요에 따라 사용하도록 추가해주었습니다.
+
+이제 프로젝트를 빌드를 한번해서 에러를 한번 잡고 가겠습니다.
+
+
+3) Resources
+
+에러를 따라가니 Resources::CreateDefaultShader 에서 에러들이 나고 있습니다. 
+
+먼저 Texture(Forward) 부분부터 만들어줄건데 기본으로 정해뒀던 VS_Main, PS_Main 이외의 셰이더 함수를 사용하는 모든 코드에서 에러가 날겁니다. 
+
+    shader->CreateGraphicsShader(L"..\\Resources\\Shader\\forward.fx", info, "VS_Tex", "PS_Tex");
+
+아까 위에서 ShaderArg 라는 struct 에서 관리하도록 수정 해줬기 때문에 ShaderArg 타입 변수를 만들어서 인자로 넘겨줘야합니다.
+
+ShaderArg arg = 
+{
+    "VS_Tex",
+    "",
+    "",
+    "",
+    "PS_Tex",
+}
+    
+    shader->CreateGraphicsShader(L"..\\Resources\\Shader\\forward.fx", info, arg);
+
+이런 식으로 넘겨주면 될것입니다.
+이걸 에러가 난곳 마다 반복해주면 오늘 Shader 코드 수정한 부분은 통과가 될겁니다. 
+
+다음으로는 Tessellation 이 적용된 물체를 그려볼껀데 그 물체가 사용할 디폴트 셰이더를 만들어 주겠습니다. 
+
+Resources::CreateDefaultShader
+{
+	// Tessellation
+	{
+		ShaderInfo info =
+		{
+			SHADER_TYPE::FORWARD,       // 셰이더 타입은 포워드로 설정했습니다.
+			RASTERIZER_TYPE::WIREFRAME, // 레스터라이저 타입이 와이어프레임인데 이건 정점들로 이뤄진 삼각형 내부까지 다 색을 칠해주는게 아니라 삼각형의 
+                                        // 변만 색을 칠해주는 타입입니다. Tessellation 으로 삼각형을 늘려도 겉보기에 티가 나도록 와이어프레임으로 설정했습니다.
+			DEPTH_STENCIL_TYPE::LESS,
+			BLEND_TYPE::DEFAULT,
+			D3D_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST    // Tessellation 이 적용 되면 Topology 대신 이 옵션을 사용하다고 했습니다.
+                                                                // 컨트롤 포인트 3개 짜리로 이뤄진 패치리스트다 라는 의미입니다.
+		};
+
+		ShaderArg arg =
+		{
+			"VS_Main",
+			"HS_Main",
+			"DS_Main",
+			"",
+			"PS_Main",
+		};
+
+		shared_ptr<Shader> shader = make_shared<Shader>();
+		shader->CreateGraphicsShader(L"..\\Resources\\Shader\\tessellation.fx", info, arg);
+		Add<Shader>(L"Tessellation", shader);
+	}
+}
+
+그다음에 이어서 디폴트 머테리얼도 만들어 줍니다.
+
+Resources::CreateDefaultMaterial
+{
+	// Tessellation
+	{
+		shared_ptr<Shader> shader = GET_SINGLE(Resources)->Get<Shader>(L"Tessellation");
+		shared_ptr<Material> material = make_shared<Material>();
+		material->SetShader(shader);
+		Add<Material>(L"Tessellation", material);
+	}
+}
+
+
+4) SceneManager
+이제 물체를 만들어 주기 위해 SceneManager::LoadTestScene 으로 가보겠습니다.
+
+SceneManager::LoadTestScene
+{
+#pragma region Tessellation Test
+	{
+		shared_ptr<GameObject> gameObject = make_shared<GameObject>();
+		gameObject->AddComponent(make_shared<Transform>());
+		gameObject->GetTransform()->SetLocalPosition(Vec3(0, 0, 300));  // 적당히 카메라로 부터 300 정도 떨어진 위치
+		gameObject->GetTransform()->SetLocalScale(Vec3(100, 100, 100)); // 스케일도 그냥 100 정도 씩으로 설정
+		gameObject->GetTransform()->SetLocalRotation(Vec3(0, 0, 0));
+
+		shared_ptr<MeshRenderer> meshRenderer = make_shared<MeshRenderer>();
+		{
+			shared_ptr<Mesh> mesh = GET_SINGLE(Resources)->LoadRectangleMesh(); // 메쉬는 사각형 메쉬로 간단하게 삼각형 두개 붙힌것으로 테스트
+			meshRenderer->SetMesh(mesh);
+			meshRenderer->SetMaterial(GET_SINGLE(Resources)->Get<Material>(L"Tessellation"));   // 아까 만들었던 디폴트 머테리얼을 가져옵니다.
+		}
+		gameObject->AddComponent(meshRenderer);
+
+		scene->AddGameObject(gameObject);
+	}
+#pragma endregion
+}
+
+이대로만 실행시키면 이전에 만들었던 구 오브젝트가 시야를 가리니까 주석처리를 했습니다.
+
+
+- 테스트 
+
+빌드, 실행을 해보면 빨간색으로 사각형 안에 몇개의 삼각형들이 있는 도형이 보입니다. 
+
+자세히 보면 사각형은 두개의 삼각형으로 이뤄져있고 이번에 배운 용어로 말하자면 두개의 패치로 이뤄져있고 각각 3개의 컨트롤 포인트로 이뤄진 패치라고 할 수 있습니다.
+
+작은 삼각형들도 ConstantHS 에서 설정한 정책에 따라 삼각형이 나눠져 있는걸 알 수 있습니다. 
+ConstantHS 안의 수치들을 건드려 보면서 어떤식으로 삼각형들이 쪼개 지는지를 이리저리 장난쳐 볼 수 있습니다.
+
+이 내용을 어떻게 활용할거나면 나중에 터레인이라고 불리는 지형 메쉬같은걸 카메라와의 거리에 따라 가까울 수록 삼각형을 늘려서 자세히 그려줄것인지 멀면 삼각형을 
+줄여서 간단히 표시할것인지를 정할수 있게될겁니다.
+
+다음 시간에는 터레인을 적용시키고 동적 LOD를 어떻게 적용시킬지에 대해 알아보겠습니다.
