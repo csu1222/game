@@ -1,0 +1,812 @@
+
+
+        37. Terrain
+
+
+이전 시간에 배운 Tessellation 을 활용 할 수 있는 전형적인 예제가 Terrain 입니다.
+
+터레인 지형이라는것 자체가 모든 게임에 100퍼센트 등장해야 하는것은 아닙니다.
+와우를 예시로 들어보면 와우의 달라란, 얼음왕관성채 1보스의 지형은 터레인이 아니라 보통 메쉬로 만들어져 있다고 합니다.
+
+반면 배틀 그라운드 같은 게임의 경우에는 터레인으로 월드를 구현했는데 이런데에 사용할 수 있도록 학습해볼겁니다.
+
+그러면 지형(터레인) 은 어떻게 만들어져 있을까 생각해보겠습니다.
+지형도 무수히 많은 삼각형들이 이어져서 만들어 지는데 유니티에서 터레인을 만들면 여러 Rectangle들을 붙혀서 넓게 펼쳐놓은듯한 모양입니다.
+
+그런데 이 터레인이 일반 메쉬와 다른점은 터레인을 이루는 삼각형의 크기가 한칸한칸 다 동일하다는걸 알 수 있습니다.
+테스트를 와이어 프레임으로 하면 삼각형들이 어떻게 나열되어 있는지를 볼 수 있고 나중에 바닥 텍스쳐를 매핑하면 정말 바닥처럼 표현이 될것입니다.
+일반 메쉬와 다른점은 터레인을 이루고 있는 정점들의 간격이 일정하다는 것입니다.
+
+여기서 나올수 있는 질문이 있는데 그러면 어짜피 바닥이 평평하고 넓게 표현될거면 큰 사각형 하나에 텍스쳐를 매핑해서 하지 왜 
+작은 삼각형 여러개를 이어 붙혀서 하는가? 라는 질문이 생길 수 있습니다.
+
+그 이유는 터레인이 항상 평평하지는 않을것이고 울퉁불퉁한 모양을 표현하기 위해서 잘게 쪼개 놓은겁니다.
+
+유니티 나 언리얼 엔진에서 모두 터레인 기능을 지원하고 있고 처음에는 평평한 터레인이 주어지지만 우리 스스로 조각을 하듯이 지형을 위에 그릴 수 있습니다.
+
+이번 강의의 테스트 결과물에서는 터레인을 만들고 높이 차를 줘서 터레인이 잘 작동하는지 체크하는것과 Tessellation 을 적용해서 거리에 따라 삼각형 갯수를 조절하는 것 까지가
+목표입니다. 
+
+그런데 터레인의 높낮이를 코드 타이핑으로 조절하는것은 너무나도 노가다 이고 보통은 유니티나 언리얼 엔진 처럼 툴을 만들어서 따로 저장을 해주는게 일반적입니다.
+이 터레인을 어떻게 파일로 저장할지를 궁리하는게 문제입니다.
+쉽게 생각하면 터레인도 정점 단위로 이뤄져있으니까 정점 하나하나의 로컬 포지션 정보나 uv 좌표 정보를 싸그리 하나씩 파일에 저장하는게 하나의 방법이 될 텐데
+그렇게 되면 살짝 낭비가 되겠다는 생각이 듭니다. 
+왜냐면 일반 메쉬와 다르게 터레인 같은 경우에는 정점들 사이의 x축 y축 으로 간격이 일정하다고 했었습니다.
+그러면 각 정점의 포지션 전부를 저장하는게 아니라 높이 값만 저장 해놓는다면 저장하고 싶은 터레인을 복원 할 수 있을것 같습니다.
+이런 이유로 일반적으로 터레인을 저장할 때는 높이 맵 이라는것을 사용합니다. 
+높이 맵은 일종의 텍스쳐인데 터레인의 각 정점마다 가져야 할 높이 데이터를 텍스쳐에 저장한다고 보면 되겠습니다. 
+
+지금 생각해보면 텍스쳐를 여러가지 용도로 사용해 왔습니다. diffuse 용도로 색 자체를 저장해둔 텍스쳐, normal 텍스쳐로 표면의 specular 값을 자연스럽게 더해주는 텍스쳐
+그림자 맵으로 어느 곳에서 그림자가 생겨야 하는지 비교할 수 있는 텍스쳐 등이 있었습니다. 이런 텍스쳐의 사용용도의 연장선이라고 볼 수 있습니다.
+
+우리가 툴을 만들어서 일일히 그려준 높이 값들을 저장하는 내용은 나중에 진지하게 포트폴리오를 만들고 싶을때 해야할 내용이고 
+
+지금은 높이를 테스트 하기 위해 외부에서 다운 받은 높이 맵을 활용해서 테스트 할 것 입니다.
+
+이제 코드로 가서 기능을 추가해보겠습니다.
+
+
+- 코드 
+
+우선 이번 테스트에 필요한 리소스들을 다운 받아야 합니다. terrain texture 검색해서 나오는 이미지 파일과 height texture 로 나오는 이미지 를 
+프로젝트 디렉토리에서 Resources\\Texture\\Terrain 디렉토리 안에 리소스들을 저장해주겠습니다.
+
+시작으로 Terrain 클래스를 리소스 필터 아래에 만들어 줄것입니다. 이 리소스 필터 아래에 있는 클래스들은 Material, Mesh, Shader, Texture 등으로 
+Resources 클래스에서 관리할수 있는 클래스들입니다.
+
+1) Resources 
+먼저 여기서 메쉬를 로드하는 함수들이 있었습니다. LoadPointMesh, LoadRectangleMesh 등등 이 있었는데 터레인도 이런것들과 비슷하게 메쉬를 
+로드하는 함수를 추가 해줍니다. 
+
+class Resources
+{   
+	shared_ptr<Mesh> LoadPointMesh();
+	shared_ptr<Mesh> LoadRectangleMesh();
+	shared_ptr<Mesh> LoadCubeMesh();
+	shared_ptr<Mesh> LoadSphereMesh();
+	shared_ptr<Mesh> LoadTerrainMesh(int32 sizeX = 15, int32 sizeZ = 15);
+}
+코드에서도 보이듯이 다른 로드 메쉬 함수들과 차이가 있습니다. 인자로 사이즈를 받아주고 있습니다.
+터레인만 사이즈를 인자로 받아주는것은 다른 메쉬들을 scale을 늘리면 되지만 터레인의 크기를 늘리려면 구성하고 있는 정점들도 늘려야 하기 때문입니다.
+
+
+정의부는 이렇습니다.
+shared_ptr<Mesh> Resources::LoadTerrainMesh(int32 sizeX, int32 sizeZ)
+{
+	vector<Vertex> vec;         // 정점들을 담을 벡터를 준비하고 있습니다. 
+
+	for (int32 z = 0; z < sizeZ + 1; z++)       // 2중 for 문을 돌면서 인자로 받은 사이즈 크기 만큼 1 단위로 정점들을 만들어서 vec에 넣어주고 있습니다.
+	{
+		for (int32 x = 0; x < sizeX + 1; x++)
+		{
+			Vertex vtx;
+			vtx.pos = Vec3(static_cast<float>(x), 0, static_cast<float>(z));
+			vtx.uv = Vec2(static_cast<float>(x), static_cast<float>(sizeZ - z));
+			vtx.normal = Vec3(0.f, 1.f, 0.f);
+			vtx.tangent = Vec3(1.f, 0.f, 0.f);
+
+			vec.push_back(vtx);
+		}
+	}
+
+	vector<uint32> idx;     // vec 에 담긴 정점들의 인덱스 정보를 주기 위해 준비하고 있습니다. 
+
+	for (int32 z = 0; z < sizeZ; z++)
+	{
+		for (int32 x = 0; x < sizeX; x++)
+		{
+			//  [0]
+			//   |	\
+			//  [2] - [1]
+			idx.push_back((sizeX + 1) * (z + 1) + (x));
+			idx.push_back((sizeX + 1) * (z)+(x + 1));
+			idx.push_back((sizeX + 1) * (z)+(x));
+			//  [1] - [2]
+			//   	\  |
+			//		  [0]
+			idx.push_back((sizeX + 1) * (z)+(x + 1));
+			idx.push_back((sizeX + 1) * (z + 1) + (x));
+			idx.push_back((sizeX + 1) * (z + 1) + (x + 1));
+		}
+	}
+
+	shared_ptr<Mesh> findMesh = Get<Mesh>(L"Terrain");
+	if (findMesh)
+	{
+		findMesh->Init(vec, idx);
+		return findMesh;
+	}
+
+	shared_ptr<Mesh> mesh = make_shared<Mesh>();
+	mesh->Init(vec, idx);
+	Add(L"Terrain", mesh);
+	return mesh;
+}
+
+이렇게 기본적으로 x 15, z 15 크기인 터레인 메쉬를 만들엇습니다. 여기에 코드들을 모두 만들어서 터레인 텍스쳐와 높이 맵을 매핑하기 전에 
+지금 시점에 한번 화면에 그려보고 싶습니다. 
+
+어짜피 나중에 만들 내용이기도 하고 중간 체크로 한번 만들어 보겟습니다.
+
+중간 테스트 터레인이 사용할 셰이더와 머테리얼을 만들어 줄건데 지금 Resources 클래스 안에 디폴트 리소스를 만드는 함수들에 추가 할겁니다.
+
+CreateDefaultShader 에서 새로 만들어줄 임시 셰이더코드는 이렇습니다.
+
+	// Terrain
+	{
+		ShaderInfo info =
+		{
+			SHADER_TYPE::DEFERRED,
+			RASTERIZER_TYPE::WIREFRAME,
+		};
+
+		shared_ptr<Shader> shader = make_shared<Shader>();
+		shader->CreateGraphicsShader(L"..\\Resources\\Shader\\deferred.fx", info);
+		Add<Shader>(L"Terrain", shader);
+	}
+내용을 보면 디퍼드 셰이더를 사용하고 레스터라이저 타입이 와이어 프레임으로 만들고 있습니다. Tessellation 시간에 만든 tessellation.fx 대신 그냥 deferred.fx 를 
+가져다 사용하고 있습니다. 일단은 메시가 잘 만들어 졌는지만 확인하는 용도 이기 때문 같습니다.
+
+DefaultMaterial 은 그냥 셰이더 이름과 저장할 마테리얼 이름만 Terrain 으로 사용하도록 만들어줬습니다.
+
+	// Terrain
+	{
+		shared_ptr<Shader> shader = GET_SINGLE(Resources)->Get<Shader>(L"Terrain");
+		shared_ptr<Material> material = make_shared<Material>();
+		material->SetShader(shader);
+		Add<Material>(L"Terrain", material);
+	}
+
+이제 임시 테스트때 사용할 셰이더, 머테리얼을 만들었으니 테스트 터레인을 만들어보겠습니다.
+
+
+2) SceneManager
+
+이전에 큐브를 넓적하게 늘려서 Plane 이라는 이름으로 그림자를 테스트할 바닥으로 사용하고 있었는데 이걸 이제 터레인으로 바꿔 줄겁니다.
+
+LoadTestScene
+{
+#pragma region Terrain
+	{
+		shared_ptr<GameObject> obj = make_shared<GameObject>();
+		obj->AddComponent(make_shared<Transform>());
+		obj->GetTransform()->SetLocalScale(Vec3(50.f, 200.f, 50.f));
+		obj->GetTransform()->SetLocalPosition(Vec3(-100.f, -200.f, 300.f));
+		obj->SetStatic(true);
+		shared_ptr<MeshRenderer> meshRenderer = make_shared<MeshRenderer>();
+		{
+			shared_ptr<Mesh> mesh = GET_SINGLE(Resources)->LoadTerrainMesh();
+			meshRenderer->SetMesh(mesh);
+		}
+		{
+			shared_ptr<Material> material = GET_SINGLE(Resources)->Get<Material>(L"Terrain");
+			meshRenderer->SetMaterial(material);
+		}
+		obj->AddComponent(meshRenderer);
+		scene->AddGameObject(obj);
+	}
+#pragma endregion
+}
+이전 Plane 의 트랜스폼의 수치들을 수정했고 메쉬렌더러에 넣어줄 메쉬를 아까 만든 LoadTerrainMesh 로 로드해서 넣어주었습니다. 
+머테리얼도 마찬가지로 Terrain 이름으로 된 머테리얼을 주었습니다. 
+
+이걸 빌드하고 실행해보면 이제 저번 테스트에서 봤던 Tessellation 이 적용된 물체와 그 밑에 검정색 와이어 프레임으로 된 많은 삼각형들이 보입니다. 
+지금은 ShaderInfo 에서 RASTERIZER_TYPE 을 WIREFRAME 으로 했으니까 그런데 나중에는 uv 좌표를 통해 처음에 다운 받은 터레인 텍스쳐에 매핑해주면 될겁니다.
+
+그런데 이 터레인에 텍스쳐를 매핑해줄때 0 ~ 1 사이의 비율로 매핑을 해주던지 아니면 0,1,2,3,4 ... 같이 매핑을 해줄 지는 우리 마음입니다 이게 무슨 말이냐면 
+
+아까 LoadTerrainMesh 를 만들때 uv 를 어떻게 설정 했는지를 보면 
+	for (int32 z = 0; z < sizeZ + 1; z++)
+	{
+		for (int32 x = 0; x < sizeX + 1; x++)
+		{
+			Vertex vtx;
+			vtx.pos = Vec3(static_cast<float>(x), 0, static_cast<float>(z));
+			vtx.uv = Vec2(static_cast<float>(x), static_cast<float>(sizeZ - z));
+			vtx.normal = Vec3(0.f, 1.f, 0.f);
+			vtx.tangent = Vec3(1.f, 0.f, 0.f);
+
+			vec.push_back(vtx);
+		}
+	}
+uv 를 설정해주는 부분을 보면 for문을 돌면서 0,1,2,3.. 이런 식으로 값을 푸시 백 해주고 있는걸 볼 수 있습니다.
+그러다 보니까 여기에 텍스쳐를 입히게 되면 어떻게 되는지 테스트를 해보겠습니다. 
+
+먼저 만들어 뒀던 임시 Terrain 디폴트 머테리얼 코드에 텍스쳐를 추가해봤습니다.
+	// Terrain
+	{
+		shared_ptr<Shader> shader = GET_SINGLE(Resources)->Get<Shader>(L"Terrain");
+		shared_ptr<Texture> texture = GET_SINGLE(Resources)->Load<Texture>(L"Terrain", L"..\\Resources\\Texture\\Terrain\\terrain.png");
+		shared_ptr<Material> material = make_shared<Material>();
+		material->SetShader(shader);
+		material->SetTexture(0, texture);
+		Add<Material>(L"Terrain", material);
+	}
+그리고 ShaderInfo 의  RASTERIZER_TYPE 도 바꿔줘야 합니다.	
+		ShaderInfo info =
+		{
+			SHADER_TYPE::DEFERRED,	// RASTERIZER_TYPE 을 그냥 삭제했습니다.
+		};
+이제 빌드, 실행 하면 터레인 삼각형들의 외곽선이 아니라 다운 받았던 터레인 텍스쳐가 매핑되어 있습니다. 
+
+그런데 UI 에 나오는 텍스쳐의 diffuse color 보다 많이 어둡게 나오는데 왜 그런지를 찾아보았더니 
+deferred.fx 에서 PS_Main 의 코드가 문제 같습니다. 
+
+PS_OUT PS_Main(VS_OUT input)
+{
+    PS_OUT output = (PS_OUT)0;
+
+    float4 color = float4(1.f, 1.f, 1.f, 1.f);
+    if (g_tex_on_0)					// 이 부분을 if (g_tex_on_0 == 1) 로 변경
+        color = g_tex_0.Sample(g_sam_0, input.uv);
+
+    float3 viewNormal = input.viewNormal;
+    if (g_tex_on_1)					// 이 부분을 if (g_tex_on_1 == 1) 로 변경
+    {
+        // [0,255] 범위에서 [0,1]로 변환
+        float3 tangentSpaceNormal = g_tex_1.Sample(g_sam_0, input.uv).xyz;
+        // [0,1] 범위에서 [-1,1]로 변환
+        tangentSpaceNormal = (tangentSpaceNormal - 0.5f) * 2.f;
+        float3x3 matTBN = { input.viewTangent, input.viewBinormal, input.viewNormal };
+        viewNormal = normalize(mul(tangentSpaceNormal, matTBN));
+    }
+
+    output.position = float4(input.viewPos.xyz, 0.f);
+    output.normal = float4(viewNormal.xyz, 0.f);
+    output.color = color;
+
+    return output;
+}
+
+조건문에서 왜 이상한 작동을 하는지 생각 해보면 이전에는 각각 g_tex_on 파라미터가 0이 아닌지를 체크하고 있었습니다. 
+변경된 코드는 1 인지를 체크하고 있죠
+1 이 아니더라도 0이 아닌 값을 들고 있어서 두번째 if 문 안으로 들어간것 같습니다. 들어가게 되면 매핑되지않은 g_tex_1 의 노멀 값을 가져다가 설정해서 
+어둡게 나온것 같습니다.
+이 문제에서 왜 Texture 의 1번 인덱스에 텍스쳐를 세팅하지 않았는데 이런 문제가 일어나나면 Material 클래스에서 텍스쳐를 세팅해주는 함수에서 실행할때마다 초기화를 해주지 
+않아서 생기는 문제 같습니다.
+enum
+{
+	MATERIAL_ARG_COUNT = 4,	// 어짜피 전부 4개씩 사용하니까 ARG로 뭉쳐서 관리하겠습니다. 
+};
+
+struct MaterialParams
+{
+	MaterialParams()	// 생성자에서 int, float, TexOn 을 모두 0으로 초기화 해줍니다.
+	{
+		for (int32 i = 0; i < MATERIAL_ARG_COUNT; i++)
+		{
+			SetInt(i, 0);
+			SetFloat(i, 0.f);
+			SetTexOn(i, 0);
+		}
+	}
+
+	void SetInt(uint8 index, int32 value) { intParams[index] = value; }
+	void SetFloat(uint8 index, float value) { floatParams[index] = value; }
+	void SetTexOn(uint8 index, int32 value) { texOnParams[index] = value; }
+	void SetVec2(uint8 index, Vec2 value) { vec2Params[index] = value; }
+	void SetVec4(uint8 index, Vec4 value) { vec4Params[index] = value; }
+	void SetMatrix(uint8 index, Matrix& value) { matrixParams[index] = value; }
+
+	array<int32, MATERIAL_ARG_COUNT> intParams;
+	array<float, MATERIAL_ARG_COUNT> floatParams;
+	array<int32, MATERIAL_ARG_COUNT> texOnParams;
+	array<Vec2, MATERIAL_ARG_COUNT> vec2Params;
+	array<Vec4, MATERIAL_ARG_COUNT> vec4Params;
+	array<Matrix, MATERIAL_ARG_COUNT> matrixParams;
+};
+
+이제 진짜 빌드 하고 실행 해보면 밝은 색상의 터레인 텍스쳐가 매핑되어있는걸 볼 수 있습니다. 
+그런데 uv 좌표가 0 ~ 1 범위의 값들이 아니고 0,1,2,3 .. 이렇게 되다보니 1칸마다 텍스쳐가 반복되서 출력되고 있습니다. 
+
+이제 여기까지 중간에 터레인을 테스트 해봤습니다. 
+여기서 추가할 내용은 이제 heght map 을 이용해서 터레인의 높이 값을 조절하는것과 
+Tessellation 을 적용해서 거리에 따라 폴리곤의 수를 조절하는것을 추가해서 테스트 하는 일이 남았습니다.
+
+
+3) terrain.fx
+터레인에 tessellation 을 적용시킨 셰이더를 만들겁니다. 프로젝트 디렉토리\\Resources\\Shader 경로에 terrain.fx 라는 파일을 하나 만들고 프로젝트에 추가해주었습니다.
+
+기존 tessellation.fx 에서 차이점을 위주로 볼겁니다. 
+
+가장처음의 차이점은 당연히 ifndef 을 체크해줄 이름을 바꿔주는겁니다.
+
+#ifndef _TERRAIN_FX_
+#define _TERRAIN_FX_
+
+그리고 이전에는 params.fx 만 include 되어있었는데 터레인에서는 utils.fx 에서 함수를 가져다 쓸거라서 추가해주었습니다.
+#include "params.fx"
+#include "utils.fx"
+
+다음은 Constant HS 부분이 달라져야하는데 기존 tessellation.fx 에서는 그냥 테스트 삼아 고정적인 값을 줬었는데 
+실제 Tessellation 은 거리에 따라 폴리곤 갯수를 조절 한다고 했던것 처럼 적용시킬겁니다.
+
+이제는 카메라 거리에 따라서 레벨을 나누도록 수정을 할겁니다.
+
+참고로 이번 terrain.fx 에서는 인자를 많이 사용할겁니다. 
+
+// [Terrain Shader]
+// g_int_1      : TileX
+// g_int_2      : TileZ
+// g_float_0    : Max Tessellation Level
+// g_vec2_0     : HeightMap Resolution
+// g_vec2_1     : Min/Max Tessellation Distance
+// g_vec4_0     : Camera Position
+// g_tex_0      : Diffuse Texture
+// g_tex_1      : Normal Texture
+// g_tex_2      : HeightMap Texture
+
+어디에 사용되는지는 코드를 작업하면서 설명이 될겁니다.
+
+ConstantHS 부터 보겠습니다. 바뀔 코드는 아래와 같습니다.
+// Constant HS
+PatchTess ConstantHS(InputPatch<VS_OUT, 3> input, int patchID : SV_PrimitiveID)
+{
+    PatchTess output = (PatchTess)0.f;
+
+    float minDistance = g_vec2_1.x;		// Tessellation 이 적용될 최소, 최대 거리입니다.
+    float maxDistance = g_vec2_1.y;
+
+    float3 edge0Pos = (input[1].pos + input[2].pos) / 2.f;	// 터레인에서 한 삼각형의 3변의 중앙점 포지션 좌표를 얻어내고 있습니다.
+    float3 edge1Pos = (input[2].pos + input[0].pos) / 2.f;
+    float3 edge2Pos = (input[0].pos + input[1].pos) / 2.f;
+
+    edge0Pos = mul(float4(edge0Pos, 1.f), g_matWorld).xyz;	// 얻어낸 3변의 좌표는 로컬 기준이었기 때문에 world space 로 변환하고 있습니다.
+    edge1Pos = mul(float4(edge1Pos, 1.f), g_matWorld).xyz;
+    edge2Pos = mul(float4(edge2Pos, 1.f), g_matWorld).xyz;
+
+    float edge0TessLevel = CalculateTessLevel(g_vec4_0.xyz, edge0Pos, minDistance, maxDistance, 4.f);	// 변의 월드 포지션과 카메라와의 거리에 비해 
+    float edge1TessLevel = CalculateTessLevel(g_vec4_0.xyz, edge1Pos, minDistance, maxDistance, 4.f);	// Tessellation 레벨을 구하는 
+    float edge2TessLevel = CalculateTessLevel(g_vec4_0.xyz, edge2Pos, minDistance, maxDistance, 4.f);	// 함수를 나중에 utils.fx 에 만들겁니다.
+
+    output.edgeTess[0] = edge0TessLevel;
+    output.edgeTess[1] = edge1TessLevel;
+    output.edgeTess[2] = edge2TessLevel;
+    output.insideTess = edge2TessLevel;
+
+    return output;
+}
+
+Tessellation 의 최소 최대 거리가 무슨 말이냐면 카메라와 터레인이 있을텐데 만약 1000 ~ 5000 이 최소 최대 거리라고 해보겠습니다. 
+그러면 카메라로부터 1000 까지의 거리안에 있는 터레인들은 설정한 최대한의 Tessellation 레벨로 그려지게 되고 카메라로부터 5000 거리 이상의 터레인들은 
+설정 최소한의 레벨로 그려지게 되는겁니다. 이 사이의 거리에 있는 터레인은 거리에 따라 그라데이션으로 Tessellation 레벨이 조정될것입니다. 
+
+그리고나서 하나의 패치에 들어오는 컨트롤 포인트들이 있는데 그것들로 이루어진 삼각형의 3변, 그 3변의 가운데 점의 위치정보를 얻어내고 있습니다. 
+기하학적으로 삼각형의 어떤 꼭지점의 반대편에 있는 변이 같은 넘버링을 가집니다. 
+3변의 중심점의 위치를 얻어 내면 월드 스페이스로 변환 행렬을 연산해서 넘깁니다. 이제 월드 스페이스에서는 카메라의 포지션과 각 3변의 중점 사이의 거리를 
+측정할 수 있게 되는데 그 거리를 통해 Tessellation Level 을 얻어내는 함수를 만들어 해당하는 Tessellation Level 을 적용시키고 있습니다.
+
+위에서 사용된 CalculateTessLevel 이라는 함수를 만들어 주겠습니다. utils.fx 쪽에 빼줄겁니다.
+
+// utils.fx 
+
+float CalculateTessLevel(float3 cameraWorldPos, float3 patchPos, float min, float max, float maxLv)
+{
+    float distance = length(patchPos - cameraWorldPos);
+
+    if (distance < min)
+        return maxLv;
+    if (distance > max)
+        return 1.f;
+
+    float ratio = (distance - min) / (max - min);
+    float level = (maxLv - 1.f) * (1.f - ratio);
+    return level;
+}
+
+함수의 내용은 단순합니다. 카메라와 계산할 patchPos (위에서는 edgePos) 의 차이를 length 로 길이를 구했습니다. 
+이게 현재 거리이고 이 현재거리와 인자로 받은 min max 거리를 비교해서 min 보다 가까우면 maxLv, max 보다 멀면 1.f 레벨로 바로 리턴해주고 있습니다. 
+이 두 경우가 아니라면 min 과 max 사이에 있을것 인데 그 비율에 따라 level 을 구해서 리턴해주고 있습니다. 
+
+다시 terrain.fx 로 와서 다음 ControlPointHS 를 보겠습니다. 이부분은 대부분 똑같지만 partitioning 의 옵션을 변경해줄겁니다. 이전에는 
+integer 였는데 이 옵션을 fractional_odd 로 변경할건데 이 쪽이 조금 더 정밀하게 표현할 수 있다고 합니다.
+
+// Control Point HS
+[domain("tri")] // 패치의 종류 (tri, quad, isoline)
+[partitioning("fractional_odd")] // subdivision mode (integer 소수점 무시, fractional_even, fractional_odd)		// 변경점
+[outputtopology("triangle_cw")] // (triangle_cw, triangle_ccw, line)
+[outputcontrolpoints(3)] // 하나의 입력 패치에 대해, HS가 출력할 제어점 개수
+[patchconstantfunc("ConstantHS")] // ConstantHS 함수 이름
+HS_OUT HS_Main(InputPatch<VS_OUT, 3> input, int vertexIdx : SV_OutputControlPointID, int patchID : SV_PrimitiveID)
+{
+    HS_OUT output = (HS_OUT)0.f;
+
+    output.pos = input[vertexIdx].pos;
+    output.uv = input[vertexIdx].uv;
+
+    return output;
+}
+
+다음은 DomainShader 단계입니다. 
+여기서 이전에 DeferredShader 의 VertexShader 같은 역할을 한다고 했습니다. 
+즉 여기서 각 정점들에 대해 행렬변환을 해준다는 의미입니다. 
+
+같은 역할을 하는 VS 의 내용을 다시 살펴보면 필요한 인풋 데이터는 파라미터로 들어올것이고 
+DS의 아웃풋의 형태가 이제는 viewPos, viewNormal, viewTangent, viewBinormal 도 포함한 형태가 되어야 합니다. 
+
+struct DS_OUT
+{
+    float4 pos : SV_Position;
+    float2 uv : TEXCOORD;
+    float3 viewPos : POSITION;
+    float3 viewNormal : NORMAL;
+    float3 viewTangent : TANGENT;
+    float3 viewBinormal : BINORMAL;
+};
+
+Tessellation 시간에 배운 DS 의 내용에서 ControlPointHS 에서 넘어온 추가된 점들은 아직 로컬 포지션이 없다고 했습니다. 그래서 
+넘어오 패치의 제어점들과 그 비율 location 을 가지고 함수내에서 로컬포지션 좌표를 받아 계산해준다고 했습니다.
+이 부분은 이번 시간에도 바뀌지 않습니다. 
+
+[domain("tri")]
+DS_OUT DS_Main(const OutputPatch<HS_OUT, 3> input, float3 location : SV_DomainLocation, PatchTess patch)
+{
+    DS_OUT output = (DS_OUT)0.f;
+
+    float3 localPos = input[0].pos * location[0] + input[1].pos * location[1] + input[2].pos * location[2];
+    float2 uv = input[0].uv * location[0] + input[1].uv * location[1] + input[2].uv * location[2];
+
+	//이 다음 부분들이 많이 바뀌고 중요한 부분입니다.
+
+	// 이부분은 MaterialParams 로 받은 인자들을 그대로 사용하기는 용어가 햇갈리니까 이름을 붙혀주고 있습니다.
+    int tileCountX = g_int_1;
+    int tileCountZ = g_int_2;
+    int mapWidth = g_vec2_0.x;
+    int mapHeight = g_vec2_0.y;
+
+	// uv 좌표를 다시 0 ~ 1 사이의 값으로 변환하고 이 uv를 가지고 높이 맵의 높이 값을 가져옵니다. 
+    float2 fullUV = float2(uv.x / (float)tileCountX, uv.y / (float)tileCountZ);
+    float height = g_tex_2.SampleLevel(g_sam_0, fullUV, 0).x;
+	// height 를 가져올때 SampleLevel 을 사용하고 있는데 지금까지 알고 있던 방법은 Sample 을 사용하는 방법이었습니다. 
+	// Sample 은 PS 에서만 사용되는 방법이고 나머지 다른 셰이더에서는 SampleLevel 을 사용해야 한다고 합니다.
+
+    // 높이맵 높이 적용
+    localPos.y = height;
+
+	// 이 밑에는 바뀐 높이에 맞는 Tangent, Binormal 값을 구해주고 있습니다. 델타 uv 라고 해서 화면 해상도의 한칸에 해당하는 uv 좌표를 구하고 
+	// 위에서 구한 deltaUV 를 터레인의 x , z 크기에 곱해서 deltaPos 라고 받아주고 있습니다. 이러면 터레인 텍스쳐를 매핑한 다음에 그 위에서의 포지션 좌표를 
+	// 알 수 있을겁니다.
+    float2 deltaUV = float2(1.f / mapWidth, 1.f / mapHeight);
+    float2 deltaPos = float2(tileCountX * deltaUV.x, tileCountZ * deltaUV.y);
+
+	// 현재 정점의 에서 상하 좌우로 deltaUV 하나 만큼 씩 움직인 위치를 받고 있습니다.
+    float upHeight = g_tex_2.SampleLevel(g_sam_0, float2(fullUV.x, fullUV.y - deltaUV.y), 0).x;
+    float downHeight = g_tex_2.SampleLevel(g_sam_0, float2(fullUV.x, fullUV.y + deltaUV.y), 0).x;
+    float rightHeight = g_tex_2.SampleLevel(g_sam_0, float2(fullUV.x + deltaUV.x, fullUV.y), 0).x;
+    float leftHeight = g_tex_2.SampleLevel(g_sam_0, float2(fullUV.x - deltaUV.x, fullUV.y), 0).x;
+
+    float3 localTangent = float3(localPos.x + deltaPos.x, rightHeight, localPos.z) - float3(localPos.x - deltaPos.x, leftHeight, localPos.z);
+    float3 localBinormal = float3(localPos.x, upHeight, localPos.z + deltaPos.y) - float3(localPos.x, downHeight, localPos.z - deltaPos.y);
+
+    output.pos = mul(float4(localPos, 1.f), g_matWVP);
+    output.viewPos = mul(float4(localPos, 1.f), g_matWV).xyz;
+
+    output.viewTangent = normalize(mul(float4(localTangent, 0.f), g_matWV)).xyz;
+    output.viewBinormal = normalize(mul(float4(localBinormal, 0.f), g_matWV)).xyz;
+    output.viewNormal = normalize(cross(output.viewBinormal, output.viewTangent));
+
+    output.uv = uv;
+
+	return output;
+}
+
+DS에서 pos, uv, viewPos, viewTangent, viewBinormal, viewNormal 을 아웃풋에 담아서 다음 단계인 PS 로 넘기면 이제 
+여기서는 어떤 일을 하는지 생각 해보겠습니다. 
+터레인을 deferred 를 기반으로 Tessellation 을 적용시킨 버전으로 만들고 있는겁니다. 그러면 PS 의 아웃풋은 
+Position 버퍼, Normal 버퍼, Color 버퍼로 최종 렌더 타겟에 넘기기전에 G_BUFFER 라는 중간 렌더 타겟으로 데이터를 넘겨줄겁니다.
+
+struct PS_OUT
+{
+    float4 position : SV_Target0;
+    float4 normal : SV_Target1;
+    float4 color : SV_Target2;
+};
+
+
+PS_OUT PS_Main(DS_OUT input)
+{
+    PS_OUT output = (PS_OUT)0;
+
+    float4 color = float4(1.f, 1.f, 1.f, 1.f);
+    if (g_tex_on_0 == 1)
+        color = g_tex_0.Sample(g_sam_0, input.uv);
+
+    float3 viewNormal = input.viewNormal;
+    if (g_tex_on_1 == 1)
+    {
+        // [0,255] 범위에서 [0,1]로 변환
+        float3 tangentSpaceNormal = g_tex_1.Sample(g_sam_0, input.uv).xyz;
+        // [0,1] 범위에서 [-1,1]로 변환
+        tangentSpaceNormal = (tangentSpaceNormal - 0.5f) * 2.f;
+        float3x3 matTBN = { input.viewTangent, input.viewBinormal, input.viewNormal };
+        viewNormal = normalize(mul(tangentSpaceNormal, matTBN));
+    }
+
+    output.position = float4(input.viewPos.xyz, 0.f);
+    output.normal = float4(viewNormal.xyz, 0.f);
+    output.color = color;
+
+    return output;
+}
+
+사실 terrain.fx 의 PS_Main 코드는 deferred.fx 에서와 똑같습니다. 차이는 PS 이전에 단계들에서 차이가 납니다. 
+
+정리하겠습니다. terrain.fx 의 코드는 Tessellation 시간에 배운 내용과 거의 동일하고 ConstantHS 에서 그냥 하드 코딩으로 Tessellation Level 을 설정해주는게 
+아니라 실제 정점과 카메라 사이의 거리를 이용해 적절한 레벨을 찾아주는 부분과 
+DomainShader 에서는 HS에서 늘려준 정점들의 로컬 포지션을 지정하고 uv 좌표를 다시 0 ~ 1 사이의 값으로 조정, 높이 맵을 터레인에 적용하고 
+달라진 높이로 인한 달라진 탄젠트, 바이노멀 을 구하고 둘을 외적해 노멀도 구한다음 행렬 변환 까지 해서 다음 단계인 PS 로 넘기는 
+이 부분들이 주요한 차이점입니다.
+
+이제 셰이더 코드를 완성했으니 테스트를 진행하고 싶은데 
+이번 셰이더에 필요한 파라미터들이 꽤 많습니다.
+그리고 나중에는 맵 툴을 따로 만들어서 사용할 수도 있고 유니티 에서는 터레인이 별도의 컴포넌트로 사용되고 있었습니다. 
+우리도 터레인 컴포넌트를 만들어 주려고 합니다.
+
+
+4) Terrain 컴포넌트 
+Component 필터 아래로 Terrain 클래스를 생성했습니다.
+
+본격적으로 터레인에 대한 cpp 코드를 넣어줄겁니다.
+
+먼저 헤더 코드 입니다.
+#pragma once
+#include "Component.h"
+
+class Terrain : public Component	// 컴포넌트로 사용할것이기에 상속받았습니다.
+{
+public:
+	Terrain();
+	virtual ~Terrain();
+
+	void Init(int32 sizeX, int32 sizeZ);	// 터레인 사이즈를 정해서 초기화 합니다.
+
+	virtual void FinalUpdate() override;	// 업데이트 함수
+
+private:
+	int32 _sizeX = 15;				// 터레인의 사이즈 인데 기본 값으로 15 씩을 줬습니다.
+	int32 _sizeZ = 15;
+	float _maxTesselation = 4.f;	// 최대 Tessellation 레벨 
+
+	shared_ptr<class Material> _material;	// 파라미터들을 담을 머테리얼을 들고 있습니다.
+};
+
+다음은 정의부 입니다. 먼저 터레인에서 사용할 헤더가 많습니다.
+#include "pch.h"
+#include "Terrain.h"
+#include "Resources.h"
+#include "SceneManager.h"
+#include "Scene.h"
+#include "Camera.h"
+#include "Transform.h"
+#include "MeshRenderer.h"
+#include "Material.h"
+#include "Texture.h"
+
+그리고서 가장 먼저 생성자 에서 컴포넌트 타입을 정해줍니다.
+
+Terrain::Terrain() : Component(COMPONENT_TYPE::TERRAIN)	// Component.h 안에 터레인 타입을 추가해주었습니다.
+{
+}
+
+Terrain::~Terrain()
+{
+}
+
+초기화 함수입니다. 
+인자로 사이즈를 세팅해주고 있고 include 한 헤더들에서 이런 저런 데이터를 _material 에 담아주고 있습니다.
+
+void Terrain::Init(int32 sizeX, int32 sizeZ)
+{
+	_sizeX = sizeX;
+	_sizeZ = sizeZ;
+
+	_material = GET_SINGLE(Resources)->Get<Material>(L"Terrain");
+
+	_material->SetInt(1, _sizeX);
+	_material->SetInt(2, _sizeZ);
+	_material->SetFloat(0, _maxTesselation);
+
+	shared_ptr<Texture> heightMap = GET_SINGLE(Resources)->Load<Texture>(L"HeightMap", L"..\\Resources\\Texture\\Terrain\\height.png");
+	Vec2 v = Vec2(heightMap->GetWidth(), heightMap->GetHeight());
+	_material->SetVec2(0, Vec2(heightMap->GetWidth(), heightMap->GetHeight()));
+	_material->SetVec2(1, Vec2(1000.f, 5000.f));
+	_material->SetTexture(2, heightMap);
+
+	shared_ptr<MeshRenderer> meshRenderer = GetGameObject()->GetMeshRenderer();
+	{
+		shared_ptr<Mesh> mesh = GET_SINGLE(Resources)->LoadTerrainMesh(sizeX, sizeZ);
+		meshRenderer->SetMesh(mesh);
+	}
+	{
+		shared_ptr<Material> material = GET_SINGLE(Resources)->Get<Material>(L"Terrain");
+		meshRenderer->SetMaterial(material);
+	}
+}
+
+셰이더 코드에서 사용하던 파라미터들 중 sizeX, sizeZ, g_int_1, g_int_2, g_float_0, g_vec2_0, g_vec2_1, g_tex_2 를 여기서 채워주고 있습니다.
+지금은 머테리얼을 채우는 용도로 사용되지만 나중에 맵 툴에 대한 내용도 여기서 관리해주게 될겁니다.
+
+터레인 오브젝트에 추가될 메쉬렌더러 컴폰넌트를 불러와서 메쉬와 머테리얼을 세팅하고 있습니다.
+
+다음은 Terrain::FinalUpdate 입니다. 
+여기서는 메인카메라를 가져와서 메인카메라의 로컬 포지션을 _material 에 담아주고 있습니다. g_vec4_0 에 담길 데이터입니다.
+void Terrain::FinalUpdate()
+{
+	shared_ptr<Camera> mainCamera = GET_SINGLE(SceneManager)->GetActiveScene()->GetMainCamera();
+	if (mainCamera == nullptr)
+		return;
+
+	Vec3 pos = mainCamera->GetTransform()->GetLocalPosition();
+	_material->SetVec4(0, Vec4(pos.x, pos.y, pos.z, 0));
+}
+
+터레인은 처음에 세팅해주면 이후로 왠만하면 바뀌지 않을것이고 바뀌는건 카메라의 위치 뿐 일것이기 때문에 이 데이터를 FinalUpdate 에서 관리해줍니다.
+
+그런데 아직 Scene 에 GetMainCamera 라는 함수를 만들어 준 적이 없습니다.
+
+shared_ptr<Camera> Scene::GetMainCamera()
+{
+	if (_cameras.empty())
+		return nullptr;
+
+	return _cameras[0];
+}
+
+예전에 Scene 에서 카메라를 따로 관리하게 변경했었습니다. Scene::AddGameObject 에서 분류 해주고 있었습니다.
+따로 모아진 카메라들 중에 가장 처음 추가된 카메라를 메인카메라로 사용하고 있었으니까 _cameras[0] 을 메인 카메라고 리턴해주고 있습니다.
+
+여기까지 만들어졌고 다음은 GameObject 클래스로 갈것입니다. 예전부터 컴포넌트가 추가 되면 같이 추가되는 코드가 있었습니다.
+
+
+5) GameObject 클래스 
+
+최근 만들었던 GetParticleSystem 밑에 GetTerrain 을 만들어 줄겁니다. 헤더 파일에서는 Terrain 을 전방선언 해줘야 잘 작동합니다.
+
+#include "Terrain.h"
+
+shared_ptr<Terrain> GameObject::GetTerrain()
+{
+	shared_ptr<Component> component = GetFixedComponent(COMPONENT_TYPE::TERRAIN);
+	return static_pointer_cast<Terrain>(component);
+}
+
+
+프로젝트를 빌드 해봐서 통과되는지 체크 해봤습니다.
+
+빌드 통과 하였으면 SceneManager::LoadTestScene 에 가서 맨처음에 테스트 했던 Terrain 오브젝트를 수정해서 본격적인 터레인을 출력해보겠습니다.
+
+
+6) Resources 
+오브젝트를 수정하기 전에 먼저 터레인을 간략하게 테스트 하기 위해서 디폴트 셰이더를 그냥 deferred 셰이더 파일을 가져다 사용하도록 해놨던 부분을 
+제대로 수정하고 넘어가야합니다.
+
+먼저 ShaderInfo 를 그냥 셰이더 타입 디퍼드라고만 설정했었는데 제대로 하려면 이제 Tessellation 도 적용된 버전을 사용할것이기 때문에 아래와 같이 
+ShaderInfo 를 설정해줬습니다.
+CreateDefaultShader 
+{
+	// Terrain
+	{
+		ShaderInfo info =
+		{
+			SHADER_TYPE::DEFERRED,
+			RASTERIZER_TYPE::CULL_BACK,
+			DEPTH_STENCIL_TYPE::LESS,
+			BLEND_TYPE::DEFAULT,
+			D3D_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST	// 이부분이 Tessellation 이 적용되기 위해 꼭 필요한 옵션입니다.
+		};
+
+		// 그리고 Tessellation 을 적용한다는건 HullShader, DomainShader 를 적용한다는 의미입니다.
+		
+		ShaderArg arg =
+		{
+			"VS_Main",
+			"HS_Main",
+			"DS_Main",
+			"",
+			"PS_Main",
+		};
+		
+		// 마지막으로 아까 먼저 테스트 할때는 사용하는 셰이더 파일 자체가 deferred 파일을 임시로 사용하고 있었는데 이제는 terrain.fx 를 사용합니다.
+		
+		shared_ptr<Shader> shader = make_shared<Shader>();
+		shader->CreateGraphicsShader(L"..\\Resources\\Shader\\terrain.fx", info, arg);
+		Add<Shader>(L"Terrain", shader);
+	}
+}
+
+디폴트 머테리얼은 변경되는 점이 없습니다. 아까 테스트때 처럼 Terrain 디폴트 셰이더 가져오고 Terrain.png 파일도 불러오는 코드입니다.
+
+
+7) SceneManager 
+
+게임 오브젝트들을 좀 수정하겠습니다. 
+
+먼저 Tessellation 테스트 하던 오브젝트를 삭제 했습니다. 
+
+그리고 Directional Light 의 LightDirection이 (0.f, -1.f, 0.f) 로 수직 아래로 쬐이는 빛이었는데 
+(0.f, -1.f, 1.f) 로 비스듬히 빛이 쬐이도록 수정했습니다.
+
+오늘의 주인공인 터레인 오브젝트도 수정해주겠습니다. 
+우선 Terrain.h 를 include 해주고 
+
+Terrain 컴포넌트도 추가해줍니다.
+
+#pragma region Terrain
+	{
+		shared_ptr<GameObject> obj = make_shared<GameObject>();
+		obj->AddComponent(make_shared<Transform>());
+		obj->AddComponent(make_shared<Terrain>());
+		obj->AddComponent(make_shared<MeshRenderer>());		
+
+		obj->GetTransform()->SetLocalScale(Vec3(50.f, 250.f, 50.f));
+		obj->GetTransform()->SetLocalPosition(Vec3(-100.f, -200.f, 300.f));
+		obj->SetStatic(true);	
+		obj->GetTerrain()->Init(64, 64);	// Terrain::Init 의 인자로 64, 64 를 줬으니까 가로세로 64 칸의 터레인이 만들어 집니다.
+		obj->SetCheckFrustum(false);	// 프러스텀 컬링을 꺼놓고 있습니다. 
+
+		scene->AddGameObject(obj);
+	}
+#pragma endregion
+
+그리고 카메라 오브젝트의 기본 최대 시야 Far 가 1000.f 로 설정되어 있을겁니다. 
+좀더 멀리 보기 위해서 10000.f 정도로 세팅해주겠습니다. 
+
+#pragma region Camera
+	{
+		shared_ptr<GameObject> camera = make_shared<GameObject>();
+		camera->SetName(L"Main_Camera");
+		camera->AddComponent(make_shared<Transform>());
+		camera->AddComponent(make_shared<Camera>()); // near = 1, far = 1000, fov = 45
+		camera->AddComponent(make_shared<TestCameraScript>());
+		camera->GetCamera()->SetFar(10000.f);			// far 수정 코드
+		camera->GetTransform()->SetLocalPosition(Vec3(0.f, 0.f, 0.f));
+		uint8 layerIndex = GET_SINGLE(SceneManager)->LayerNameToIndex(L"UI");
+		camera->GetCamera()->SetCullingMaskLayerOnOff(layerIndex, true); // UI는 안 찍음
+
+		scene->AddGameObject(camera);
+	}
+
+#pragma endregion
+
+
+8) Texture
+갑작스럽지만 이전에 만들었던 코드중에 텍스쳐의 width , height 를 가져오는 Get 함수 부분을 수정해야합니다. 
+이전에 width, height 를 외부에 넘겨주기위해 _desc 라는 멤버 변수에 저장해 뒀다가 필요할때 꺼내 줬었는데 그부분이 수정되야합니다.
+
+이전에 Texture::Load 함수 안에서 _desc 를 받아주는게 버퍼의 Description 을 받아주고 있습니다.
+	
+	_desc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+
+사실은 우리가 받아줘야할 Description 은 버퍼가 아니라 텍스쳐의 원본 데이터 자체를 저장해줘야 합니다.
+
+CreateTexture 함수가 실행된 다음에 _tex2D의 Description 을 받아줍니다.
+
+	HRESULT hr = ::CreateTexture(DEVICE.Get(), _image.GetMetadata(), &_tex2D);
+	if (FAILED(hr))
+		assert(nullptr);
+
+	_desc = _tex2D->GetDesc();
+
+그럼 이전에 받아주던 _desc 는 어쩌냐면 이건 텍스쳐의 Description 과 다른 버퍼의 Decription 의 용도 이니까 
+임시 저장 변수로 받아서 사용되던 코드도 이름을 바꿔줘서 그대로 사용할 수 있도록 해줍니다.
+
+이걸 갑자기 왜 수정하러 왔나면
+원래 텍스쳐가 4096, 4096 의 크기였으면 Texture::GetWidth , Texture::GetHeight 를 호출했을때도 똑같이 나와줘야하는데
+버퍼로 만들어주는 순간 1*4096*4096 으로 깨지게 되더라구요 이런 버그때문에 약간 수정이 필요했습니다.
+
+- 테스트 
+
+이제 전체 빌드 하고 실행해보면 멋있는 지형이 출력되는걸 볼 수 있습니다.
+
+이 상태에서 카메라를 앞뒤로 움직여보면 지면이 꿈틀대면서 변하는걸 볼 수 있는데 이건 Tessellation 이 적용된 상태라서 실시간으로 폴리곤이 늘었다 줄었다 
+하다보니 보이는 현상입니다. 
+이런 현상은 실제 서비스 중인 게임같은것에도 멀리 있는 지형을 유심히 보면서 다가 가다보면 비슷하게 지형이 변하는걸 볼 수 있습니다. 
+그러면 그걸 보고 아 동적 LOD가 적용 되고 있구나 하고 생각할 수 있게 된겁니다. 
+
+이렇게 해서 간단하게 터레인의 원리를 알아봤고 터레인, 지형이 많이 어려운 개념은 아니었고 지금까지 배운 메쉬와 비슷하게 삼각형들로 이루어져 있고
+거기에 각점에 높이를 매핑해서 지형 처럼보이게 하는거라는걸 알 수 있었습니다.
+
+나중에는 맵 툴을 이용해서 원하는 지형의 높이를 조절할수 있게 될겁니다. 
+
+그리고 지금은 지형의 텍스쳐가 한가지로 밋밋한데 모든 셀 단위가 동일한 텍스쳐를 입혀놨기 때문인데 
+나중에 가면 이렇게 한 지형에 전부다 같은 텍스쳐를 입히는게 아니라 여러 텍스쳐를 준비해서 레이어에 따라 그때 그때 알맞는 텍스쳐를 붙혀줄 수 있을겁니다. 
