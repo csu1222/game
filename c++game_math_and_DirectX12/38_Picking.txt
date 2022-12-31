@@ -1,0 +1,514 @@
+
+
+        38. Picking
+
+
+지금까지 렌더링에 대해 이런 저런 내용들을 배웠습니다. 
+하지만 사실은 렌더링을 배운것만으로 게임을 구현할 수 없다고 합니다. 
+게임적 상호작용이 일어나는것은 사실 가상의 3D 게임세상에서 일어나는 일이고 렌더링한 결과물은 그 세상을 카메라가 찍은후 
+입체적으로 보이도록 2D 화면으로 렌더타겟으로 옮겨 그린 화면을 보는게 렌더링입니다. 
+
+렌더링된 결과물인 모니터 화면 어딘가를 클릭을 했더니 3D 세상속의 어느점을 찍은것 마냥 물체가 선택이 된다는건 신기한 일이기도 합니다.
+
+지금까지 경혐해본 게임들에서는 게임 화면을 클릭해서 어떤 물건을 선택하는게 너무나도 당연한 기능이었습니다. 
+그런데 DirectX 를 처음으로 공부한 입장에서 이 것을 구현하려고 하면 막막합니다.
+
+화면에 출력된 물건들은 모두 자신만의 로컬 스페이스에서 부터 월드 스페이스라는 3D 세상의 좌표로 옮겨지고 세상을 찍을 카메라가 있어서 카메라가 보는 물건들을 표현하기 위해
+다시 카메라를 기준으로한 뷰 스페이스로 좌표 변환을 하고 뷰 스페이스에서 화면에 출력하기 위해 일정 비율로 물체들을 2D 렌더타겟에 투영하는 투영 좌표계로 
+옮겨 그린다음 비율에서 실제 화면을 표시할 윈도우 해상도에 맞춰 픽셀을 할당해서 표현하는 스크린 스페이스 변환 까지 한 결과물이 
+지금까지 배운 프로젝트의 결과물이었습니다.
+
+그러면 역으로 스크린 스페이스의 어떤 점을 클릭했을때 그 점이 월드 스페이스에서 어느 점인지를 알 수 있어야 거기에 물건이 있는지 없는지 판별할 수 있다는 말입니다.
+출력된 화면에 물체를 그리고 있는 픽셀들의 범위를 어떻게 잘 해가지고 하면되지 않을까 하지만 게임에서는 카메라가 움직이면 픽셀들의 범위도 변하기도 하고 
+생각보다 어렵습니다.
+
+그래서 결국 우리가 이런 문제를 해결하기 위해 사용해야 하는 기술은 레이캐스팅(Ray casting) 이라는 기술 입니다.
+이름대로 레이저를 쏘는 기술이라고 생각하면됩니다.
+좀 더 자세히 설명해보면 우리가 스크린 스페이스 기준으로 어느 좌표를 클릭 했다고 가정을 해봅니다. 중앙을 노렸다고 해보겠습니다.
+그러면 레이캐스팅이 적용된 후 실질적으로 일어나는 일이 무엇이냐면 카메라 물체가 있고 카메라가 촬영하는 범위 Frustum 이 있을 것이고 투영좌표계에서 
+물체들을 투영하는 지점이 있을겁니다. 그 투영지점의 중앙을 향해 카메라로 부터 레이저가 쓩 쏴질 겁니다.
+그 레이저가 계속 쭉쭉 나가면서 그 경로에 물체가 있으면 여기에 물체가 있다고 판별이 가능해집니다.
+
+이렇게 카메라로 부터 어느 좌표에 레이저를 쏴서 그 경로에 물체가 있는지를 판별하는 기술이 레이캐스팅 이라는게 결론입니다.
+
+이 레이저를 쏜다는 기술도 지금까지 내용에서 잘 생각해 보면 어느 좌표계를 기준으로 레이저를 쏘는지 먼저 생각해봐야 합니다.
+여러 스페이스가 있었는데 카메라가 레이저를 쏘고 계산하는 스페이스랑 목표로 하는 물체의 좌표가 어느 스페이스 기준인지가 같아야 제대로 계산이 될겁니다.
+쉽게 말해 모든걸 물체의 로컬스페이스로 맞춰서 계산하던가 해야 된다는겁니다.
+
+그리고 물체의 충돌을 판별하는 방법도 여러가지가 있는데 예를 들어 Sphere Collider 라는 방식은 물체 중심으로부터 일정 크기의 구형 범위에 레이저가 닿으면 
+충돌했다고 판별하는 방법이 있습니다.
+
+개념은 이렇고 이 기술을 구현하기 위함 수학적 이론을 간략하게 배워 보겠습니다. 
+
+- 수학 
+위에서 복습했던 물체를 렌더링하기위해 스페이스 변환을 했던 과정이 있습니다. 
+
+로컬 -> 월드 -> 카메라(뷰) -> 투영(클립) -> 스크린 
+
+레이캐스팅을 하기 위해 스크린 스페이스에서 어느 좌표를 찍었을때 이 좌표가 월드기준으로는 어떤지, 로컬 기준으로는 어떤지를 알기 위해서는 
+위의 과정을 거꾸로 거슬러 올라가면됩니다.
+
+예를들어 현재 윈도우가 800*600 크기이고 화면 중앙을 찍었다면 (400,300) 라는 좌표로 나타낼 수 있을건데 이 좌표는 어디까지나 스크린 스페이스 기준이고 
+이 좌표를 변환행렬의 역행렬을 사용해서 거슬러 올라가 뷰 스페이스건 월드 스페이스건 로컬 스페이스건 계산할 스페이스를 맞춰서 계산해줘야 합니다.
+
+먼저 스크린 좌표계에서 프로젝션 좌표계로 변환하는 방법은 생각보다 간단한데 스크린 좌표계가 width * height 안에 표시된 좌표계였고 
+프로젝션 좌표계가 -1 ~ 1 사이의 x, y 값과 0 ~ 1 까지의 z 깊이값을 가진 좌표계였는데 
+스크린 좌표계에 너비, 높이에 각각 width, height 를 나눠주게되면 0 ~ 1 사이의 값을 가지게 되고 이 값에 - 0.5f 를 해준다음 다시 2 를 곱해주면 
+가로세로 -1 ~ 1 사이의 값을 가진 좌표계가 나옵니다. 한가지 유의 할점은 스크린에서 y 축은 위에서 아래로 갈때 값이 커졌지만 
+프로젝션에서 y 축 값은 아래에서 위로 갈 때 값이 켜졌습니다.
+
+이걸 수식으로 표현해보게습니다. 
+
+    (프로젝션에서 x) = (2(스크린에서 x) / width) - 1  ,     (프로젝션에서 y) = - (2(스크린에서 y) / height) + 1
+
+다음은 이제 프로젝션 스페이스에서 뷰 스페이스로 거슬러 올라가고싶습니다.
+이건 예전에 게임수학 배울때 했던 내용인데 뷰 스페이스 에서 프로젝션 스페이스로 변환하는 내용은 변환하기 편하게 상이 맺히는 위치를 카메라로 부터 1의 거리,
+그리고 fov 가 45 도 정도로 되어서 위 아래로 1 씩의 거리를 두는 상태라고 가정하고 
+
+뷰 스페이스에서의 좌표 (x, y) 에다가 x 값에는 화면비(width / height) 를 나눠줘서 나중에 화면비가 보통 직사각형인데 어색하지않도록 해주고 
+카메라에서 상이 맺히는 곳까지의 거리가 1 이고 fov 가 θ 라고 할 때 x 좌표와의 비율이 x / tan(θ/2) 입니다. 
+거기에 다시 물체의 거리가 멀수록 작게 보일것이기 때문에 거리값 z 를 다시 나눠줍니다. 
+
+y 좌표의 경우에는 x 좌표의 계산에서 화면비만 빠진 상태로 계산이 됩니다. 
+
+    X = x / ((화면비)* z * tan(θ/2))  , Y = y / (z * tan(θ/2))
+
+이게 뷰 스페이스에서 프로젝션 스페이스로 변환되는 수식이고 반대로 가는 수식은 나눠 주고 있던걸 곱해주면 되겠습니다. 
+
+    X = x * r * tan(θ/2)    ,   Y = y * tan(θ/2)    // z 가 생략된 이유는 화면이 맻히는 거리가 1 이기 때문에 생략되었습니다.
+
+그런데 신기하게도 위의 식을 계산하기 위한 값들을 새로 구해주는것 보다 프로젝션 변환 행렬을 보면 이 행렬의 (0,0) , (1,1) 에 있는 값을 
+x,y 에 각각 나눠주면 똑같은 계산이 가능합니다.  프로젝션 변환 행렬을 P 라고 했을때 다시 수식을 표현해보면 
+
+    X = x / P(0,0)  , Y = y / P(1,1)  이라고 표현할 수 있습니다.
+
+이제 위에 스크린 스페이스에서 프로젝션 스페이스로 그리고 프로젝션 스페이스에서 뷰 스페이스로 넘어가는 식을 같이 사용해보겠습니다. 
+(스크린에서 좌표를 (x,y), 뷰스페이스 에서 좌표를 (X,Y)  width 를 w, height 를 h 라고 사용합니다.)
+    X = (2x/w - 1) / P(0,0)       Y  = -(2y/h - 1) / P(1,1)
+
+이런 식을 사용해서 나오는 결과물은 스크린 스페이스에서 찍은 좌표가 뷰 스페이스의 카메라로부터 1 거리에 떨어진 곳 의 좌표가 됩니다. 
+
+결과물을 viewX, viewY 라고 하면 현재 뷰 스페이스니까 좌표계의 원점이 카메라가 있는곳 이 될것이고 그러면 
+(0, 0) 에서 (viewX, viewY) 로 가는 벡터를 구해 쭉 나아가서 물체의 Collider 와 충돌을 하느냐 아니냐를 판별해 주면 되겠습니다.
+
+이제는 충돌 판정에 대한 내용입니다. 이번 강의에서는 Sphere Collider 를 사용할것이라고 했습니다. 물체에 따라 큐브모양이나 캡슐 모양이나 
+여러 Collider 방법이 있다고도 말했었습니다. 
+
+먼저 구에 대한 공식을 살펴보게습니다. 구의 중심을 c 라고 하고 구의 반지름을 d , 구 위의 어느 한 점을 p 라고 해보겠습니다. 
+그러고 원점에서 c 까지의 벡터를 →c p 까지의 벡터를 →p 라고 하겠습니다. 이때 이런 식이 만족합니다. 
+    | →p - →c | = d
+벡터의 뺄셈의 성질과 절대값으로 스칼라 값을 꺼내는 방법입니다.
+
+이번에는 레이를 공식으로 표현해볼겁니다. 레이는 어느 방향으로 가는 성질이 있기 때문에 벡터로 표현해서 →r 이 레이라고 하고 레이는 어느점에서 
+어느점으로 향하는 것인데 시작하는 점을 →q , 가는 방향을 →u 라는 단위 벡터로 해보겠습니다. 그러면 식으로 표현하면 이렇습니다. 
+    →r = →q + t(→u)
+u 앞에 t는 레이가 뻗는 길이입니다. 
+
+이 두 식을 이용해서 레이와 물체가 접촉하는지를 알아볼건데 접촉한다는것은 원위의 어떤점 p 와 r 위의 어느점이 같아진다고 볼 수 있습니다.
+그러면 →p 위치에 →r 을 대입해서 성립하면 그때 레이는 물체에 접촉한것 일겁니다.
+    | →q + t(→u) - →c | = d 
+위의 식을 제곱하고 조금 앞뒤를 바꿔보면 아래의 식이 됩니다.
+    d² = (→q - →c + t(→u))(→q - →c + t(→u))
+이중에 연산을 쉽게 하기위해서 →q - →c 를 →m 이라는 이름으로 치환해주었습니다.
+다시 전개하면 
+    d² = →m*→m + 2→m→ut + t²→u→u
+    ↳ 0 = →u→ut²+ 2→m→ut + →m→m - d²
+이렇게 전개가 되는데 여기서 →u→u 를 a 라고 하고 2→m→u 를 b →m→m - d² 를 c 라고 보면 이런 형태의 식이 됩니다. 
+    a*t² + b*t + c 
+전형적인 2차 방정식이 되는데 2차 방적식을 만족하는 값이 있다면 레이가 구를 히트 했다는 의미이고 만족하는 값이 없다면 히트하지 않았다는 의미입니다. 
+이런걸 알 수 있는 식을 중,고등학생때 배웠던 적이 있는데 근의 공식이란것이 있었습니다. 이걸 활용해서 근의 갯수를 구하는 방법이 있었습니다. 
+
+    b² - 4ac 의 값이 0보다 크다면 근이 2개, 0과 같다면 근이 1개, 0보다 작다면 근이 없습니다.
+
+즉 위의 값이 0보다 크거나 같다면 우리가 소는 레이가 물체와 충돌했다 라는것을 알 수 있습니다.
+
+이렇게 스크린 좌표를 뷰 좌표로 변환하는식, 카메라로부터 쏜 레이가 물체에 닿았는지를 판별하는 식을 알아 봤습니다. 
+실제로 사용할 때는 이런 내용을 꼭 알고 있을 필요는 없고 이미 준비된 함수에 인자만 건내줘서 사용할것이지만 
+그냥 겸사 겸사 원리를 수식으로 알아보았습니다.
+
+이제 이 내용들을 코드로 구현해보겠습니다.
+
+
+- 코드 
+
+오늘 추가할 코드는 Collider 를 추가하고 이걸 오브젝트에 붙혀서 이게 Picking 테스트를 통과하는지를 볼겁니다.
+여기서 말하는 Picking 테스트는 오늘 강의의 제목이기도 하고 위에서 알아본 카메라로 부터 나온 레이가 물체의 Collider 에 충돌하는지를 알아보는 테스트를 말합니다.
+
+Collider 는 컴포넌트에 속하는데 종류에 따라 구, 큐브, 캡슐 등으로 나뉠겁니다. 그런데 이번 테스트에서는 간단하게 그냥 구 형태 Collider 만 만들겁니다. 
+기존 Coponent 필터 아래에 Collider 필터를 새로 만들고 거기에 먼저 모든 콜라이더의 조상이 되는 BaseCollider 라는 클래스를 하나 파줄것이고 그리고 
+오늘 테스트할 SphereCollider 를 만들어 주겠습니다.
+
+1) BaseCollider 
+먼저 조상이 되는 클래스인 베이스콜라이더 부터 시작하겠습니다. 
+콜라이더도 컴포넌트로 사용될것이기 때문에 Component 를 상속받을것이고 자식 클래스들이 어떤 타입의 Collider 인지를 가지고 있기 위해 
+ColliderType 이라는 enum class 도 가지고 있을겁니다.
+#pragma once
+#include "Component.h"
+
+enum class ColliderType
+{
+	Sphere,
+};
+
+class BaseCollider : public Component
+{
+public:
+	BaseCollider(ColliderType colliderType);    // Collider 타입을 받는 생성자
+	virtual ~BaseCollider();
+
+	virtual bool Intersects(Vec4 rayOrigin, Vec4 rayDir, OUT float& distance) = 0;
+    // 이 함수는 Picking 테스트를 하는 함수입니다. 자세한 내용은 나중에 알아보겠습니다. 그리고 뒤에 = 0 이 붙는 가상함수, 순수 가상함수로써 
+    // 상속받는 클래스에서 용도에 맞게 구현을 해줘야 합니다.
+
+private:
+	ColliderType _colliderType = {};
+};
+
+그리고 정의부에서는 그냥 컴포넌트타입을 Collider 로 설정해주는 생성자만 있습니다.
+#include "pch.h"
+#include "BaseCollider.h"
+
+BaseCollider::BaseCollider(ColliderType colliderType)
+	: Component(COMPONENT_TYPE::COLLIDER), _colliderType(colliderType)
+{
+
+}
+
+BaseCollider::~BaseCollider()
+{
+
+}
+
+1-1) Component.h
+컴포넌트 타입 추가도 Component.h 에서 해주었습니다.
+
+// Component로 사용할 타입들을 정리
+enum class COMPONENT_TYPE : uint8
+{
+	TRANSFORM,
+	MESH_RENDERER,
+	CAMERA,
+	LIGHT,
+	PARTICLE_SYSTEM,
+	TERRAIN,
+	COLLIDER,
+	// ...
+	MONO_BEHAVIOUR,
+	END,
+};
+
+그리고 컴포넌트가 추가 될 때마다 GameObject 에서 Get 함수를 만들어 줍니다. 
+
+1-2) GameObject
+// h
+class BaseCollider
+
+{
+	shared_ptr<BaseCollider> GetCollider();
+}
+
+// cpp
+shared_ptr<BaseCollider> GameObject::GetCollider()
+{
+	shared_ptr<Component> component = GetFixedComponent(COMPONENT_TYPE::COLLIDER);
+	return static_pointer_cast<BaseCollider>(component);
+}
+
+만약 외부에서 필요한게 BaseCollider 가 아니라 그 자식 클래스인 SphereCollider 같은게 필요 할 수도 있지만 어짜피 BaseCollider 를 상속받은 것이니
+필요하다면 알아서 캐스팅해서 사용해도 될것입니다.
+
+
+2) SphereCollider
+
+헤더 코드입니다. 
+#pragma once
+#include "BaseCollider.h"
+
+class SphereCollider : public BaseCollider  // 상속받았습니다.
+{
+public:
+	SphereCollider();
+	virtual ~SphereCollider();
+
+    // FinalUpdate 와 Intersects 를 오버라이드 하고 있습니다. 
+	virtual void FinalUpdate() override;
+	virtual bool Intersects(Vec4 rayOrigin, Vec4 rayDir, OUT float& distance) override;
+
+	void SetRadius(float radius) { _radius = radius; }
+	void SetCenter(Vec3 center) { _center = center; }
+
+private:
+	// Local 기준
+	float		_radius = 1.f;
+	Vec3		_center = Vec3(0, 0, 0);
+
+    // 구의 부피를 나타내는 DirectX 의 지원 클래스입니다.
+	BoundingSphere _boundingSphere;
+};
+
+정의부 코드입니다.
+#include "pch.h"
+#include "SphereCollider.h"
+#include "GameObject.h"
+#include "Transform.h"
+
+SphereCollider::SphereCollider() : BaseCollider(ColliderType::Sphere)   // 콜라이더 타입을 정해주고 있습니다.
+{
+
+}
+
+SphereCollider::~SphereCollider()
+{
+
+}
+
+void SphereCollider::FinalUpdate()  // 여기서 _boundingSphere 의 Center, Radius 를 설정해주고 있습니다. 
+{
+	_boundingSphere.Center = GetGameObject()->GetTransform()->GetWorldPosition();
+
+	Vec3 scale = GetGameObject()->GetTransform()->GetLocalScale();
+	_boundingSphere.Radius = _radius * max(max(scale.x, scale.y), scale.z); // x, y, z 스케일중 가장 큰것을 기준으로 하고 있습니다.
+}
+
+bool SphereCollider::Intersects(Vec4 rayOrigin, Vec4 rayDir, OUT float& distance)
+{
+    // 여기서 Picking 테스트를 해주고 있습니다 이 함수의 내용은 몰라도 되고 원리는 위에서 알아본 방법을 통해 한다고 생각하면 되겠습니다.
+    // 레이의 시작점 rayOrigin, 레이의 방향 rayDir 이걸 가지고 레이가 충돌했으면 bool으로 뱉어줄 것이고 
+    // 충돌한 거리가 마지막 인자인 distance 에 들어가게 될겁니다.   
+	return _boundingSphere.Intersects(rayOrigin, rayDir, OUT distance);
+}
+
+여기서 또 유심히 봐야할것은 우리가 충돌 테스트를 할 때 어느 스페이스에서 할것인지가 중요합니다.
+지금 코드에서는 월드를 기준으로 계산해주려고 하고 있습니다 
+FinalUpdate 에서 _boundingSphere 의 Center 를 월드 좌표로 담아주고 있는걸 알 수 있습니다. scale 은 물체의 x,y,z 중 가장 큰 스케일로 설정해주고 있습니다. 
+거기에 멤버 변수인 _radius 를 곱해주면서 SetRadius 로 원하는 크기로 설정해 줄 수 있습니다.
+SetCenter 는 어느경우에 사용하나면 캐릭터 위치를 보이는 그대로 픽킹되는것이 아니라 떨어진 곳을 선택했을때 물체가 픽킹되도록 할때 사용될겁니다. 
+보통 오브젝트의 월드 포지션은 캐릭터라고 치면 양발의 중앙이 포지션 좌표입니다. 이걸 캐릭터의 중앙으로 옮기고 싶다거나 할 때를 말합니다.
+
+다음 수정할 코드는 이번에 스크린 좌표를 클릭하는걸로 피킹 테스트하는 내용이다 보니 클릭을 인식할 수 있도록 수정해줘야합니다. 
+
+
+3) Input 클래스 
+인풋 클래스가 오랜만인데 KEY_TYPE 이라는 이넘 클래스에 좌 클릭, 우 클릭을 추가해주었습니다. 
+enum class KEY_TYPE
+{
+	UP = VK_UP,
+	DOWN = VK_DOWN,
+	LEFT = VK_LEFT,
+	RIGHT = VK_RIGHT,
+
+	W = 'W',
+	A = 'A',
+	S = 'S',
+	D = 'D',
+
+	Q = 'Q',
+	E = 'E',
+	Z = 'Z',
+	C = 'C',
+
+	LBUTTON = VK_LBUTTON,	// 추가된 코드 
+	RBUTTON = VK_RBUTTON,
+};
+이제 프로그램은 마우스가 눌렸다는건 아는데 눌린 좌표가 어딘지는 아직 모릅니다. 이걸 알 수 있도록 변수를 추가해줄겁니다.  
+POINT 라는 구조체를 사용해서 눌린 위치를 받아올겁니다. 이 구조체는 windef 이라는 기본 라이브러리에 존재하는 구조체입니다. 
+
+private:
+	HWND _hwnd;
+	vector<KEY_STATE> _states;
+	POINT _mousePos = {};
+
+그리고 Input::Update 에서 사용할수 있게 GetMousePos 함수도 추가합니다. 
+
+	const POINT& GetMousePos() { return _mousePos; }
+
+다음은 Input::Update 에서 수정점을 보겠습니다. 
+기존 코드는 버튼이 지금 눌렸는지 눌려있었는지 이런걸 체크하고 있었고 마우스 포지션에 대한 내용은 이렇습니다 
+
+	::GetCursorPos(&_mousePos);
+	::ScreenToClient(GEngine->GetWindow().hwnd, &_mousePos);
+
+이런 두개의 함수는 윈도우 API 여서 자세히 살펴보진안겠지만 하는역할은 우리 프로그램 창에서 마우스의 위치를 가져다 주는 역할을 하고 있습니다. 
+
+이러면 매 프레임 마다 마우스 커서의 위치를 _mousePos 에 담아주고 있다가 마우스가 눌렸다면 그 위치를 리턴해주는 작업을 하게 될겁니다. 
+
+다음은 SceneManager 에서 테스트할 오브젝트를 수정해주겠습니다.
+
+
+4) SceneManager 
+
+이전부터 만들어 뒀던 구형태 오브젝트가 있었는데 그걸 다시 복원하고 거기에 SphereCollider 를 추가해서 Picking 테스트를 진행해볼겁니다.
+
+수정된 코드는 아래와 같습니다.
+#pragma region Object
+	{
+		shared_ptr<GameObject> obj = make_shared<GameObject>();
+		obj->SetName(L"OBJ");
+		obj->AddComponent(make_shared<Transform>());
+		obj->AddComponent(make_shared<SphereCollider>());
+		// 여기서 SphereCollider 가 추가되었습니다. 
+		obj->GetTransform()->SetLocalScale(Vec3(100.f, 100.f, 100.f));
+		obj->GetTransform()->SetLocalPosition(Vec3(0, 0.f, 500.f));
+		obj->SetStatic(false);
+		shared_ptr<MeshRenderer> meshRenderer = make_shared<MeshRenderer>();
+		{
+			shared_ptr<Mesh> sphereMesh = GET_SINGLE(Resources)->LoadSphereMesh();
+			meshRenderer->SetMesh(sphereMesh);
+		}
+		{
+			shared_ptr<Material> material = GET_SINGLE(Resources)->Get<Material>(L"GameObject");
+			meshRenderer->SetMaterial(material->Clone());
+		}
+		dynamic_pointer_cast<SphereCollider>(obj->GetCollider())->SetRadius(0.5f);
+		// Collider 의 반지름을 0.5f 로 설정하고 있는데 처음에 LoadSphereMesh 에서 반지름을 0.5f 로 만들었어서 그걸 맞춰준것입니다. 
+		dynamic_pointer_cast<SphereCollider>(obj->GetCollider())->SetCenter(Vec3(0.f, 0.f, 0.f));
+		obj->AddComponent(meshRenderer);
+		scene->AddGameObject(obj);
+	}
+#pragma endregion
+
+이제 이 구체는 Picking 테스트를 진행할수 있는 상태인겁니다. 카메라로 부터 레이를 쏴서 그 경로에 구체가 있는지를 판별할 수 있게 되었습니다.
+
+지금까지 만든것은 BaseCollider, SphereCollider 와 Input 에서 화면에 클릭을하면 그곳이 어느 좌표인지를 알수 있게 수정했고 
+그러면 아직 만들지 않은게 SphereCollider::Intersects 함수를 사용하지 않았습니다. 이 함수의 bool 값으로 레이와 물체가 충돌했는지를 알 수 있고 
+충돌했다면 distance 라는 변수로 반환한다고 했습니다. 
+
+이걸 보통 유니티에서는 Physics 라는 매니저 클래스아래로 Picking 클래스도 만들어서 관리 한다고 합니다. Physics 를 따로 만들어서 관리하는 이유는 
+게임에서 충돌에 대한 내용이 여러종류가 있어서인데 오늘 주제인 Picking 말고도 캐릭터와 지형의 충돌, 카메라의 충돌 등이 있습니다. 
+
+이번시간에서는 일단은 Picking 만 간단히 만들어서 테스트 해볼것이고 그것도 따로 클래스를 파주는것 보다 SceneManager 아래에 함수를 하나 만들어서 
+테스트 해보겠습니다.
+
+Picking 함수의 선언부 입니다.
+	shared_ptr<class GameObject> Pick(int32 screenX, int32 screenY);
+인자인 스크린 좌표의 x, y 값을 받아주면 그 좌표로 레이를 쏴서 거기에 반환타입인 GameObject 의 shared_ptr 을 뱉어주는 함수입니다. 
+
+오늘의 주인공이라고 볼 수 있는 이 함수의 정의부입니다.
+
+shared_ptr<GameObject> SceneManager::Pick(int32 screenX, int32 screenY)
+{
+	// 가장 먼저 메인 카메라를 가져옵니다.
+	shared_ptr<Camera> camera = GetActiveScene()->GetMainCamera();
+
+	// 현재 스크린의 너비와 높이를 가져왔습니다. 
+	float width = static_cast<float>(GEngine->GetWindow().width);
+	float height = static_cast<float>(GEngine->GetWindow().height);
+
+	// 프로젝션 변환 행렬을 가져왔고 
+	Matrix projectionMatrix = camera->GetProjectionMatrix();
+
+	// ViewSpace에서 Picking 진행
+	float viewX = (+2.0f * screenX / width - 1.0f) / projectionMatrix(0, 0);
+	float viewY = (-2.0f * screenY / height + 1.0f) / projectionMatrix(1, 1);
+
+	// 뷰 변환 행렬과 그 역행렬을 가져옵니다.
+	Matrix viewMatrix = camera->GetViewMatrix();
+	Matrix viewMatrixInv = viewMatrix.Invert();
+
+	// 현재 액티브된 씬에서 게임 오브젝트들을 모두 가져오고 있습니다. 
+	auto& gameObjects = GET_SINGLE(SceneManager)->GetActiveScene()->GetGameObjects();
+
+	float minDistance = FLT_MAX;
+	shared_ptr<GameObject> picked;
+
+	for (auto& gameObject : gameObjects)
+	{
+		if (gameObject->GetCollider() == nullptr)	// 물체가 Collider 를 들고 있는지 
+			continue;
+
+		// ViewSpace에서의 Ray 정의	
+		Vec4 rayOrigin = Vec4(0.0f, 0.0f, 0.0f, 1.0f);	// 카메라의 위치인데 뷰 스페이스에서는 카메라가 원점입니다.
+		Vec4 rayDir = Vec4(viewX, viewY, 1.0f, 0.0f);	// 아까 구한 뷰 스페이스 에서 클릭한 좌표
+
+		// WorldSpace에서의 Ray 정의 뷰 스페이스 변환 행렬의 역행렬로 월스 스페이스 변환을 하고 있습니다. 
+		rayOrigin = XMVector3TransformCoord(rayOrigin, viewMatrixInv);	// 좌표 정보 w 값이 1 인 벡터는 coord 가 붙은 함수
+		rayDir = XMVector3TransformNormal(rayDir, viewMatrixInv);	// 방향정보만 있는 w값이 0 인 벡터는 normal 이 붙은 함수 
+		rayDir.Normalize();
+
+		// 월드 스페이스로 변환해주는 이유는 SphereCollider 에서도 _boundingSphere.Center 를 월드 스페이스 기준으로 맞춰놨기 때문
+
+		// WorldSpace에서 연산
+		// SphereCollider 에서 만들어 뒀던 Intersects 함수로 계산
+		float distance = 0.f;
+		if (gameObject->GetCollider()->Intersects(rayOrigin, rayDir, OUT distance) == false)
+			continue;
+		// 함수 결과가 false 라면 충돌하지 않았기 때문에 다음 게임오브젝트로 컨틴뉴
+
+		// 통과하였더라도 현재 충돌한 물체가 최소거리보다 가까웠다면 최소거리를 갱신하고 현재 게임오브젝트를 picked 라는 변수에 담습니다.
+		if (distance < minDistance)
+		{
+			minDistance = distance;
+			picked = gameObject;
+		}
+	}
+
+	return picked;
+}
+
+여기서 중요한것은 개론 시간에도 말했듯이 카메라가 레이를 쏠때 어느 스페이스 에서 할것인지 물체는 어느 스페이스 기준으로 계산할것인지를 
+맞춰주는게 중요합니다. 뷰 스페이스건 월드 스페이스건 로컬 스페이스건 상관이 없고 현재 프로젝트에서는 SphereCollider::FinalUpdate 에서 
+_boundingSphere.Center 값을 물체의 월드 스페이스 좌표로 받아 왔기 때문에 월드 스페이스 기준으로 해주고 있습니다.
+
+지금처럼 바운딩 스피어를 사용해서 충돌 체크를 해주고 있는 상황은 위에서 말한것 처럼 어느 스페이스 기준으로 충돌 체크 하던 상관없는데
+
+만약에 물체를 이루는 삼각형 각각의 단위로 모두 충돌 체크를 해주고 싶다고 하면 왠만해서는 로컬 스페이스까지 돌아가서 계산해주는게 좋다고 합니다. 
+
+이제 픽킹 함수가 완성이 되었습니다. 테스트를 하기위해서 픽킹이 되고 반환된 게임오브젝트를 어떻게 활용할것인지를 
+원래는 컨텐츠 단계에서 해줘야 하는데 우리 프로젝트에서는 그 부분을 TestCameraScript 클래스에서 해주고 있었습니다.
+
+
+5) TestCameraScript 
+TestCameraScript::LateUpdate 함수안에서 우리가 카메라를 움직이는 부분을 넣어놨었는데 거기에 우클릭시 그 좌표로 픽킹 테스트를 진행하는 
+코드를 추가했습니다.
+
+	if (INPUT->GetButtonDown(KEY_TYPE::RBUTTON))
+	{
+		const POINT& pos = INPUT->GetMousePos();
+		GET_SINGLE(SceneManager)->Pick(pos.x, pos.y);
+	}
+
+이제 빌드를 해보고 문제가 있는지 체크 해보겟습니다.
+
+
+결과는 뭔가 문제가 있습니다.
+에러 메세지는 캐스팅 실패입니다. static_cast Component 에서 BaseCollider 로 변환 할 수 없다고 합니다. 
+이 변환은 게임오브젝트에서 GetCollider 할때 _components 에서 Collider 를 꺼내 static_pointer_cast<BaseCollider> 를 하는 부분입니다. 
+해결법은 BaseCollider 헤더를 include 하는것입니다. 
+이번에 잊어먹고 추가를 안해줬던겁니다.
+
+이제 다시 빌드를 하면 잘 통과 됩니다. 
+
+- 테스트 
+테스트를 어떻게 할것이냐면 지금상태는 Input 에서 화면에서 마우스의 좌표를 추적하고 있고 TestCameraScript 에서 우클릭하면 그 지점의 좌표를 SceneManager::Pick 
+에게 넘겨주고 있습니다. 이 Pick 함수는 메인카메라와 화면의 너비 높이를 가져와서 인자로 받은 마우스 클릭한 좌표를 View 스페이스 기준으로 변환하고 
+또 SceneManager->GetActiveScene->GetGameObjects 를 통해 게임 오브젝트들을 가져와서 순환합니다. 
+그 오브젝트들중 Collider 컴포넌트를 들고 있는 오브젝트라면 이제 view 스페이스에서 카메라의 위치와 위에서 변환한 view 스페이스에서 클릭한 좌표를 
+World 스페이스 변환 역행렬을 가지고 월드 스페이스 기준으로 변환을 합니다. 그리고 나서는 게임 오브젝트가 들고 있는 Collider 컴포넌트의 메소드인 
+Intersects 로 카메라의 레이와 물체의 Collider가 충돌하는지를 체크해줍니다. 인자로는 카메라의 월드 기준 좌표, 스크린에서 찍은 마우스 좌표를 월드 스페이스까지 
+변환해 레이가 나갈 방향, 그리고 OUT distance 라는 float 변수를 넣어줍니다. 
+이 메소드의 결과물은 픽킹 테스트를 통과하면 true 통과 하지 못하면 false를 반환하고 distance 에는 성공했을시 물체 까지의 거리를 같이 반환합니다. 
+마무리로 distance 의 최소거리를 갱신해주면서 픽킹 테스트를 통과한 게임오브젝트를 반환합니다. 
+
+이 과정중에서 아직 픽킹 테스트를 통과한 오브젝트를 어떻게 한다는게 없습니다. 그러면 픽킹을 구현했어도 테스트에서 결과를 확인하기가 애매한데 
+이걸 확인하는 방법으로 SceneManager::Pick 함수에서 마지막에 Intersects 함수를 통과하는 곳에 중단점을 걸면 지금 피킹이 통과했구나를 알 수 있습니다. 
+그런데 일반 중단점은 확인할 때 마다 프로그램이 멈추니까 중단점 우클릭->작업->출력창에 메세지 "HIT !" 를 설정해 놓으면 
+오브젝트에 픽킹 테스트가 통화했을경우 콘솔에 HIT ! 라는 메세지가 나오는걸로 잘 구현 됐는지를 알 수 있을겁니다. 
+
+레이 캐스팅이라는 기술이 어떤방식으로 작동하는지를 알고 넘어가면 좋겠습니다. 
+스크린의 좌표가 어떻게 3D 게임 세상의 물체와 상호작용하는지 결국 스크린의 좌표, 물체 둘다 같은 스페이스 기준으로 옮겨야 둘을 계산을 할 수 있습니다. 
+렌더링파이프라인은 3D에서 2D로 변환을 해주고 레이캐스팅은 거꾸로 2D 에서 3D로 거슬러 올라가는 느낌입니다. 
+이제 이 픽킹테스트를 통과한 물체를 선택해주는 기능을 추가하면 일반적인 게임처럼 될겁니다. 
+
+사실 충돌 테스트가 이런 경우에도 쓰이지만 다른 용도로도 많이 쓰입니다. 예를 들어 어떤 캐릭터가 칼을 휘두르고 그 칼의 경로에 있는 몬스터가 피격 판정이 생긴다
+이런것도 충돌 테스트 입니다. 레이 캐스팅 처럼 한 지점의 충돌만 테스트 하는게 아니라 범위와 범위의 충돌을 테스트 하는 경우도 많을것이고 
+또 하나 예시를 들자면 캐릭터가 굴곡이 있는 지형을 걸어가면 그 굴곡을 따라 위아래로 움직이면서 걸어나갈건데 이것은 캐릭터의 배꼽에서 부터 아래 방향으로 일정 
+거리의 레이를 쏴서 충돌테스트를 하는것과 비슷한 느낌입니다. 
+
+그런 만큼 레이캐스팅은 많은 곳에 응용 될 수 있습니다. 지금은 SphereCollider 를 사용하고 있지만 나중에는 정말 물체를 이루는 삼각형 하나하나에 충돌을 테스트 할수 
+있게되고 그러면 모든 물체의 형태에 충돌테스트를 할 수 있다는 말이 됩니다.
+
+메쉬를 이루고 있는 모든 삼각형에 대해 레이캐스팅을 할 수 있겠지만 당연하게도 많은 부하가 걸리게 될겁니다. 성능을 끌어올리기 위해서는 
+메쉬의 삼각형마다가 아니라 일정 영역을 잘라서 그 영역에 대해 테스트를 진행하는 방법도 있을겁니다.
+
+또 한가지 예시로 FPS 게임을 보면 총을 쏠 때 과녁의 머리부분이 있고 몸통, 팔, 다리 부분들이 있을겁니다. 부위마다 Collider 를 배치해서 어디에 맞았는지에 따라
+데미지를 다르게 산출 할 수 있을겁니다.
