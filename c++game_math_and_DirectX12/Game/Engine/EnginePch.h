@@ -33,11 +33,7 @@ using namespace Microsoft::WRL;
 #include <DirectXTex/DirectXTex.h>
 #include <DirectXTex/DirectXTex.inl>
 
-#ifdef _DEBUG
-#pragma comment(lib, "DirectXTex\\DirectXTex_debug.lib")
-#else
-#pragma comment(lib, "DirectXTex\\DirectXTex.lib")
-#endif
+#include "FBX/fbxsdk.h"
 
 // 각종 lib
 #pragma comment(lib, "d3d12")
@@ -45,21 +41,37 @@ using namespace Microsoft::WRL;
 #pragma comment(lib, "dxguid")
 #pragma comment(lib, "d3dcompiler")
 
-// 각종 typedef
-using int8		= __int8;
-using int16		= __int16;
-using int32		= __int32;
-using int64		= __int64;
-using uint8		= unsigned __int8;
-using uint16	= unsigned __int16;
-using uint32	= unsigned __int32;
-using uint64	= unsigned __int64;
-using Vec2		= DirectX::SimpleMath::Vector2;
-using Vec3		= DirectX::SimpleMath::Vector3;
-using Vec4		= DirectX::SimpleMath::Vector4;
-using Matrix	= DirectX::SimpleMath::Matrix;
+#ifdef _DEBUG
+#pragma comment(lib, "DirectXTex\\DirectXTex_debug.lib")
+#else
+#pragma comment(lib, "DirectXTex\\DirectXTex.lib")
+#endif
 
-enum class CBV_REGISTER
+#ifdef _DEBUG
+#pragma comment(lib, "FBX\\debug\\libfbxsdk-md.lib")
+#pragma comment(lib, "FBX\\debug\\libxml2-md.lib")
+#pragma comment(lib, "FBX\\debug\\zlib-md.lib")
+#else
+#pragma comment(lib, "FBX\\release\libfbxsdk-md.lib")
+#pragma comment(lib, "FBX\\release\libxml2-md.lib")
+#pragma comment(lib, "FBX\\release\\zlib-md.lib")
+#endif
+
+// 각종 typedef
+using int8 = __int8;
+using int16 = __int16;
+using int32 = __int32;
+using int64 = __int64;
+using uint8 = unsigned __int8;
+using uint16 = unsigned __int16;
+using uint32 = unsigned __int32;
+using uint64 = unsigned __int64;
+using Vec2 = DirectX::SimpleMath::Vector2;
+using Vec3 = DirectX::SimpleMath::Vector3;
+using Vec4 = DirectX::SimpleMath::Vector4;
+using Matrix = DirectX::SimpleMath::Matrix;
+
+enum class CBV_REGISTER : uint8
 {
 	b0,
 	b1,
@@ -97,7 +109,6 @@ enum class UAV_REGISTER : uint8
 	END,
 };
 
-
 enum
 {
 	SWAP_CHAIN_BUFFER_COUNT = 2,
@@ -110,11 +121,10 @@ enum
 
 struct WindowInfo
 {
-	HWND	hwnd;	// 출력윈도우 핸들
-	int32	width;	// 너비
-	int32	height;	//높이
-	bool	windowed;// 창모드 or 전체화면
-
+	HWND	hwnd; // 출력 윈도우
+	int32	width; // 너비
+	int32	height; // 높이
+	bool	windowed; // 창모드 or 전체화면
 };
 
 struct Vertex
@@ -130,6 +140,8 @@ struct Vertex
 	Vec2 uv;
 	Vec3 normal;
 	Vec3 tangent;
+	Vec4 weights;
+	Vec4 indices;
 };
 
 #define DECLARE_SINGLE(type)		\
@@ -145,20 +157,18 @@ public:								\
 
 #define GET_SINGLE(type)	type::GetInstance()
 
-
 #define DEVICE				GEngine->GetDevice()->GetDevice()
 #define GRAPHICS_CMD_LIST	GEngine->GetGraphicsCmdQueue()->GetGraphicsCmdList()
 #define RESOURCE_CMD_LIST	GEngine->GetGraphicsCmdQueue()->GetResourceCmdList()
 #define COMPUTE_CMD_LIST	GEngine->GetComputeCmdQueue()->GetComputeCmdList()
 
-#define GRAPHICS_ROOT_SIGNATURE		GEngine->GetRootSignature()->GetGraphicsRootSignature() 
+#define GRAPHICS_ROOT_SIGNATURE		GEngine->GetRootSignature()->GetGraphicsRootSignature()
 #define COMPUTE_ROOT_SIGNATURE		GEngine->GetRootSignature()->GetComputeRootSignature()
 
 #define INPUT				GET_SINGLE(Input)
 #define DELTA_TIME			GET_SINGLE(Timer)->GetDeltaTime()
 
 #define CONST_BUFFER(type)	GEngine->GetConstantBuffer(type)
-
 
 struct TransformParams
 {
@@ -170,7 +180,8 @@ struct TransformParams
 	Matrix matViewInv;
 };
 
-
-// GEngine이 등장 할 것이라고 미리 선언하는 코드
 extern unique_ptr<class Engine> GEngine;
 
+// Utils
+wstring s2ws(const string& s);
+string ws2s(const wstring& s);

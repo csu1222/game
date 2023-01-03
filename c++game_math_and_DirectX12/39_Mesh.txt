@@ -1,0 +1,685 @@
+
+
+        39. Mesh
+
+    
+이번시간부터 메쉬와 애니메이션에 대한 내용을 배울겁니다. 
+
+지금까지는 물체를 띄울때 Resources 라느 클래스 안에서 일종의 하드코딩된 좌표를 가지고 구, 큐브, 사각형 등 도형을 만들고 있었는데 
+실제 게임에서는 당연히 이런식으로 물체를 만들지 않고 모델러분들이 만든 모델 파일을 읽어서 처리를 하게 될검니다. 그리고 그 물체들을 
+애니메이션으로 움직이게 하는걸로 게임이 진행될건데 이런 실습을 해볼겁니다. 
+
+오늘 실습에 필요한 것들이 있는데 FBX 라는 확장자의 파일을 읽어서 메쉬를 표현할것인데 이에 해당하는 기능을 직접 만드는게 아니라 
+외부 라이브러리를 활용할것입니다. 이름은 FBX SDK 입니다.
+
+구글에서 검색을 하면 AutoDesk 라는 사이트에서 다운 받을 수 있는데 강의에서는 VS 2019 버전을 다운 받았고 현재 검색 결과에서 최신이 2019 버전이기 
+때문에 다운 받고 설치 했습니다. 
+설치된 경로는 C:\Program Files\Autodesk\FBX\FBX SDK\2020.2.1  에 설치 되어 있습니다. 이중에서 우리 프로젝트로 가져올 include 와 lib 을 
+골라 와야하는데 일단 우리 프로젝트에서 위치는 Game\Liblary\ 로 오면 Lib 폴더, include 폴더가 있습니다. 
+먼저 Lib 폴더에는 FBX SDK 폴더중 lib\vs2019\x64\ 위치에 있는 debug, release 폴더를 Lib 으로 옮겼습니다. 
+프로젝트의 include 에는 FBX SDK 폴더에서 include\ 안에 있는 내용물들을 include 폴더 안으로 옮겼습니다. 
+
+두번째 준비물은 무엇이냐면 FBX 파일을 하나 가져올겁니다. free3D.com 이라는 사이트 무료 모델이 있습니다. 이걸 학습용도로는 사용해도 된다고 
+허락되었다고 합니다. 여기 있는 오브젝트들 중에 나중에 애니메이션도 실습할것이기 때문에 적용된 모델을 다운 받아야 합니다. 지금은 강의에서 제공된
+드래곤 모양의 모델을 사용하겠습니다. 
+
+드래곤 모델을 다운 받고 압축을 푸면 여러 파일들이 있습니다. 그중에 textures 라는 폴더에 담겨있는 여러 텍스쳐들이 일단 필요하고 
+모델 파일도 필요합니다. 모델 파일은 여러 종류가 있습니다. 유형을 보면 3D Object, BLEND, Unity package file 등이 있는데 유니티와 블렌더는 
+지금 사용하지 않고 눈여겨 봐야 하는 유형은 3D Object 유형입니다. 
+
+이 중에서도 파일명에 binary, ASCII 로 뒤에 쓰여있는게 나뉘어져있는데 이런 파일들을 메모장 같은 걸로 연결시켜 실행하면 모델을 만들기 위한 
+모든 정보들이 여기 있다는걸 알 수 있습니다. 메쉬의 정점과 인덱스 정보 뿐만 아니라 애니메이션 정보, 이 모델과 연결되어 있는 머테리얼, 또 
+머테리얼과 연결되어 있는 텍스쳐 등 온갖 정보가 다 있다는걸 알 수 있습니다. 
+ASCII 버전과 binary 버전의 차이는 ASCII 는 좀 더 사람이 보기 편하게 되어 있는 것이고 binary 는 컴퓨터 친화적인 버전입니다. 둘이 하는 역할은 
+똑같지만 컴퓨터 친화적인 binary 버전을 사용할겁니다. 결국 textures 폴더에 있는 텍스쳐들과 binary 버전의 모델 파일을 
+프로젝트에 Resources\FBX\ 아래로 붙여 넣어 주겠습니다. 
+
+텍스쳐 폴더와 모델 파일이름도 알기 쉽게 바꿔 주었습니다. 폴더이름 -> dragon.fbx , 모델 파일 이름 -> Dragon.fbx 
+여기까지 해서 오늘 준비물이 다 되었고 
+
+
+- 코드 입니다.
+가장 먼저 EnginePch.h 코드 입니다. 
+
+1) EnginePch.h
+이전에 텍스쳐를 처음 배울때 DirectXTex 라는 라이브러리를 추가 했었습니다. 이번에도 라이브러리를 추가하는 것이니 그 아래에 코드를 추가해주겠습니다.
+
+#ifdef _DEBUG
+#pragma comment(lib, "FBX\\debug\\libfbxsdk-md.lib")
+#pragma comment(lib, "FBX\\debug\\libxml2-md.lib")
+#pragma comment(lib, "FBX\\debug\\zlib-md.lib")
+#else
+#pragma comment(lib, "FBX\\release\libfbxsdk-md.lib")
+#pragma comment(lib, "FBX\\release\libxml2-md.lib")
+#pragma comment(lib, "FBX\\release\\zlib-md.lib")
+#endif
+
+이런 코드들로 라이브러리를 추가해줬고 
+또 이 lib 를 활용하기 위해 헤더파일도 include 해줘야 합니다. 
+헤더 파일의 경로는 "Game\Liblary\include\FBX\fbxsdk.h" 입니다. 현재 프로젝트에서 설정으로 include 폴더까지는 자동으로 찾도록 해놨습니다. 
+
+#include "FBX/fbxsdk.h" 
+
+를 해주었습니다. 
+
+유틸 함수 두개를 추가해줄겁니다. string 과 wstring 사이를 왔다 갔다 하는 함수입니다. 지금까지 저희 프로젝트에서는 wstring 을 주로 사용하고 있었는데 
+FBX 에서는 string 도 사용하다 보니 둘 사이을 자연스럽게 왔다갔다 할 수 있도록 추가하는겁니다. 
+
+wstring s2ws(const string& s)
+{
+	int32 len;
+	int32 slength = static_cast<int32>(s.length()) + 1;
+	len = ::MultiByteToWideChar(CP_ACP, 0, s.c_str(), slength, 0, 0);
+	wchar_t* buf = new wchar_t[len];
+	::MultiByteToWideChar(CP_ACP, 0, s.c_str(), slength, buf, len);
+	wstring ret(buf);
+	delete[] buf;
+	return ret;
+}
+
+string ws2s(const wstring& s)
+{
+	int32 len;
+	int32 slength = static_cast<int32>(s.length()) + 1;
+	len = ::WideCharToMultiByte(CP_ACP, 0, s.c_str(), slength, 0, 0, 0, 0);
+	string r(len, '\0');
+	::WideCharToMultiByte(CP_ACP, 0, s.c_str(), slength, &r[0], len, 0, 0);
+	return r;
+}
+
+이제 다음으로 
+
+Utils 필터 아래에 FBXLoader 라는 클래스를 추가 해줍니다. 말 그대로 FBX 를 로딩하는 클래스입니다.
+
+
+2) FBXLoader
+
+이 클래스의 내용이 긴 편인데 이 내용을 꼭 기억하고 있어야 한다던가 그런 중요한 내용은 아니라고 합니다. 지금은 FBX 로 실습을 하려고 이 FBXLoader 방식을 
+사용하는것이고 다음에 프로젝트를 할 때 어떤 모델 파일 유형을 사용하는지에 따라 지금 이 클래스 내용도 바뀝니다. 
+그래서 그때 그때 사용하는 모델 파일 유형에 따라 인터넷에서 긁어 와서 사용하면 됩니다.
+
+평소와 달리 이 코드는 모든 코드를 하나씩 보는데 아니라 그때 그때 내용의 코드만 확인하는 식으로 진행하겠습니다. 
+
+FBXLoader 의 코드는 생각보다 긴데 이 내용에는 오늘의 주제인 메쉬 뿐만 아니라 다음 주제인 애니메이션에 대한 내용도 포함되어 있습니다. 
+이번시간에는 메쉬에 대한 코드를 살펴보고 다음시간에 추가하는게 아니라 다음시간에는 애니메이션 내용의 코드를 볼겁니다. 
+
+/*
+이때 fbxsdk.h 를 인식하지 못하는 버그가 있어서 한참을 해맸는데 프로젝트의 포함 디렉토리를 설정해주지 않아서 그런것이었습니다. 
+Engine 프로젝트를 우클릭하고 -> 속성 -> 구성 속성 -> VC++ 디렉터리 -> 일반란에 포함 디렉터리를 기존 내용에 
+$(SolutionDir)Liblary/include/FBX/; 를 추가해줘야 했습니다. 
+*/
+
+그리고 두가지 에러 메세지가 뜹니다. indices, weights 라는 멤버가 Vertex에 포함되어 있지 않다고 하는데 이 부분은 
+다음 강의의 애니메이션 시간에 필요한 내용인데 자세한 내용은 그때 다루고 일단 코드는 추가해주겠습니다.
+위치는 EnginePch.h 에 Struct Vertex 입니다. 
+2-1) EnginePch
+struct Vertex
+{
+	Vertex() {}
+
+	Vertex(Vec3 p, Vec2 u, Vec3 n, Vec3 t)
+		: pos(p), uv(u), normal(n), tangent(t)
+	{
+	}
+
+	Vec3 pos;
+	Vec2 uv;
+	Vec3 normal;
+	Vec3 tangent;
+	Vec4 weights;
+	Vec4 indices;
+};
+
+이제 통과가 될겁니다. 다시 FBXLoader 로 돌아 가겠습니다. 
+
+2) FBXLoader
+여기에는 여러가지 struct 가 선언되어 있는데 이중에 다은 시간인 애니메이션 시간에 다룰 것들은 빼고 살펴보겠습니다.
+핵심적으로 살펴볼것은 FbxMaterialInfo, FbxMeshInfo 입니다.
+
+struct FbxMaterialInfo
+{
+	Vec4			diffuse;
+	Vec4			ambient;
+	Vec4			specular;
+	wstring			name;
+	wstring			diffuseTexName;
+	wstring			normalTexName;
+	wstring			specularTexName;
+};
+
+fbx 머테리얼같은 경우는 머테리얼에 연결된 텍스쳐들은 무엇인지, 자신의 이름은 무엇인지, diffuse, ambient, scepcualar 값이 어떻게되는지 
+을 들고 있습니다. 연결된 텍스쳐중에 scepcualarTexName 스펙큘러 텍스쳐라는것은 지금까지는 노멀 텍스쳐를 이용해서 specular 값을 조절해주고 있었습니다.
+경우에 따라서 더 정밀하게 표현하고 싶을때 노멀 텍스쳐로 연산하는게 아니라 따로 스펙큘러 텍스쳐를 받아서 연산을 해줍니다.
+
+struct FbxMeshInfo
+{
+	wstring								name;
+	vector<Vertex>						vertices;
+	vector<vector<uint32>>				indices;
+	vector<FbxMaterialInfo>				materials;
+	vector<BoneWeight>					boneWeights; // 뼈 가중치
+	bool								hasAnimation;
+};
+
+다음으로 메쉬에 대한 정보를 담은 구조체입니다. 내용은 메쉬의 이름, 정점 정보, 인덱스 정보, 머테리얼, 본웨이트, 애니메이션을 할것인지를 담고 있는데 
+이중에 뒤에 두개 본에 대한것과 애니메이션은 다음시간 내용이기 때문에 재쳐두고
+
+인덱스정보가 지금까지 사용했던 인덱스 정보는 딱 하나만 두고 활용했었는데 이런 방법과 달리 FBX 에서는 인덱스 버퍼가 여러개로 쪼개 질 수 있습니다.
+이게 무슨 말이냐면 하나의 물체를 그린다고 해도 상체 하체로 분리해서 그릴 수 있을겁니다.
+FBX 에서는 인덱스를 분리해서 관리하는데 다른 방법인 어심프?나 다른 것들에서는 인덱스를 분리하지 않고 하나만 쓰지만 메쉬 자체를 분리해서 로딩이 됩니다.
+이 부분은 라이브러리 마다 맞춰서 사용해줘야 하는데 당장 지금 fbxsdk 에서는 하나의 메쉬에 분리된 인덱스를 사용하는 방법으로 갈겁니다.
+그래서 uint32 벡터의 벡터로 되어 있는것 같습니다.
+
+이제 FBXLoader 클래스 본문으로 들어가보면 생성자는 그대로고 소멸자에서는 멤버 변수중에 _scene, _manager 가 null 이 아니라면 Destroy 라는 메소드를 
+실행 해줍니다.
+
+FBXLoader::FBXLoader()
+{
+
+}
+
+FBXLoader::~FBXLoader()
+{
+	if (_scene)
+		_scene->Destroy();
+	if (_manager)
+		_manager->Destroy();
+}
+
+그리고 FBXLoad 라는 메소드입니다.
+
+void FBXLoader::LoadFbx(const wstring& path)
+{
+	// 파일 데이터 로드
+	Import(path);
+
+	// Animation	
+	//LoadBones(_scene->GetRootNode());
+	//LoadAnimationInfo();
+
+	// 로드된 데이터 파싱 (Mesh/Material/Skin)
+	ParseNode(_scene->GetRootNode());
+
+	// 우리 구조에 맞게 Texture / Material 생성
+	CreateTextures();
+	CreateMaterials();
+}
+
+경로에 있는 파일을 가져오는 Import 메소드 이 코드도 따라가면 내용이 많지만 이 모든 코드를 세세하게 알 필요는 없습니다. 그냥 
+라이브러리를 활용하면 됩니다.
+Import 의 내용을 간단하게 살펴보면 _manager 라는 멤버변수에 FbsManager 를 생성하고 FbsIOSettings 라는 객체를 생성해서 _manager->SetIOSetting 에 붙혀줍니다.
+또 다른 멤버변수 _scene 멤버변수에 FbxImporter 객체를 생성 등의 내용들이 있습니다. 
+
+이중에 생각해봐야할 부분은 메소드 아랫부분에 Triangulate 라는 부분이 있는데 여기서는 Scene 내에 삼각형화 할 수 있는 모든 노드를 삼각형화 하는데 이게 필요한 이유는 
+여태껏 우리 프로젝트에서는 기본적으로 메쉬를 삼각형을 기본요소로 만들어 왔지만 이제부터는 다른사람이 만든 모델을 가져와 사용할 수 도 있게 된겁니다. 
+사람에 따라 기본 Topology 를 삼각형외에 사각형이나 다른 도형을 기본으로 사용할 수도 있는데 이럴때 위의 Triangulate 함수로 Topology 를 삼각형으로 변환해서 가져옵니다.
+
+또 _resourceDirectory 변수에는 어떤 경로를 담아주는데 이 경로의 의미는 지금 읽어들인 파일의 경로안에 더해서 .fbm 이라는 경로를 가진 폴더안에 텍스쳐 파일이 들어있다는
+정보를 담아놓았습니다. 모델파일을 읽는 동시에 그 경로 밑 텍스쳐 파일의 경로를 미리 저장해 놓는겁니다.
+
+결과적으로 위의 Import 함수는 이 라이브러리의 규칙에 따라 자세히는 모르지만 모델 파일을 읽어 들였다는 효과를 냅니다. 
+
+Import 다음은 애니메이션에 대한 내용인데 일단 주석처리해 놓았습니다. 일단은 넘어가겠습니다. 
+
+다음은 ParseNode 입니다. 
+여기서 노드라고 하는것의 구조는 트리 구조를 하고 있습니다. 트리구조라는것은 자료구조 알고리즘에 나오는 내용입니다. 먼저 간단히 설명하자면 
+트리구조는 상위에 하나 노드가 있고 그 밑으로 자식 노드들이 달리는걸 트리 구조라고 합니다. 이 노드중에 맨 위에 있는 노드를 루트 노드라고 합니다. 그래서 이 루트 노드부터
+해서 파싱을 시작하는겁니다. Parsing 은 한글로 구문 분석이라는 뜻인데 문장(코드)를 분해해서 내가 원하는 형태의 데이터로 가공해서 가져오는 것입니다. 
+
+나중에 알고리즘 시간에 배우겠지만 트리구조에서 파싱을 할때 대표적으로 사용하는 방법이 재귀적 방법입니다. 재귀란 자신안에서 자신을 또다시 부르는걸 말하는데 
+재귀는 리미트를 걸어놓지 않으면 무한 루프를 돌기때문에 사용에 조심해야 하는 방식입니다. 파싱에 재귀를 사용한다는것은 찾는 데이터를 리미트로 걸어 두는 방법을 사용하는겁니다. 
+
+루트 노드부터 재귀적으로 파싱을 하면 하위 노드에 메쉬 정보가 있을수 있고 머테리얼 정보가 있을수 있고 애니메이션 정보가 있을수 있는데 정말 복잡하게 구조화 되어 있습니다. 
+FBX 란 라이브러리는 게임을 만들때 뿐만 아니라 토이스토리 같은 CG 애니메이션을 만들 때도 사용할 수 있는 라이브러리다 보니까 모든 경우의 수를 맞춰주기 위해 구조가 정말 
+복잡하게 되어 있습니다. 
+
+그래서 ParseNode 함수는 인자로 _scene->GetRootNode() 를 넘겨주고 있습니다. ParseNode 함수의 내요을 보면 실제로 마지막에 ParseNode 자신을 호출하면서 현재 노드가 
+메쉬이면 메쉬를 Get 하면서 break 하고 아니라면 중간에 머테리얼이 있다면 머테리얼들을 모두 LoadMaterial 해준 다음 재귀를 합니다. 
+
+	여기서 LoadMaterial 을 잠시 살펴보겠습니다. 내용은 FBXLoader 클래스 처음에 정의 해놓았던 FbxMaterialInfo 타입의 임시 변수를 생성해서 현재 LoadMaterial 하고 있는 
+	머테리얼의 name, diffuse, ambient, specular, diffuseTexName, normalTexName, specularTexName 등을 임시 fbx 머테리얼 변수에 설정한 다음 멤버변수인 
+	_meshes.back().materials.push_back() 해주고 있습니다.
+
+아까도 말했듯이 이런 내용들은 참고로 알아만두고 달달 외울만한 내용들은 아닙니다. 사용하는 라이브러리마다 그때 그때 사용법을 알아 사용할 수 있으면 되는겁니다.
+
+	이번에는 LoadMesh 를 한번 훑어보겠습니다. 여기서는 _meshes 라는 변수에 Vertex 정보며 index 정보며 노멀 탄젠트 UV 도 담아주고 있는데 
+	_meshes.back() 가장 최근 메쉬를 임시변수 meshInfo 로 참조하게 해서 여기에 모든 정보들을 담아주고 있습니다.
+	파싱된 노드의 메쉬정보중 name 은 그냥 s2ws 함수로 wstring으로 변환해서 담아주고 있고 FBX 특유의 GetControlPointCount 로 정점의 count 를 가져오고 이걸 기반으로
+	vertices 와 boneWeights 를 리사이즈 해줍니다. 
+	다음은 정점의 포지션 정보를 담아주는데 for 문으로 vertexCount 만큼 돌면서 우리 코드인 meshInfo 에 fbx 파일의 정점 포지션 데이터를 하나씩 담아주고 있습니다. 
+	여기서 이상하게 보이는게 있는데 우리코드는 x, y, z 순으로 평범한데 fbx 데이터는 0, 2, 1 번 인덱스 순으로 넘겨주고 있습니다. 이 이유는 fbx 에서 축이 우리 프로젝트와 
+	다르게 틀어져 있어서 우리 상황에 맞도록 수정을 한겁니다. indices 의 사이즈는 왜인지 노드의 머테리얼 카운트를 가져와서 리사이즈를 해주고 있습니다. 
+	그 밑에서는 GetPolygonSize 라는걸 가져와서 assert 로 폴리곤 사이즈가 3인지를 체크해주고 있습니다. 우리가 Import 에서 Triangulate 를 사용했기때문에 폴리곤 사이즈가 
+	3으로 되어 있어야 합니다. 여기서 통과가 안된다면 뭔가 문제가 있는것이라고 합니다.
+	그 밑에서는 인덱스배열을 3개 짜리로 만들고 vertexCounter 와 triCount 라고 메쉬의 삼각형 갯수를 가져옵니다. 이제 이중 for 문을 돌건데 
+	첫번째 for문은 0 부터 triCount 의 크기만큼 그 안에 다시 for문은 0부터 3개를 돌건데 fbx 파일의 삼각형을 이루는 정점마다 노멀 탄젠트 uv 정보를 인덱스 배열에 담아서 
+	한 삼각형마다 순서에 맞춰 인덱스 정보를 push_back 해줍니다. 이때도 인덱스 순서가 0, 2, 1 순서입니다.
+	이중 for문을 빠져나온다음은 애니메이션 데이터를 LoadAnimationData 해주는데 이 내용은 다음 시간으로 미루겠습니다.
+
+이렇게 해서 Import 한 fbx 파일을 우리 프로젝트중 _meshes 라는 멤버 변수에 파싱해왔습니다. 
+
+그리고 LoadFbx 함수 마지막으로 우리 프로젝트 구조에 맞게 텍스쳐와 머테리얼을 생성하고 있습니다. 
+	CreateTextures();
+	CreateMaterials();
+이 두 메소드인데 CreateTextures 부터 보면 현재 파싱한 _meshes 라는 FbxMeshInfo 를 담은 vector 의 사이즈만큼을 for문을 돌겁니다. 각 메쉬 마다 
+또 다중 머테리얼을 사용하기 때문에 머테리얼의 사이즈 만큼 두번째 for문을 돕니다. 
+
+FbxMaterialInfo 에서 diffuseTexName, normalTexName, scepcualarTexName 세가지가 있었습니다.
+예를들얼 diffuseTexName 을 가진 텍스쳐를 로딩해서 우리 구조대로 만들려면 상대경로를 먼저 받아옵니다. 지금 다루고 있는 메쉬, 지금 다루고 있는 머테리얼이 가지고 있는
+diffuseTexName의 c_str() 라는 함수를 호출하는데 이게 상대경로 같습니다. 상대경로를 알았으면 파일 시스템에서 상대경로를 통해 파일 이름을 가져옵니다. 
+파일이름으로는 다시 fullPath 라고 텍스쳐를 생성할때 필요한 경로를 만듭니다. 이때 이용하는것은 아까 LoadFbx 에서 텍스쳐를 만들때 사용할것이라고 저장해 뒀던
+_resourceDirectory 에다가 +L"\\" + 파일이름
+이렇게 저장될 경로를 만듭니다. 이제 진짜로 이 메쉬의 머테리얼에 diffuseTexName 이 있는지를 체크하는데 if(filename.empty() == false) 이런조건이면 파일이름이 
+존재하면 다음 코드로 넘어갑니다. 이 조건문의 내용은 우리가 만들어서 많이 사용하던 
+GET_SINGLE(Resources)->Load<Texture>(filename, fullPath); 
+으로 filename 이라는 문자열을 가져다가 리소스의 이름으로 사용하고 경로는 fullPath 를 사용합니다.
+
+이런식으로 Normal, specular 도 텍스쳐를 생성해줍니다.
+
+CreateMaterials 에서도 마찬가지로 _meshes 의 사이즈 만큼, materials 의 사이즈 만큼 2중으로 for 문을 돌면서 
+우리가 사용하던 Material 객체를 임시로 생성한 다음 머테리얼의 이름을 설정해주는데 이 부분은 아직 구현이 안되있습니다.
+GET_SINGLE(Resources)->Get<Shader>(L"Deferred"); 로 디퍼드 셰이더를 불러와서 머테리얼에 세팅해줍니다. 모델 파일로 로드 한 오브젝트들은 디퍼드 셰이더로 그려줄겁니다.
+그리고 위에 CreateTextures 로 만들어준 텍스쳐들을 material->SetTexture 로 0번은 diffuseTexture, 1번은 normalTexture, 2번은 specularTexture 를 담아줍니다.
+그리고 나서 Resources 에 Add 를 해줍니다.
+
+이제 이 모델을 우리 프로젝트에 띄우는 작업을 해봐야 합니다. 여기서 일단 생각나는 수정해줄 부분은 FBX에서 다중 머테리얼 구조로 되어 있는 부분입니다.
+
+
+
+새로 리소스를 만들어 줄겁니다. 모델 파일에서 데이터를 파싱해온다음 이 데이터를 리소스로 관리해주면 하면서 오브젝트에 붙여주면 될것 같습니다. 
+그 클래스의 이름은 MeshData로 하겠습니다.
+
+
+3) MeshData
+메쉬데이터 클래스에도 관리하고 있는 struct가 있는데 메쉬와 머테리얼을 같이 들고 있는 MeshRenderInfo 라는 struct 입니다. 
+struct MeshRenderInfo
+{
+	shared_ptr<Mesh>				mesh;
+	vector<shared_ptr<Material>>	materials;
+};
+
+메쉬데이터가 하는 역할은 아까 FBXLoader 에서 파싱한 내용을 들고 있는겁니다. 
+그래서 가지고 있는 멤버 변수가 3가지 있습니다.
+private:
+	shared_ptr<Mesh>				_mesh;
+	vector<shared_ptr<Material>>	_materials;
+
+	vector<MeshRenderInfo> _meshRenders;
+
+그리고 이제 오브젝트 타입이 하나 추가 되었으니까 Object 클래스에서 관리하던 ONJECT_TYPE 에 추가 해줘야겠습니다.
+// Object . ONJECT_TYPE
+enum class OBJECT_TYPE : uint8
+{
+	NONE,
+	GAMEOBJECT, // PREFAB
+	COMPONENT,
+	MATERIAL,
+	MESH,
+	MESH_DATA,
+	SHADER,
+	TEXTURE,
+
+	END
+};
+
+이제 메쉬데이터가 가지고 있는 메소드들을 보겠습니다.
+생성자, 소멸자를 들고 있는데 생성자에서 하는일은 생성하면서 OBJECT_TYPE::MESH_DATA 로 설정해주는 것뿐입니다. 소멸자는 그냥 비어있습니다.
+MeshData::MeshData() : Object(OBJECT_TYPE::MESH_DATA)
+{
+}
+
+MeshData::~MeshData()
+{
+}
+
+그 다음 메소드는 이 클래스에서 주요 내용이라고 할 수 있는 LoadFromFBX 라는 함수입니다. 이 메소드는 인자로 const wstring& 타입을 받고 있는데 
+경로를 받는겁니다. 정의부를 긁어와 보겠습니다.
+
+shared_ptr<MeshData> MeshData::LoadFromFBX(const wstring& path)
+{	
+	// 아까 추가한 FBXLoader
+	FBXLoader loader;
+	loader.LoadFbx(path);
+
+	shared_ptr<MeshData> meshData = make_shared<MeshData>();
+
+	for (int32 i = 0; i < loader.GetMeshCount(); i++)
+	{
+		shared_ptr<Mesh> mesh = Mesh::CreateFromFBX(&loader.GetMesh(i));
+
+		GET_SINGLE(Resources)->Add<Mesh>(mesh->GetName(), mesh);
+
+		// Material 찾아서 연동
+		vector<shared_ptr<Material>> materials;
+		for (size_t j = 0; j < loader.GetMesh(i).materials.size(); j++)
+		{
+			shared_ptr<Material> material = GET_SINGLE(Resources)->Get<Material>(loader.GetMesh(i).materials[j].name);
+			materials.push_back(material);
+		}
+
+		MeshRenderInfo info = {};
+		info.mesh = mesh;
+		info.materials = materials;
+		meshData->_meshRenders.push_back(info);
+	}
+
+	return meshData;
+}
+
+내용 처음 두줄에서 아까 위에서 만든 FBXLoader 클래스를 여기서 호출해 파싱을 해주고 있습니다. 이때 Resources 에서 텍스쳐들을 생성한 후 머테리얼에 담아서 Add 까지 
+됩니다. 
+이제 메쉬를 파싱한 loader 에서 가져와 생성해준다음 Resources 에 Add 해줍니다. 
+이때 Mesh::CreateFromFBX 라는 Mesh의 메소드는 아직 만들어 주지 않은 부분입니다. 일단 넘어가고 
+메쉬를 잘 추가 했으면 loader.LoadFbx 로 생성한 머테리얼 리소스를 찾아오고 있습니다. 머테리얼 벡터에 만들어둔 머테리얼을 담아서 
+메쉬데이터에서 관리하던 MeshRenderInfo 에 메쉬와 머테리얼을 담아주고 있습니다.
+
+이때 MeshData 라는 클래스가 가지고 있는 _meshRenders 는 vector 로 되어 있습니다. 그 안에서는 다시 다중 머테리얼 방식을 사용하고 있기도 합니다. 
+하나의 메쉬에 여러개의 머테리얼이 올 수 있고 또 이 메쉬도 여러개가 있을 수 있는 모든 경우의 수를 상정해주기 위해서 for문을 통해 커버해주고 있습니다.
+
+결국 MeshData 다른 포멧으로 저장해서 가지고 있다면 매번 FBXLoader 를 통해 로드 할 필요 없이 가져다가 사용할 수 있을겁니다.
+사실 FBX 파일에는 우리가 사용하지 않을 잉여의 데이터가 많이 들어 있습니다. 그걸 우리가 필요한 정보만 파싱해서 사용하는것은 성능에도 좋은 영향이 갈겁니다.
+
+이제 MeshData::LoadFromFBX 안에서 아직 구현하지 않았던 Mesh::CreateFromFBX 를 구현해주러 가보겠습니다. 
+
+
+4) Mesh
+이제 Mesh 에서 무엇이 바뀌어야 하는가면 지금까지 Mesh 에서 Vertex 정보들과 Index 정보들을 들고 있었습니다. 
+
+이중에 Index 정보들이 이렇게 있었는데
+	ComPtr<ID3D12Resource>		_indexBuffer;
+	D3D12_INDEX_BUFFER_VIEW		_indexBufferView;
+	uint32 _indexCount = 0;
+FBX 라이브러리 특징상 다중 머테리얼을 사용하고 인덱스 버퍼가 여러개 있을 수 있습니다. 그래서 위의 변수들을 하나의 struct 로 묶어 두고 
+그 sturct 를 vector 로 여러개를 들고 있을 수 있게 수정해야합니다.
+
+struct IndexBufferInfo
+{
+	ComPtr<ID3D12Resource>		buffer;
+	D3D12_INDEX_BUFFER_VIEW		bufferView;
+	DXGI_FORMAT					format;
+	uint32						count;
+};
+
+// Mesh 클래스 안 
+{
+	vector<IndexBufferInfo>		_vecIndexInfo;
+}
+
+물론 이렇게 바뀐 내용에 맞게 다른 수정점도 있을겁니다. 먼저 인덱스 정보들을 얼마다 들고 있는지 사이즈를 알기 위한 함수
+public:
+	uint32 GetSubsetCount() { return static_cast<uint32>(_vecIndexInfo.size()); }
+
+그리고 Render 하는 함수들의 인자에 uint32 타입의 인덱스를 인자로 받아주도록 변경합니다.
+	void Render(uint32 instanceCount = 1, uint32 idx = 0);
+	void Render(shared_ptr<class InstancingBuffer>& buffer, uint32 idx = 0);
+
+_vecIndexInfo 중에 몇번째 인덱스의 인덱스 정보를 사용할것인지 골라주기위한 내용입니다.
+
+그리고 Mesh 클래스로 온 이유인 CreateFromFBX 함수도 추가합니다.
+	static shared_ptr<Mesh> CreateFromFBX(const struct FbxMeshInfo* meshInfo);
+
+FbxMeshInfo 를 이용해서 CreateFromFBX 를 호출하면 Mesh객체가 만들어지도록 해줄겁니다.
+여기서 메쉬까지 만들어 주면 아까 FBXLoader 에서 텍스쳐와 머테리얼을 만들어 줬고 이제 정말로 물체를 그려주기 위해 준비가 되었다고 할 수 있습니다.
+
+그런데 이렇게 CreateFromFBX 를 만들고 보니까 예전에는 Init 이라는 이름이었던 메소드도 정점과 인덱스 정보를 받아서 메쉬를 만들어 주는 역할을 하고 있으니까 
+통일성과 중의적인 느낌을 주기 위해 이름을 Init 에서 Create로 바꿔주었습니다.
+
+이제 Mesh 클래스의 정의부를 보겠습니다. 
+
+Render 함수들 부터 수정해보겠습니다. 어디가 수정되어야 하냐면 이전에는 인덱스 버퍼를 하나만 사용하던걸 이제는 여러개의 인덱스 버퍼를 사용할수 있게 바꾼 
+그 내용 때문에 수정되어야 합니다. 
+수정된 Render 들의 코드입니다.
+
+void Mesh::Render(uint32 instanceCount, uint32 idx)
+{
+	GRAPHICS_CMD_LIST->IASetVertexBuffers(0, 1, &_vertexBufferView); // Slot: (0~15)
+	GRAPHICS_CMD_LIST->IASetIndexBuffer(&_vecIndexInfo[idx].bufferView);
+
+	GEngine->GetGraphicsDescHeap()->CommitTable();
+
+	GRAPHICS_CMD_LIST->DrawIndexedInstanced(_vecIndexInfo[idx].count, instanceCount, 0, 0, 0);
+}
+
+void Mesh::Render(shared_ptr<InstancingBuffer>& buffer, uint32 idx)
+{
+	D3D12_VERTEX_BUFFER_VIEW bufferViews[] = { _vertexBufferView, buffer->GetBufferView() };
+	GRAPHICS_CMD_LIST->IASetVertexBuffers(0, 2, bufferViews);
+	GRAPHICS_CMD_LIST->IASetIndexBuffer(&_vecIndexInfo[idx].bufferView);
+
+	GEngine->GetGraphicsDescHeap()->CommitTable();
+
+	GRAPHICS_CMD_LIST->DrawIndexedInstanced(_vecIndexInfo[idx].count, buffer->GetCount(), 0, 0, 0);
+}
+
+많이 바뀌진 않았고 _vecIndexInfo 에서 인자로 고른 인덱스 정보들중 bufferView 라던가 count 라던가 필요한 내용을 꺼내 사용하고 있습니다.
+
+그다음은 CreateFromFBX 입니다. 
+#include "FBXLoader.h"
+shared_ptr<Mesh> Mesh::CreateFromFBX(const FbxMeshInfo* meshInfo)
+{
+	shared_ptr<Mesh> mesh = make_shared<Mesh>();
+	mesh->CreateVertexBuffer(meshInfo->vertices);
+
+	for (const vector<uint32>& buffer : meshInfo->indices)
+	{
+		if (buffer.empty())
+		{
+			// FBX 파일이 이상하다. IndexBuffer가 없으면 에러 나니까 임시 처리
+			vector<uint32> defaultBuffer{ 0 };
+			mesh->CreateIndexBuffer(defaultBuffer);
+		}
+		else
+		{
+			mesh->CreateIndexBuffer(buffer);
+		}
+	}
+
+	return mesh;
+}
+
+이 함수가 하는일은 예전 Mesh::Init, 현재는 Mesh::Create 함수에서 하는일을 외부에서 로딩한 정점정보들 인덱스정보들로 
+CreateVertexBuffer, CreateIndexBuffer 를 하고 있는겁니다.
+CreateVertexBuffer 는 원래도 vector<Vertex> 타입의 인자를 받아서 버퍼로 만들어 주는 함수였다보니까 수정점이 없는데 
+CreateIndexBuffer 함수의 경우는 다중 인덱스를 사용하기위해 _vecIndexInfo 에 인덱스 정보들이 담도록 수정해 줬다 보니까 이 함수도 수정해줘야합니다.
+
+void Mesh::CreateIndexBuffer(const vector<uint32>& buffer)
+{
+	uint32 indexCount = static_cast<uint32>(buffer.size());	// 수정점
+	uint32 bufferSize = indexCount * sizeof(uint32);
+
+	D3D12_HEAP_PROPERTIES heapProperty = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+	D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+
+	ComPtr<ID3D12Resource> indexBuffer;	// 수정점
+	DEVICE->CreateCommittedResource(
+		&heapProperty,
+		D3D12_HEAP_FLAG_NONE,
+		&desc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&indexBuffer));	// 수정점
+
+	void* indexDataBuffer = nullptr;
+	CD3DX12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
+	indexBuffer->Map(0, &readRange, &indexDataBuffer);	// 수정점
+	::memcpy(indexDataBuffer, &buffer[0], bufferSize);
+	indexBuffer->Unmap(0, nullptr);		// 수정점
+
+	D3D12_INDEX_BUFFER_VIEW	indexBufferView;	// 수정점
+	indexBufferView.BufferLocation = indexBuffer->GetGPUVirtualAddress();	// 수정점
+	indexBufferView.Format = DXGI_FORMAT_R32_UINT;	// 수정점
+	indexBufferView.SizeInBytes = bufferSize;	// 수정점
+
+	IndexBufferInfo info =	// 수정점
+	{
+		indexBuffer,
+		indexBufferView,
+		DXGI_FORMAT_R32_UINT,
+		indexCount
+	};
+
+	_vecIndexInfo.push_back(info);	// 수정점
+}
+
+원래 코드는 Mesh의 멤버변수들에 직접 내용을 채워주는 방법이었는데 이제는 멤버 변수들을 모두 struct IndexBufferInfo 에 담아 뒀다보니까
+함수내 임시 변수를 만들어서 내용을 잠시 저장해둔다음 함수 끝날때 IndexBufferInfo 변수를 하나 만들어 데이터들을 모두 담아서 
+_vecIndexInfo 에 push_back 해주는 방법이 되었습니다.
+
+이렇게 완성이 되었으면 예전에 사용하던 Mesh::Create 에서는 직접 만든 정점데이터, 인덱스데이터를 가지고 예전처럼 만들어 줄것이고 
+Mesh::CreateFromFBX 에서는 FBX 파일에서 읽어온 정점데이터 인덱스 데이터를 가지고 메쉬를 만들어줄겁니다.
+
+이제 Mesh 는 수정이 완료 되었지만 다른 곳에서 에러가 생길겁니다. 
+
+빌드하고 에러메세지를 보면 가장많이 보이는 메세지가 Init 이 Mesh의 멤버가 아니라는 메세지입니다. 이건 이름을 Create로 바꿔줬기때문이라서 간단합니다.
+
+이제 다시 빌드하면 에러메세지가 하나 남는데 MeshRenderer::SetMaterial 함수는 인자를 2개 사용하지 않는다고 합니다. 
+위치는 MeshData 입니다. 
+원래 우리가 사용하던 머테리얼 구조는 단일 구조 였습니다. 그런데 이번 시간에 새로 만든 MeshData 는 다중 머테리얼 구조를 염두에 두고 만들었기때문에 
+에러가 생기는겁니다. 
+
+
+5) MeshRenderer
+
+이제까지의 MeshRenderer 를 보면 멤버 변수로 머테리얼을 하나만 받고 있는데 이것도 Mesh에서 인덱스 정보들과 같이 여러개를 받을 수 있도록 
+	vector<shared_ptr<Material>> _materials;
+이렇게 바뀌어야 합니다. 이 버전을 지원하기 위해서 기존 메소드들도 조금씩 수정해줘야하는데
+	shared_ptr<Material> GetMaterial(uint32 idx = 0) { return _materials[idx]; }
+	void SetMaterial(shared_ptr<Material> material, uint32 idx = 0);
+이렇게 GetMaterial 도 인덱스를 인자로 받아주고, SetMaterial도 인덱스 인자로 받아서 세팅할수 있게 수정해줘야 합니다.
+
+SetMaterial 정의부는 이렇습니다.
+void MeshRenderer::SetMaterial(shared_ptr<Material> material, uint32 idx)
+{
+	if (_materials.size() <= static_cast<size_t>(idx))
+		_materials.resize(static_cast<size_t>(idx + 1));
+
+	_materials[idx] = material;
+}
+현재 _materials 의 사이즈가 인자로 받은 사이즈보다 작다면 _materials 의 사이즈를 idx 보다 1 크게 (idx는 인덱스니까 0부터 시작) resize를 해줍니다.
+그리고 idx 위치에 material을 담아줍니다.
+
+그리고 또 다중 머테리얼 구조로 바꾸면서 MeshRenderer::Render 함수들도 수정이 필요합니다. 마찬가지로 단일 머테리얼 구조를 따르고 있었던걸 이제는
+void MeshRenderer::Render()
+{
+	for (uint32 i = 0; i < _materials.size(); i++)
+	{
+		shared_ptr<Material>& material = _materials[i];
+
+		if (material == nullptr || material->GetShader() == nullptr)
+			continue;
+
+		GetTransform()->PushData();
+		material->PushGraphicsData();
+		_mesh->Render(1, i);
+	}
+}
+
+void MeshRenderer::Render(shared_ptr<InstancingBuffer>& buffer)
+{
+	for (uint32 i = 0; i < _materials.size(); i++)
+	{
+		shared_ptr<Material>& material = _materials[i];
+
+		if (material == nullptr || material->GetShader() == nullptr)
+			continue;
+
+		buffer->PushData();
+		material->PushGraphicsData();
+		_mesh->Render(buffer, i);
+	}
+}
+이렇게 수정되었습니다. _materials 의 사이즈 만큼 for문을 돌면서 각각 PushGraphicsData 를 해주고 Mesh 클래스에도 같은 인덱스의 IndexBufferInfo 를 
+Render 해주고 있습니다.
+
+마지막으로 GetInstanceId 도 수정해주겠습니다.
+uint64 MeshRenderer::GetInstanceID()
+{
+	if (_mesh == nullptr || _materials.empty())	// _material == nullptr 에서 수정
+		return 0;
+
+	//uint64 id = (_mesh->GetID() << 32) | _material->GetID();
+	InstanceID instanceID{ _mesh->GetID(), _materials[0]->GetID() };	// _materials 의 0번째 머테리얼의 아이디를 가져옵니다.
+	return instanceID.id;
+}
+
+아이디를 만드는 부분에서 인스턴싱에는 Mesh 와 Material이 같아야 하기 때문에 0번인덱스의 머테리얼을 그냥 가져오는것 말고도 모든 머테리얼이 같은지를 
+확인하는 부분이 있어야 하지만 지금은 일단은 통과만 되게끔 만들어 둘겁니다.
+
+여기까지 하고 일단 빌드를 해보면 통과가 됩니다.
+
+이제는 진짜로 테스트를 해볼 때가 왔습니다.
+오브젝트에 필요한 메쉬, 정점데이터, 인덱스 데이터들 , 머테리얼들, 텍스쳐, 셰이더를 그냥 오브젝트 만들때 직접 만들어도 되지만 
+지금까지는 이런건 Resources 에서 만들어서 오브젝트 만들때는 그걸 불러와서 만들었었습니다.
+
+
+6) Resources
+
+
+	shared_ptr<class MeshData> LoadFBX(const wstring& path);
+
+이런 메소드를 추가해서 FBX 파일이 있는 경로를 주면 지금까지 했던 작업들을 해주는 함수를 하나 만들어보겠습니다.
+#include "MeshData.h"
+shared_ptr<MeshData> Resources::LoadFBX(const wstring& path)
+{
+	wstring key = path;
+
+	shared_ptr<MeshData> meshData = Get<MeshData>(key);	// Resouces 에서 이미 경로의 메쉬데이터가 있는지 확인하는 부분
+	if (meshData)
+		return meshData;
+
+	meshData = MeshData::LoadFromFBX(path);		// 여기까지오면 로드해둔 메쉬데이터가 없다는 의미입니다.
+	meshData->SetName(key);	// 경로를 이름으로 
+	Add(key, meshData);
+
+	return meshData;
+}
+
+이제는 이번시간의 마무리로 오브젝트를 만드는 부분입니다. 항상 오브젝트를 만들었던 SceneManager 로 가겠습니다.
+
+
+7) SceneManager
+
+#include "MeshData.h"
+#pragma region FBX
+	{
+		shared_ptr<MeshData> meshData = GET_SINGLE(Resources)->LoadFBX(L"..\\Resources\\FBX\\Dragon.fbx");
+
+		vector<shared_ptr<GameObject>> gameObjects = meshData->Instantiate();
+
+		for (auto& gameObject : gameObjects)
+		{
+			gameObject->SetName(L"Dragon");
+			gameObject->SetCheckFrustum(false);
+			gameObject->GetTransform()->SetLocalPosition(Vec3(0.f, 0.f, 300.f));
+			gameObject->GetTransform()->SetLocalScale(Vec3(1.f, 1.f, 1.f));
+			scene->AddGameObject(gameObject);
+		}
+	}
+#pragma endregion
+
+메쉬데이터를 만들때 사용하는 경로는 아까 이번시간 시작할때 리소스들을 다운 받은 그 위치입니다. 
+
+평소와 다르게 GameObject 를 하나만 만드는게 아니라 vector에 담아서 여러개의 오브젝트를 meshData->Instantiate 로 담아줍니다. 
+그리고나서 for 문으로 gameObjects 를 하나씩 돌면서 Dragon 이라는 하나의 이름으로 씬에 추가해줍니다. 같은 위치, 같은 스케일로 만들어 줍니다.
+
+
+- 테스트 
+
+지금은 용가리를 띄우는 테스트를 하고 있기때문에 이전에 만들어 뒀던 오브젝트들은 일단 주석처리해주겠습니다.
+
+Engine, Client 둘다 빌드를 해주는데 Client 에서 강의 시작때 떴던 에러가 다시 뜹니다. 프로젝트의 포함디렉토리를 설정안해준 문제 였기 때문에 
+추가해서 통과 되었고 빌드도 모두 성공했습니다. 
+
+실행하면 용가리가 딱 출력됩니다.
+
+
+여기서 출력된 용가리를 봤을 때 처음 FBX 사이트에서 봤던 색상이랑 다릅니다. 사이트에서는 검은색이었는데 우리 프로젝트의 결과물은 회색으로 표현됩니다. 
+이게 왜이렇나면 FBX를 만들때 애당초 모든 정보가 다 있다고 보장이 되지않습니다. 추출하는사람에 따라 다르게 만들수 있는데
+
+FBXLoader 로 돌아가서 LoadFbx 에서 ParseNode 를 타고 들어가고 또 LoadMesh 에서 MeshInfo 를 가져오는 부분에서 
+Normal, Tangent, UV 를 가져오고 있었는데 FBX 파일에서 대부분 Normal 정보는 넣어주는 경우가 많은 반면 Tangent 정보는 잘 넣어주지 않는 경우가 많습니다.
+그럴경우에는 우리가 직접 이런저런 복잡함 알고리즘을 통해 Tangent 값을 만들어 줘야 합니다.
+지금 우리 코드에서는 FBXLoader::GetTangent 에서 탄젠트 정보가 없을경우 정점의 탄젠트 값을 모두 (1.f, 0.f, 0.f) 로 설정해주고 있습니다. 
+
+
+이제 다음 내용은 다음 강의인 애니메이션 시간에 이어서 하겠습니다.
