@@ -1,0 +1,1164 @@
+
+
+        40. Animation (Skinning)
+
+
+이번시간은 애니메이션을 배우는 시간인데 이전 시간에 FBX 파일로 메쉬를 불러오는 작업을 해봤었습니다. 
+사실 메쉬시간은 오늘의 애니메이션을 배우기 위한 사전작업 같은것이었습니다. 
+
+이번에 배우는 애니메이션은 여러 기법들 중 스키닝(Skinning) 기법에 대해 배우게 될겁니다.
+
+일단 애니메이션은 플레이어가 칼을 휘두른다거나 물건을 줍는다거나 하는걸 말합니다. 일반적으로 게임에서 말고 일본풍 애니메이션은 그림을 
+프레임단위로 굉장히 많은 양을 준비한 다음 그 그림들을 빠르게 지나가면서 보여주면 생동감 있게 표현되는 이런걸 말합니다. 
+그래서 2D 게임에서 가장 고전적인 애니메이션 기법은 여러 그림을 준비해서 빠르게 보여주는 방법입니다.
+
+그런데 우리가 지금 실습하고 있는 3D 물체를 움직인다 그러면 어떻게 해야 할까요 위에서 말한 여러 그림을 준비하는 방법을 적용시켜보려고 하면 
+문제가 생기는데 무엇이냐면 너무 정점의 수가 많습니다. 이전시간에 실습해본 용가리 메쉬를 그릴때 필요한 정점의 수도 한 용가리에 몇만개의 정점을 
+사용해야합니다.
+이런 용가리의 날개를 펄럭이게 하고 싶다고 했을때 날개가 한프레임당 움직이는 만큼의 위치를 몇만개의 정점들을 움직여서 저장하는 방법으로 애니메이션을 
+구현하려고 하면 정말 기하급수적으로 용량이 늘어나게될것이고 말이 안됩니다.
+
+그러면 3D에 적용할 수 있는 다른 방법의 애니메이션의 기법이 있을겁니다. 그게 오늘 배울 기법인 스키닝입니다. 
+
+스키닝은 뼈대를 두는 개념인데 예를들어 사람형태의 메쉬가 있다고 했을때 이 메쉬를 까보면 수많은 삼각형을 이어붙혀서 사람의 형상을 이루고 있습니다.
+그런데 그 삼각형들을 신경쓰는게 아니라 내부에 뼈대를 배치해줄겁니다. 이미지적으로 보면 동그란 점과 선이 있는데 점은 관절이고 선은 뼈입니다.
+왜 스키닝이라는 이름이 붙었나면 이 뼈대에 스킨, 피부가 들러붙어있다고 해서 스키닝이라는 이름이 되었습니다. 
+메쉬를 이루는 삼각형중에 손가락을 표현하는 삼각형들을 손가락 부위의 뼈대에 붙혀서 뼈대가 움직이면 손가락 삼각형들은 그에따라 움직이게 되는 방법입니다. 
+
+그리고 이렇게 관절형태로 표현하면 장점이 또 있는데 예를들어 방금말한 사람이 칼을 휘두른다고 해보겠습니다. 뼈대는 관절로 이어져 있기때문에 
+칼을 휘두르는 모션을 했을때 손만움직여도 뼈대의 계층구조에 따라 이어진 뼈대들이 따라 움직이게됩니다.
+즉 뼈대를 만들 때 뼈끼리 계층구조를 어떻게 만들어 주느냐에 따라 움직일때 같이 움직이는 자연스러운 애니메이션을 구현할 수 있게 됩니다. 
+
+이런 질문이 생깁니다. 뼈대들은 계층구조로 되어있다 그렇다면 뼈대들중 가장 최상위의 뼈대는 무엇일까?
+일반적인 사람이라고 생각하면 왠지 머리에 매핑되어있는 뼈대가 루트 노드일것 같지만 게임에서, 애니메이션에서는 보통 골반쪽에 있는 뼈대나 
+배쪽 뼈대가 루트노드인 경우가 많습니다. 
+생각해보면 당연한게 머리를 움직일때 머리만 움직이지 온몸이 따라 움직이지는 않습니다. 그렇지만 허리를 움직인다면 다리에도 영향을 주고 상체에도 영향을 줍니다. 
+그래서 가장 영향력이 큰 부분입니다. 
+
+3D 애니메이션의 관심사는 그래서 뼈대 혹은 관절들을 움직이는 것이고 그 부분에 해당하는 정점들은 뼈대에 붙어서 같이 움직인다 
+정도가 중간 결론입니다. 
+
+추가로 알고 넘어갈 만한것은 보통 사람같은 오브젝트의 뼈대들의 기본 포지션, 포즈를 바인드 포지션 혹은 T 포즈 라고 합니다.
+
+그 다음으로 알아볼 내용은 뼈대를 움직이는 이론을 알아보겠습니다. 
+
+일단은 계층구조로 이루어져 있다고 했었습니다. 먼저 용어정리인데 예시로 뼈라고 부르는데 이건 관절부분을 부르는 겁니다.
+뼈를 회전하면서 움직임을 표현할건데 회전을 구현할때 뼈의 시작 관절을 중심으로 보는게 유리합니다.
+그러니까 뼈대들도 각자의 로컬 좌표계가 있을건데 그 중에 시작 관절이 로컬 좌표계의 원점이라는 이야기입니다. 그래야지만 손목을 돌린다고 했을때 
+손목관절의 시작부분을 기준으로 삼아야 지금까지 사용하던 좌표계 변환 행렬에서 Rotation 을 사용하기 수월하겠습니다.
+
+뼈들을 움직이는 예시로 팔을 이루는 뼈들이 있다고 했을때 어깨부터 팔꿈치 까지의 뼈, 팔꿈치부터 손목까지의 뼈, 손목 부터 손끝까지의 뼈가 있을겁니다. 
+손가락 뼈들은 생략했습니다. 이런 상황에서 손목을 움직인다고 했을때 손목에서 손끝까지의 정점들은 손목 뼈 기준의 좌표는 변하지 않지만 
+부모 뼈를 기준으로는 좌표가 변하게 될겁니다. 그래서 지금 렌더링을 배울때 물체를 로컬에서 월드, 뷰, 프로젝션 스페이스로 좌표계를 변환하던것처럼 
+뼈들도 자기만의 좌표계가 있고 뼈들이 움직일때 서로서로 영향을 줘서 좌표가 변환이 됩니다.
+
+그러면 지금 말한 팔의 움직임에 대해 좀 더 자세히 알아보겠습니다. 먼저 좌표계는 월드 좌표계를 기준으로 하겠습니다. 어깨 팔꿈치 손목 뼈를 각각 
+Bone-1, Bone-2, Bone-3 라고 하겠습니다. 또 각각의 좌표계를 F0, F1, F2 라고 하겠습니다.
+이런 상황에서 뼈들은 계층구조를 가지고 있다고 했으니까 손목뼈의 좌표계인 F2 에서 F1 으로 다시 F0 으로 넘어올 수 있을겁니다.
+그렇다면 지금까지 물체의 로컬 좌표계에서 바로 월드 좌표계로 변환 했었는데 스키닝 애니메이션을 사용하는 시점부터는 
+로컬좌표계 안에서도 각 뼈들의 로컬좌표계에서 부모의 부모, 그 위 루트노드까지 좌표계를 변환을 한다음 월드로 넘어가야 합니다.
+
+그래서 결국 이제는 로컬 좌표계에서 월드 좌표계로 변환하는 사이에 수많은 중간 단계가 생긴다는 느낌입니다.
+
+이번에는 애니메이션으로 팔을 위쪽으로 약간 굽게끔 움직였다고 해보겠습니다. 그러면 F0 부터 굽은 각도를 차례대로 θ1, θ2, θ3 이라고 하면 
+우리가 지금까지 변환 행렬을 만들때 SRT (Scale, Rotation, Translation) 을 곱해서 만들었던것 처럼 F0,1,2 좌표계 마다의 변환 행렬들을 만들 수 있을겁니다.
+이 행렬들을 어깨뼈부터 차례대로 A0, A1, A2 라고 하겠습니다. 각 행렬들은 부모의 좌표계로 넘어가기위한 변환 행렬입니다.
+이중에 손뼈 좌표계로는 F2 를 기준으로 손을 이루는 정점들이 각자의 위치를 가지고 있을건데 일종의 로컬좌표죠 뼈대의 로컬좌표 이걸 소위 Bone Space 라고 한다고 합니다. 
+F2 에서 F1 으로 올라가고 싶으면 A2 를 곱해주면 되겠습니다. 그렇게 점점 상위의 뼈로 올라가려면 A1, A0 를 곱해주게되면 F2 의 로컬 본 스페이스에 있던 손의 정점들을
+월드 좌표계 기준의 좌표로 표현할 수 있게되는겁니다. 그러니까 말단의 뼈들은 부모로 타고타고 올라가는 체이닝(Chaining) 을 계속 해줘야 한다는 말입니다.
+결국은 스키닝 애니메이션을 적용시키기 위해서 로컬좌표계에서 각 뼈들의 말단부터 본 스페이스부터 체이닝을 모두 완료해서 월드 좌표계로 넘어갈 준비를 하게 됩니다.
+
+강사님은 이런 부모로 가는 행렬을 ToParent 라는 이름으로 지어놨다고 합니다. 정식용어라고 보기는 뭣하고 알아보기 쉽게 이름을 붙인거라고 합니다. 
+그래서 ToWorld, ToRoot 라는 것을 정리 해놓으셨습니다. 
+    ToWorld(i)  = A(i)*A(i-1)*...A(1)*A(0)
+    ToRoot(i) = A(i)*A(i-1)*...A(1)
+ToWorld 는 i개의 뼈대로 이루어진 물체를 월드 좌표계까지 변환하기 위해 타고 타고 올라가는 과정을 표현한것이고 
+ToRoot 는 월드까지 가지 않고 최상위 루트노드 까지 가서 로컬 좌표계에서의 좌표를 알고 싶다고 했을때를 표현한 것입니다.
+그리고 뼈대들을 계층적인 구조를하고 있다고 했고 이전 시간에서 FBX 의 트리노드 구조에서는 재귀함수로 처리하는게 보통이라고 했습니다 
+재귀적으로 위의 식을 표현하면 아래와 같습니다. 
+    ToWorld(i) = A(i) * ToWorld(i-1)
+    ToRoot(i) = A(i) * ToRoot(i-1)
+
+모델 파일을 읽을때 라이브러리에 따라 좌표변환 행렬을 상속구조에 따라 재귀적으로 연이어 구해줘야하던지, 아니면 함수로 만들어서 한번에 때려주는 경우도 있을겁니다.
+
+결국은 각 본 스페이스에서 바로 월드 스페이스로 가는게 아니고 부모 뼈의 좌표계로 타고 가서 월드 스페이스로 넘어간다는 말입니다.
+그래야 더욱 자연스럽게 표현이 될겁니다.
+팔을 휘두르는 동작 자체도 각 뼈들이 부모를 기준으로 적절한 각도로 회전하는것의 연속입니다.
+이것이 중요한 개념입니다. 
+
+추가로 몇가지 디테일이 있습니다. 
+
+아까 모델의 기본 포즈가 T 포즈 혹은 바인드 포지션 이라고 했습니다.
+바인드 포지션이라고 부르는 이유는 물체가 바인딩 될 때의 포지션이다, 혹은 T 자로 이루어진 포지션이라는 유래되었고
+이럴때의 각각 모델을 이루는 각각 좌표는 위에서 말한 부모를 기준으로 한 좌표를 말하는게 아니라 바인드 포지션의 좌표를 얘기하고 있는겁니다.
+이게 무슨말이냐면 우리가 이전시간에서 메쉬를 로딩할때 애니메이션, 본에 관련된 코드를 하나도 넣지 않았음에도 용가리가 잘 표현되고 있었습니다.
+그럴 수 있는 이유는 어떤 기준점, 골반이나 아니면 발밑중앙 을 동일한 기준으로 삼아서 각 정점들이 위치를 잡았기 때문입니다.
+
+애니메이션을 적용시키면서 부터는 바인딩 될 때의 좌표가 중요한게 아니고 각 본이 부모의 좌표계를 기준으로 각자의 위치가 중요하게 됩니다.
+바인드 포지션에서 기준을 어디로 잡을건지는 모델러가 정해주는 것이지만 만약에 최상위 루트노드를 기준으로 좌표를 설정했다고 하면
+Bone-1 부터 뼈에 바인딩된 물체 표면을 이루는 정점을 F0 에서부터 V0, V1, V2 라고 했을때 
+V2 의 좌표가 루트노드를 기준으로 좌표가 되어있을테지만 애니메이션을 적용하기위해서는 루트 노드를 기준으로 하는 좌표가 아니라 F2 를 기준으로의 좌표로 바꿔줘야 합니다.
+그래서 손을 이루는 각각 정점들을 F2 기준의 좌표로 바꿔줘야 움직임을 표현하는 애니메이션을 적용할 수 있을겁니다.
+
+정리하면 바인드 포지션의 각 정점들의 좌표를 로컬 본 포지션으로 변환을 한다음 그걸 다시 프레임마다 움직임을 적용해서 월드 포지션으로 보내준다 라고 요약이 됩니다.
+
+그리고 바인드 포지션에서 로컬 본 포지션으로 변환하는걸 오프셋 변환(Offset Transform) 이라고 합니다.
+
+최종결과물을 Final(i) 라고 하고 오프셋 변환을 Offset(i) 라고 하면 식으로는 
+
+    Final(i) = Offset(i) * ToRoot(i)
+
+라고 할 수 있겠습니다.
+여기까지 왔으면 Final(i) 를 해주면 지금까지 배운 변환을 적용시킬 수 있게 됩니다.
+
+이게 완전히 끝은 아니고 또 다른 디테일이 있는데
+
+스킨정보 그러니까 메쉬의 표면을 이루는 정점 정보가 뼈 하나에 들러 붙어있다고 했지만 사실은 애니메이션에서 1 : 1 의 관계가 아닐 경우가 더러 있습니다.
+예를들어 사람의 가슴 근육의 정점은 어깨를 움직이면 가슴도 살짝 움직이게 될겁니다. 그리고 마찬가지로 허리를 돌리면 그에따른 가슴근육도 움직이게 될거니까
+똑같은 한 정점이 여러 뼈에대해 동시에 영향을 받을 수 있습니다.
+
+이러면 완전히 1 : 1 의 대응이 아니기 때문에 어떻게 해야하냐면 가중치 라는것을 줘야 합니다.
+우리가 이전시간에 코드는 넣어 놨지만 살펴보지않은 부분에서 Weight, Index 라는 개념이 정점데이터에 들어갔었습니다. 이 데이터들이 어떤 의미이냐면 해당 정점이 
+영향을 받는 뼈가 누구인가를 역으로 추적하고 있는겁니다. 일반적으로 영향을 받는 뼈의 최대 갯수를 4개로 고정을 해놓더라도 꽤 자연스럽게 나온다고 합니다.
+그렇기 때문에 우리 프로젝트에서는 정점이 동시에 영향을 받는 뼈의 갯수를 4개로 설정할것이고
+어떻게 영향을 받는지를 예시를 들어보면 손에있는 어떤 정점 V2 가 F2 에도 영향을 받고 F10 , F15 에도 영향을 받는다고 가정하면 그 정점은 
+Final 변환을 하나만 적용하는게 아니라 비율에 따라 세가지 Final 변환을 동시에 적용합니다.
+동시에 적용한다는게 어떤 말이냐면 그냥 비율을 정해주는겁니다. 예시로 F2 는 0.5, F10 은 0.25, F15 도 0.25 정도 비율로 적용하겠다는 말입니다.
+각각 몇프로의 영향을 받는지 를 가중치(Weight) 라는 데이터로 정해줍니다. 어떻게 보면 렌더링때 배웠던 블랜딩 이라는 개념 처럼 자연스럽게 적절히 섞는것 같습니다.
+
+이제 지금까지 배운 이론을 최종적으로 정리 해보겠습니다.
+우리가 원하는 공식은 결국 최종변환행렬은 오프셋변환 행렬 곱하기 투 루트변환 행렬인것이고
+Final(i) = Offset(i) * ToRoot(i)
+
+애니메이션 클립을 뜯어보면 어떤 물체를 이루는 뼈대가 i 개 있다고 했을때 프레임마다 그때 움직임에 따른 Finnal 변환 행렬들이 뼈마다 있을겁니다.
+한 프레임에 i 개의 final 변환행렬이 있고 이걸 j개의 프레임이 있으면 i*j 개 만큼의 final 변환 행렬이 2차원 배열처럼 관리가 될겁니다.
+이때 Final 행렬을 그냥 행렬 통채로 들고 있어도 되고 S*R*T 형태로 분해해서 들고 있어도 됩니다.
+
+추가로 프레임마다 Final 행렬을 관리한다고 했는데 프레임마다 1개의 변환행렬을 관리하면 결과물 애니메이션이 프레임마다 뚝뚝 끊겨 보이는 현상이 있을 수 있습니다.
+그걸 보완해주기 위해서는 프레임 사이에 각각의 Final 변환 행렬을 시간 비율에 따라 적절히 섞어주면 비교적 자연스럽게 움직이는 효과를 볼 수 있습니다.
+
+
+- 코드 
+
+코드로 왔습니다.
+
+지난시간에 FBXLoader 에서 내용을 들어가 있지만 그냥 넘어갔던 뼈대와 애니메이션에 대한 코드를 분석하는것 부터 시작하겠습니다. 
+
+1) FBXLoader 
+
+FBXLoader::LoadFbx 에서 이전 시간에는 주석해놓았던 LoadBone, LoadAnimationInfo 부분의 주석을 풀었습니다.
+
+void FBXLoader::LoadFbx(const wstring& path)
+{
+	// 파일 데이터 로드
+	Import(path);
+
+	// Animation	
+	LoadBones(_scene->GetRootNode());
+	LoadAnimationInfo();
+
+	// 로드된 데이터 파싱 (Mesh/Material/Skin)
+	ParseNode(_scene->GetRootNode());
+
+	// 우리 구조에 맞게 Texture / Material 생성
+	CreateTextures();
+	CreateMaterials();
+}
+
+이전 시간에서는 경로를 따라 FBX 파일을 Import 한다음 ParseNode 에서 Mesh, Material 에 대한 정보를 파싱 했었는데 
+이번 시간 부터는 애니메이션에 관련된 내용들도 추가되었습니다.
+
+LoadBones 부터 살펴보겠습니다.
+선언부
+	void LoadBones(FbxNode* node) { LoadBones(node, 0, -1); }
+	void LoadBones(FbxNode* node, int32 idx, int32 parentIdx);
+뼈대가 계층적으로 이루어져있다고 했던만큼 뼈대를 로드하는 코드가 재귀적으로 구현되어있습니다.
+FBX 파일에서 뼈대도 트리구조로 되어있기때문에 루트노드부터 해서 쭉 스캔을 해줍니다.
+
+void FBXLoader::LoadBones(FbxNode* node, int32 idx, int32 parentIdx)
+{
+	FbxNodeAttribute* attribute = node->GetNodeAttribute();
+
+	if (attribute && attribute->GetAttributeType() == FbxNodeAttribute::eSkeleton)
+	{
+		shared_ptr<FbxBoneInfo> bone = make_shared<FbxBoneInfo>();
+		bone->boneName = s2ws(node->GetName());
+		bone->parentIndex = parentIdx;
+		_bones.push_back(bone);
+	}
+
+	const int32 childCount = node->GetChildCount();
+	for (int32 i = 0; i < childCount; i++)
+		LoadBones(node->GetChild(i), static_cast<int32>(_bones.size()), idx);
+}
+먼저 인자로 받은 노드의 Attribute 를 attribute 라는 변수로 가져오고 있습니다. 
+그 attribute 가 eSkeleton 인지를 체크하고있습니다. FbxNodeAttribute::eSkeleton 의 뜻은 먼저 FbxNodeAttribute 는 enum 입니다. 
+enum 으로 관리되는 멤버중 eSkeleton 인지를 체크하고 있는겁니다. 
+통과하면 저번식간에 그냥 지나갔던 FbxBoneInfo 객체를 shared_ptr 로 만들어 주고 있습니다. 
+
+struct FbxBoneInfo
+{
+	wstring					boneName;
+	int32					parentIndex;
+	FbxAMatrix				matOffset;	// 오프셋 변환 행렬
+};
+
+생성한 객체에 파일에서 읽어온 name을 담아주고 인자로 받은 parentIdx 도 담아준 다음 FbxBoneInfo 의 벡터인 멤버변수 _bones 에 푸시백 해주고 있습니다. 
+
+다음으로 지금 노드와 자식으로 계층관계를 맺은 노드의 수가 몇개인지를 받아와서 그만큼 for 문을 돕니다. for 문에서는 재귀적으로 자신을 다시 호출하고 있습니다. 
+인자로는 현재노드의 자식 노드를 인덱스 번호로 가져와서 넘겨주고 , 자신의 인덱스를 _bones.size() 로 표현하는데 사이즈는 인덱스보다 1 크기 때문에 자식의 인덱스 
+번호로 사용할 수 있습니다. 세번째 인자로는 자신의 인덱스를 넘겨주면 자식노드 입장에서는 부모노드의 인덱스이기때문에 넘겨줍니다. 
+
+이 부분으로 뼈대에 대한 부분을 쭉 스캔을 할것입니다.
+
+다음으로 LoadFbx 에서 LoadBone 다음에 오던 메소드는 LoadAnimationInfo 입니다.
+
+void FBXLoader::LoadAnimationInfo()
+{
+	_scene->FillAnimStackNameArray(OUT _animNames);
+
+	const int32 animCount = _animNames.GetCount();
+	for (int32 i = 0; i < animCount; i++)
+	{
+		FbxAnimStack* animStack = _scene->FindMember<FbxAnimStack>(_animNames[i]->Buffer());
+		if (animStack == nullptr)
+			continue;
+
+		shared_ptr<FbxAnimClipInfo> animClip = make_shared<FbxAnimClipInfo>();
+		animClip->name = s2ws(animStack->GetName());
+		animClip->keyFrames.resize(_bones.size()); // 키프레임은 본의 개수만큼
+
+		FbxTakeInfo* takeInfo = _scene->GetTakeInfo(animStack->GetName());
+		animClip->startTime = takeInfo->mLocalTimeSpan.GetStart();
+		animClip->endTime = takeInfo->mLocalTimeSpan.GetStop();
+		animClip->mode = _scene->GetGlobalSettings().GetTimeMode();
+
+		_animClips.push_back(animClip);
+	}
+}
+
+이 함수에서는 애니메이션에 필요한 모든 정보들이 아닌 이름, startTime, endTime 등 기본적인 정보만 일단 담고 있습니다.
+실질적인 애니메이션에 대한 정보는 아직 로드되지않았습니다.
+언제 실질적인 애니매이션을 로드하게되냐면 
+
+LoadFbx 안에서 다음 메소드인 ParseNode 안에 LoadMesh 에서 정점데이터들, 인덱스데이터들에 담을 normal, tangent, uv 데이터들을 다 담은 다음
+함수 마지막에 LoadAnimationData 를 해주는데 여기서 실질적 애니메이션 데이터가 담겨집니다.
+
+LoadAnimationData 에서는 맨처음 스킨의 갯수나 애니메이션 클립 둘중 하나라도 없다면 그냥 리턴합니다. 아니라면 애니메이션을 가지고 있다고 
+FbxMeshInfo->hasAnimation을 true로 설정합니다. 
+그리고 나서 FBX 만의 방법으로 파일에서 애니메이션 데이터를 추출합니다.
+대강 요약해보자면 스킨의 갯수만큼 for문을 도는데 for문의 안에서는 0번부터 스킨을 가져옵니다. 그리고 나서 몇번의 조건문을 통과하고 있는데
+스킨이 있는지, 스킨의 타입이 eRigid 이거나 eLinear 인지를 체크하면 그 안에서 부터 다시 clusterCount 라는걸 가져와서 이 카운트 만큼 
+두번째 for문을 돕니다. 그 안에서 관절 하나하나 씩을 돌면서 정보들을 추출하고 있습니다. 
+정보를 추출하는 중요 메소드 3개가 있는데 LoadBoneWeight, LoadOffsetMatrix, LoadKeyframe 이라는 메소드입니다.
+
+LoadBoneWeight 는 어떤 역할을 하냐면 아까 이론부분에서 하나의 정점이 동시에 여러개의 뼈대의 영향을 받을 수 있다고 했습니다. 그런 정보를 로드해주는 메소드인데 
+내용은 먼저 LoadAnimationData 에서 부터 인자로 받은 cluster 라는것에서 indices count 를 가져와서 그만큼 for문을 돕니다. 그안에서 각 인덱스를 가진 정점에서 
+weight 와 vtxidx 를 또 가져옵니다. 이 정보들을 meshInfo->boneWeight[vtxidx].AddWeight(boneIdx, weight) 로 정보를 담습니다. boneIdx는 인자로 받은겁니다.
+
+그러면 이번에는 FbxMeshInfo 에서 들고 있고 이전시간에는 그냥 넘어갔던 BoneWeight 라는 struct 가 어떻게 되어있는지를 보겠습니다.
+BoneWeight 가 들고 있는 정보는 boneWeights 라는 vector<Pair> 입니다. 여기서 Pair 도 스트럭트 내에서 정의한 타입인데 
+using Pair = pair<int32, double> 이라는 타입입니다. 이 페어가 어떻게 쓰일거냐면 들고 있는 두가지중 앞의 int32 는 인덱스, 뒤에 double은 가중치 입니다.
+이런 Pair 를 벡터타입으로 들고 있는 boneWeights 에는 이론부분에서 말했듯이 우리 프로젝트에서는 최대 4개의 뼈대까지 영향을 받도록 만들겁니다.
+데이터들을 추가해줄 AddWeight 라는 메소드와 weight 값들의 총합이 1이 되게끔 만들어 주는 Normalize 라는 메소드도 포함하고 있습니다.
+
+AddWeight 에서는 추가할 가중치 정보가 현재 정점이 가지고 있는 boneWeights 중에 더 작은 값이 있는지를 std::find_it으로 찾아서 findIt 이라는 변수에 담고 있습니다.
+findIt 이 boneWeights 의 end() 가 아니라면 추가한 가중치가 현재 들고 있는 가중치들중 하나 보다 큰 값이라는 의미입니다.
+그리고 findIt 은 가장 작은 값이 되는데 그 위치에 Insert 하면 boneWeights 안에서 Pair.second 의 값이 큰 순서대로 정렬됩니다. 
+하지만 else 조건인 findIt 이 end() 라면 boneWeights 에서 가장 작은 가중치이므로 push_back 으로 가장 뒤에 밀어 넣습니다. 
+마지막으로 우리 프로젝트에서는 정점하나가 영향을 받는 뼈대의 최대갯수를 4개로 정했으니까 4개가 넘는 다면 가장 뒤의 Pair 를 pop_back() 합니다. 
+큰 순서대로 정렬되어 있기 때문에 가장 작은 값이 pop_back 될겁니다.
+
+Normalize 메소드에서는 std::for_each 로 boneWeights 의 내용물들을 돌면서 Pair.second 값들을 double sum = 0.f  라는 변수에 전부 더해줍니다. 
+sum 은 이 정점이 들고 있는 boneWeight 의 가중치들의 전체 합입니다. 
+다음으로 다시 std::for_each 로 모든 원소들의 second 값을 sum 으로 나눠줍니다. 이렇게 하면 boneWeights 의 원소들의 second 값들의 총합이 1 이 될겁니다.
+
+이렇게 BoneWeight 까지 분석하면서 FbxMeshInfo 의 멤버들을 모두 훑어봤습니다.
+
+다음으로 애니메이션에서 중요한 내용이 아직 분석하지 않은 FbxKeyFrameInfo, FbxAnimClipInfo 입니다.
+
+좀 더 큰 개념인 FbxAnimClipInfo 부터 보겠습니다. 
+struct FbxAnimClipInfo
+{
+	wstring			name;
+	FbxTime			startTime;
+	FbxTime			endTime;
+	FbxTime::EMode	mode;
+	vector<vector<FbxKeyFrameInfo>>	keyFrames;
+};
+멤버로는 이름, 시작시간, 끝시간, 모드, 그리고 FbxKeyFrameInfo 의 벡터인 keyFrames 가 있습니다. 
+
+여기서 시작시간, 끝시간이 있는 이유는 현재는 시작시간이 0으로 될것이긴한데 경우에 따라서 여러 애니메이션을 이어 붙혀서 하나의 애니메이션으로 만드는 경우도 
+있기 때문에 시작, 끝 시간이 있습니다. 
+
+그리고 궁금해지는건 KeyFrame 이라는 정보인데 이 키 프레임은 이론부분의 마지막쯤에 나왔던 뼈대들의 움직이는 변환 행렬들 Final 행렬들을 담은 2차원 배열입니다.
+키프레임은 Bone의 갯수만큼의 열이 있고 프레임마다 각 Bone의 Final 변환 행렬들을 담습니다.
+
+FbxAnimClipInfo::keyFrames 의 사이즈를 뼈의 갯수만큼 늘려주는 부분이 LoadAnimationInfo 안에 있었습니다.
+
+
+정리를 한번 해보자면 
+LoadFbx 에서 ParseNode 를 합니다. LoadMesh, LoadMaterial 을 해주고 있는데 이중에 LoadMesh를 할때 그 안에서 같이 LoadAnimationData 를 호출헤줍니다.
+여기서 LoadBoneWeight 로 뼈 가중치를 하나씩 긁어 오고 LoadOffsetMatrix 로 뼈들의 Offset 행렬도 긁어오고 LoadKeyframe 으로 각 뼈들의 프레임마다의 
+Final 행렬들을 긁어온 다음 FillBoneWeight 를 실행합니다.
+FillBoneWeight 에서는 정점에 boneWeight 정보를 채워주고 있습니다. 언젠가 EnginePch.h 에서 Vertex struct 에 추가해줬던 멤버인 weight 와 indices 를 채우고 있습니다.
+그래서 LoadBoneWeight 와 FillBoneWeight 는 세트라고 볼 수 있습니다.
+
+위에서 정리하면서 아직 살펴보지않았던 LoadOffsetMatrix 를 살펴봐 보겠습니다.
+Offset Matrix 는 모델을 로드했을때 정점들의 좌표가 바인드 포지션을 기준으로 잡혀있을때 자신이 매핑된 Bone Space 까지 변환하는 행렬입니다.
+행렬을 구하는 자세한 내용은 넘어가겠습니다. 
+
+다음으로 아직 안 알아본 내용이 LoadKeyframe 인데 이 메소드는 애니메이션의 갯수 만큼을 루프하면서 호출됩니다.
+여기서 FbxLoader 의 멤버 변수인 _animClips 를 채워줍니다. 아까 애니메이션 카운트를 루프 돌면서 호출한다고 했었는데 그 카운트가 인덱스로 사용하면서
+SetCurrentAnimationStack 으로 파일에서 로드할 애니메이션을 골라줍니다.
+애니메이션을 골랐으면 파일이 가지고 있는 KeyFrameInfo 를 채울 time , matTransform 을 구해서 _animClips[animIndex]->KeyFrames[boneIdx]에 push_back 해줘야 합니다. 
+time 은 애니메이션이 실행되는 총 프레임 같고 matTransform 을 구하는 것은 현재 프로젝트에서는 
+node->EvaluateGlobalTransform 을 이용해서 구해주고 있습니다. 이 방법은 말단 뼈 부터 거꾸로 타고 올라가면서 변환행렬을 구하는 방법이라고 합니다. 
+이 방법은 다소 느린방법이라고 합니다. 가장 하위 변환 행렬은 그 상위 노드들의 변환행렬을 모두 계산해야하고 그걸 거꾸로 올라가면서 계산하는 방법이기 때문이고 
+반대로 루트 노드 부터 하위 노드로 변환 행렬을 구하는 방법은 차례대로 자신의 변환행렬을 구하고 다음 자식 노드의 변환행렬을 곱하는 방법으로 
+좀 더 빠른 속도로 연산이 된다고 합니다. 
+프로젝트에서는 일단 확실한 방법인 EvaluateGlobalTransform 으로 구해주고 나중에 성능을 개선하고 싶을때 다른 방법을 적용시켜보는것이 좋겠습니다.
+
+여기까지 하면 이제는 FbxLoader 의 멤버 변수들의 정보들을 모두 채워 줬습니다. 이제 이 것들을 가지고 이렇게 저렇게 활용하면서 
+애니메이션을 구현하면 되겠습니다.
+
+
+2) Animator 클래스
+새로운 컴포넌트를 추가해줄겁니다. 애니메이션을 틀어주는 기능이라고 해서 Animator 라는 이름으로 Object->Component 필터에 클래스를 만들어 주었습니다.
+
+먼저 새로운 컴포넌트가 추가되었으면 Component 에서 타입을 추가해줘야 합니다.
+// Component 
+enum class COMPONENT_TYPE : uint8
+{
+	TRANSFORM,
+	MESH_RENDERER,
+	CAMERA,
+	LIGHT,
+	PARTICLE_SYSTEM,
+	TERRAIN,
+	COLLIDER,
+	ANIMATOR,
+	// ...
+	MONO_BEHAVIOUR,
+	END,
+};
+그리고 또 GameObject 클래스에 새로 추가된 컴포넌트를 부를 Get 함수도 추가해줘야 합니다.
+// GameObject
+#include "Animator.h"
+shared_ptr<Animator> GameObject::GetAnimator()
+{
+	shared_ptr<Component> component = GetFixedComponent(COMPONENT_TYPE::ANIMATOR);
+	return static_pointer_cast<Animator>(component);
+}
+
+이제 시작하기전에 기본적인 수정은 끝났고 다시 Animator 클래스의 내용을 살펴보겠습니다.
+
+지금은 FbxLoader 객체에서는 애니메이션에 관한 데이터를 들고 있기는 하지만 아직 우리 프로젝트의 물체의 Mesh 정보에 추가해주지는 않았습니다.
+그러니까 Mesh 클래스로 가서 애니메이션 정보도 들고 있게끔 수정을 해줄겁니다.
+	
+	2-1) Mesh 클래스 
+	여기서 추가해줄 부분은 결국 Mesh::CreateFromFBX 를 했을때 애니메이션 데이터를 로드하는 부분을 추가할겁니다.
+	지금까지 로드흔 FbxMeshInfo 의 버텍스와 인덱스들을 CreateVertexBuffer, CreateIndexBuffer 해줬고 그 밑에 이제 
+	
+	if (meshInfo->hasAnimation)
+		mesh->CreateBonesAndAnimations(loader);
+
+	이렇게 인자의 meshInfo 의 hasAnimation 이 true 라면 mesh->CreateBonesAndAnimations 를 실행합니다. 그런데 아직 Mesh 클래스의 멤버 함수가 아닙니다.
+	
+		void CreateBonesAndAnimations(class FBXLoader& loader);
+		Matrix GetMatrix(FbxAMatrix& matrix);
+	이 함수들을 Mesh 클래스의 CreateIndexBuffer 아래부분에 추가 해줍니다. 하는김에 GetMatrix 도 같이 추가했습니다.
+	GetMatrix 는 FbxAMatrix 를 우리가 사용하는 형식의 행렬로 변환하는 헬퍼 함수입니다.
+	
+	Matrix Mesh::GetMatrix(FbxAMatrix& matrix)
+	{
+		Matrix mat;
+
+		for (int32 y = 0; y < 4; ++y)
+			for (int32 x = 0; x < 4; ++x)
+				mat.m[y][x] = static_cast<float>(matrix.Get(y, x));
+
+		return mat;
+	}
+	행렬의 내용을 이중 루프로 내용을 채워주는 간단한 함수입니다.
+
+	다음으로 실질적으로 애니메이션과 뼈대와 스킨 데이터를 하나씩 집어넣는 CreateBonesAndAnimations 입니다.
+	AnimClip, Bones, SkinData 이 세가지 정보를 구조체로 들고 있어야 하는데 FbxLoader 에서 사용했던 Fbx 가 붙는 구조체들은 FBX 파일에 맞는 형식이기 때문에 
+	우리 코드에 맞는 형식의 구조체를 새로 선언해주겠습니다.
+	struct KeyFrameInfo
+	{
+		double	time;
+		int32	frame;
+		Vec3	scale;
+		Vec4	rotation;
+		Vec3	translate;
+	};
+
+	struct BoneInfo
+	{
+		wstring					boneName;
+		int32					parentIdx;
+		Matrix					matOffset;
+	};
+
+	struct AnimClipInfo
+	{
+		wstring			animName;
+		int32			frameCount;
+		double			duration;
+		vector<vector<KeyFrameInfo>>	keyFrames;
+	};
+	 
+	우리 구조에 맞춘다고 했지만 그렇게 많이 다르진 않습니다. 
+
+	KeyFrameInfo 에서 행렬을 S,R,T 로 쪼개서 들고있습니다.  왜 이렇게 했냐면 나중에 프레임사이에 부드러운 움직임을 위해 블랜딩을 할때 이렇게 SRT 를 
+	쪼개서 들고 있어야 연산하기 더 유리해서 이렇게 들고 있다고 합니다.
+
+	BoneInfo 는 FbxLoader 에서와 같은 구조입니다. 
+
+	AnimClipInfo 에서는 애니메이션의 이름(animName), 이 애니메이션이 몇 프레임으로 이루어져있는지(frameCoount), 애니메이션의 지속시간(duration),
+	그리고 가장 중요한 ToRoot 행렬을 담은 KeyFrameInfo 를 담은 이중 벡터 입니다. 
+	경우에 따라 이부분이 ToRoot 가 아니라 ToParent 인경우가 있는데 이 경우에는 우리가 직접 ToRoot 로 계산을 해주는 기능을 만들어야 합니다.
+
+	ToParent 를 ToRoot 로 계산하는 방법을 복습하자면 
+	ToRoot(i) = A(i) * ToRoot(i-1) 입니다. 
+
+	이제 데이터 구조체를 선언했으니 Mesh 클래스에서 저장하기 위해서 멤버 변수도 추가 되야 합니다.
+	
+	// Animation
+	vector<AnimClipInfo>			_animClips;
+	vector<BoneInfo>				_bones;
+
+	shared_ptr<StructuredBuffer>	_offsetBuffer; // 각 뼈의 offset 행렬
+	vector<shared_ptr<StructuredBuffer>> _frameBuffer; // 전체 본 프레임 정보
+
+	_animClips, _bones 를 추가 해줬고 그 밑에 StructuredBuffer 타입의 변수들은 무었이냐면 ToRoot 와 Offset 행렬들을 연산해주는 부분을 
+	CPU 에서 할지 GPU 에서 할지를 따라서 소프트웨어 스키닝, 하드웨어 스키닝이라고 부르는데
+	당연히 GPU에서 해주는게 조금 더 빠르게 동작을 하기 때문에 그 일을 GPU에 떠넘기게 될겁니다. 그래서 GPU의 ComputeShader 와 통신하기 위해서 
+	구조화 버퍼를 활용하겠습니다.
+	각 뼈의 Offset 을 넘겨주기 위해 _offsetBuffer 를 만들었고 애니메이션이 여러개이기 때문에 구조화 버퍼를 여러개 담아서 프레임버퍼 즉 ToRoot 를 GPU에 넘겨주기 위해
+	준비를 해주었습니다.
+
+	그래서 CreateBonesAndAnimations 에서는 코드는 길지만 AnimClip, Bones, SkinData 를 FbxLoader 에서 파싱한 데이터를 우리의 구조체에 맞게 
+	분해 재조립을 해서 넣어주고 있습니다.
+
+	그리고 CreateBonesAndAnimations 를 실행하기위해 도와줄 Get 함수 헬퍼 함수 들도 추가 해주었습니다.
+	const vector<BoneInfo>*		GetBones() { return &_bones; }
+	uint32						GetBoneCount() { return static_cast<uint32>(_bones.size()); }
+	const vector<AnimClipInfo>* GetAnimClip() { return &_animClips; }
+
+	bool							IsAnimMesh() { return !_animClips.empty(); }
+	shared_ptr<StructuredBuffer>	GetBoneFrameDataBuffer(int32 index = 0) { return _frameBuffer[index]; } // 전체 본 프레임 정보
+	shared_ptr<StructuredBuffer>	GetBoneOffsetBuffer() { return  _offsetBuffer; }
+
+	#include "StructuredBuffer.h"
+	구조화 버퍼를 사용하기 위해 include 했습니다.
+
+	SkinData 를 로드하는 부분에서 IsAnimMesh 인지를 if 체크 해주면서 시작하고 있고 통과한다면 _animClips 는 비어있지 않다는 의미입니다. 
+	그리고 나서 _bones 의 크기만큼 vextor<Matrix> 를 생성하고 그 크기 만큼 for문을 돌면서 _bones[i].matOffset 을 차례대로 담아줍니다. 왜 Offset 행렬을 
+	다시 따로 만드냐면 GPU 에 넘겨줄 구조화 버퍼인 _offsetBuffer 에 넣기 위해서 입니다. 
+	이때 구조화 버퍼를 초기화하는 함수에서 이전에는 인자로 원소의 크기와 갯수 두가지만 넘겨 줬었는데 여기서는 세번째 인자로 방금 만든 Offset 행렬들을 넘겨주고 있습니다.
+
+	그런데 반면 _frameBuffer 의 경우에는 애니메이션 갯수 만큼의 배수로 행렬들을 받아줘야 하기 때문에 _animClips.size() 만큼을 루프를 돌면서 받아주고 있습니다.
+	하나의 animClip 마다 AnimFrameParams 라는 아직 만들지 않은 struct 에 애니메이션의 ToRoot 배열들을 담아줄겁니다. 그런데 아까 말했듯이 배열을 SRT 로 나눠서 
+	관리합니다. 이유는 블랜딩을 쉽게 하기 위해서 였습니다. 그런데 AnimFrameParams 은 한 프레임의 한 뼈대의 SRT 행렬이고 이 AnimFrameParams 의 타입의 벡터를 
+	뼈대의 갯수 * 한 애니메이선의 프레임 수 
+	의 크기로 만들었습니다. 이 벡터에 쭉 이어서 행렬들을 담아주는데 _animClips.keyFrames 에서는 2차 배열로 저장하던것과 달리 
+	AnimFrameParams 의 벡터 변수인 frameParams 는 1차 배열로 쭉 저장하였습니다.
+
+이제 그 다음의 문제는 무엇이냐면 지금까지 StructuredBuffer 를 인자의 크기에 따라 만들었지만 이제는 StructuredBuffer 를 만들자 마자 데이터를 밀어 넣고 싶습니다. 
+버퍼를 생성함과 동시에 데이터를 밀어넣도록 기능을 확장해주겠습니다. 
+
+이것도 그렇고 AnimFrameParams 이라는 struct 도 없는데 이것은 EnginePch.h 에 추가 해주고 가겠습니다. 
+// EnginePch.h
+
+struct AnimFrameParams
+{
+	Vec4	scale;
+	Vec4	rotation; // Quaternion
+	Vec4	translation;
+};
+
+	2-2) StructuredBuffer
+	StructuredBuffer::Init 은 지금까지 elementSize, elementCount 두가지 만 받았는데 세번째 인자를 추가할것인데 void* initialData = nullptr 
+	이렇게 추가하면 기본값이 nullptr 이니까 initialData 가 있느냐 없느냐에 따라 기존의 버퍼만 만드는 사용법과 아니면 데이터도 한번에 밀어넣는 사용법으로 
+	나눠서 만들 수 있을것 같습니다. 
+	// StructuredBuffer::Init 의 선언부 
+	void Init(uint32 elementSize, uint32 elementCount, void* initialData = nullptr);
+
+	Init 코드 안에서 버퍼를 만들어 주는 부분 아래에서 initialData 가 nullptr 이 아닐때 그 데이터를 복사해주는 함수를 넣을겁니다. 
+	
+	void StructuredBuffer::Init(uint32 elementSize, uint32 elementCount, void* initialData)
+	{
+		_elementSize = elementSize;
+		_elementCount = elementCount;
+		_resourceState = D3D12_RESOURCE_STATE_COMMON;
+
+		// Buffer
+		{
+			uint64 bufferSize = static_cast<uint64>(_elementSize) * _elementCount;
+			D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+			D3D12_HEAP_PROPERTIES heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+
+			DEVICE->CreateCommittedResource(
+				&heapProperties,
+				D3D12_HEAP_FLAG_NONE,
+				&desc,
+				_resourceState,
+				nullptr,
+				IID_PPV_ARGS(&_buffer));
+			// 추가점
+			if (initialData)
+				CopyInitialData(bufferSize, initialData);
+		}
+
+		// 생략 
+
+	이제 CopyInitialData 라는 메소드도 추가해줘야 하겠습니다. 그리고 이 함수에서 필요한 몇가지 데이터를 가져오는 헬퍼 함수도 몇가지 추가해주겠습니다.
+		
+		uint32	GetElementSize() { return _elementSize; }
+		uint32	GetElementCount() { return _elementCount; }
+		UINT	GetBufferSize() { return _elementSize * _elementCount; }
+
+	private:
+		void CopyInitialData(uint64 bufferSize, void* initialData);
+
+	그리고 CopyInitialData 의 정의부의 내용을 복사하진 않고 해석만 해보면 
+	
+	리소스 컴포인터 readBuffer 를 nullptr 로 만들고 CopyInitialData 의 인자중 bufferSize 의 크기로 resource descriptor 를 desc 라는 이름으로 ,
+	업로드 타입의 heap properties 를 heapProperties 라는 이름으로 만들었습니다. 
+
+	다음은 DEVICE->CreateCommittedResource 로 위의 임시 변수들을 넘겨줘서 리소스와 버퍼를 만들어 줍니다. 
+	그리고 나서 자주 봤었던 map , unmap , memcpy 로 데이터를 밀어넣고 있습니다. 또 배리어를 사용해서 resource state 가 커먼일때와 카피 일때 사이의 
+	동기화도 해주고 있습니다.
+
+	이 CopyInitialData 는 느리긴 하지만 프레임마다 로딩해주고 이런 자주 실행되는 함수가 아니라 처음에 한번만 밀어넣어주면 되는 함수입니다. 
+	왜냐면 여기서 밀어넣고 있는 데이터가 Offset 행렬과 ToRoot 행렬들인데 이런 애니메이션 데이터는 게임중간에 바뀌는 데이터가 아니라 처음 실행할때 부터 
+	정해져 있는 데이터이기 때문입니다.
+
+	이때 넘겨주는 인자로 initialData 가 nullptr 이면 그냥 넘어가게 될겁니다. 
+
+	2-3) 다시 Mesh 클래스 
+
+	다시 Mesh::CreateBonesAndAnimations 의 코드로 가보면 _offsetBuffer 를 만들때 넣어놨던 3번째 인자인 Offset 행렬의 벡터를 넘겨주면 그 정보를 추출해서 
+	StructuredBuffer 에 카피를 해주고 있는 부분입니다.
+
+	이렇게 _offsetBuffer, _frameBuffer 를 전달해주고 Mesh 가 종료가 됩니다.
+	
+	Mesh::CreateFromFBX 에서 지금까지는 메쉬와 인덱스만 다루고 있었지만 이제부터는 뼈대와 애니메이션 데이터도 관리해야 하기 때문에 
+	인자로 const FBXLoader& 를 받아서 필요한 데이터를 가져다 사용할겁니다.
+
+
+3) Animator 
+
+새로추가된 Animator 클래스를 살펴보던 중간에 Mesh로 빠져서 한참 돌다 왔습니다. 
+
+void Animator::FinalUpdate()
+{
+	_updateTime += DELTA_TIME;
+
+	const AnimClipInfo& animClip = _animClips->at(_clipIndex);
+	if (_updateTime >= animClip.duration)
+		_updateTime = 0.f;
+
+	const int32 ratio = static_cast<int32>(animClip.frameCount / animClip.duration);
+	_frame = static_cast<int32>(_updateTime * ratio);
+	_frame = min(_frame, animClip.frameCount - 1);
+	_nextFrame = min(_frame + 1, animClip.frameCount - 1);
+	_frameRatio = static_cast<float>(_frame - _frame);
+}
+애니메이터에 FinalUpdate 에서 업데이트를 해주고 있는데 지금 몇번째 클립을 틀고 있는지를 관리해주게 될겁니다. _updateTime 은 flaot 타입의 멤버 변수인데 업데이트 마다 
+델타타임을 더해주고 있습니다. 
+_clipIndex 라는 int32 변수로 지금 애니메이션의 인덱스를 저장하고 있고 그 인덱스에 따라 animClip 을 가져옵니다. 
+그 클립의 duration 지속시간과 방금 보았던 _updateTime 을 비교해서 _updateTime 가 클 경우 0.f 로 초기화 해줍니다. 
+
+그리고 나서 const int32 ratio 라는 변수에 현재 애니메이션 클립의 프레임수에다가 애니메이션의 지속시간을 나눠서 저장하고 있습니다. 
+이 Ratio 를 가지고 현재 프레임을 뜻하는 _frame 변수를 _updateTime * ratio 로 구해주고 있습니다. 그리고 _frame 에 1 을 더해서 다음 프레임 _nextFrame 을 구해주고 있습니다. 
+_frame, _nextFrame 둘 각각 자신과 현재 애니메이션의 총 프레임 수인 animClip.framcount 에서 1 적은 수와 비교해서 작은 값을 가져갑니다. 
+
+현재 프레임과 다음 프레임 두개를 가져가는 이유는 _frameRatio 를 구해주기 위해서인데 이 프레임 비율이란것은 시간에 따라 프레임이 정수로 딱딱 떨어지지 않을 수 있는데 
+그걸 구해주는겁니다.
+이렇게 구해준 _frame, _nextFrame, _frameRatio 들은 Animator::PushData 때 사용됩니다.
+프레임들과 중간 프레임을 구해서 넘겨주면 나중에 애니메이션을 블랜딩할때 사용될겁니다.
+
+void Animator::PushData()
+{
+	uint32 boneCount = static_cast<uint32>(_bones->size());
+	if (_boneFinalMatrix->GetElementCount() < boneCount)
+		_boneFinalMatrix->Init(sizeof(Matrix), boneCount);
+
+	// Compute Shader
+	shared_ptr<Mesh> mesh = GetGameObject()->GetMeshRenderer()->GetMesh();
+	mesh->GetBoneFrameDataBuffer(_clipIndex)->PushComputeSRVData(SRV_REGISTER::t8);
+	mesh->GetBoneOffsetBuffer()->PushComputeSRVData(SRV_REGISTER::t9);
+
+	_boneFinalMatrix->PushComputeUAVData(UAV_REGISTER::u0);
+
+	_computeMaterial->SetInt(0, boneCount);
+	_computeMaterial->SetInt(1, _frame);
+	_computeMaterial->SetInt(2, _nextFrame);
+	_computeMaterial->SetFloat(0, _frameRatio);
+
+	uint32 groupCount = (boneCount / 256) + 1;
+	_computeMaterial->Dispatch(groupCount, 1, 1);
+
+	// Graphics Shader
+	_boneFinalMatrix->PushGraphicsData(SRV_REGISTER::t7);
+}
+_boneFinalMatrix 라는 shared_ptr<StructuredBuffer> 를 초기화 하기도 현재 애니메이션의 인덱스에 해당하는 프레임버퍼(ToRoot)를 SRV_REGISTER::t8 에 
+푸시 해주고 있습니다. 오프셋 행렬도 SRV_REGISTER::t9 에 넘겨주고 있습니다. 
+이런 데이터를 가지고 Dispatch 를 실행한 후 FinalMatrix 를 구해서 그려주는 부분이라고 할 수 있습니다. 
+
+
+4) 에러 메세지 처리 
+
+위의 Animator::PushData 를 하는 도중에 Mesh 객체를 가져오는 도중에 MeshRenderer 에서 GetMesh 가 없다고 메세지가 뜨고 있어서 추가 해주러 왔습니다.
+// MeshRenderer 클래스 GetMaterial 위쪽
+	shared_ptr<Mesh> GetMesh() { return _mesh; } 
+말그대로 메쉬를 리턴하는 함수입니다.
+
+중간에 또 에러가 뜨는 곳이 있는지 빌드를 해보니 MeshData::LoadFromFBX 에서 Mesh::CreateFromFBX 의 인자 수가 안맞는다고 합니다.
+지금은 Mesh::CreateFromFBX 의 인자로 loader.GetMesh(i) 만 주고 있었는데 거기에 추가로 FBXLoader& 를 넘겨줘야 합니다. 사용하던 loader 를 넘겨주면 되겠습니다.
+
+이제 다음 코드 수정으로 진핸 해주겠습니다. 
+
+
+5) Shader 클래스 
+전에 EnginePch.h 에서도 struct Vertex 에 position, texcoord, normal, tangent 이외에 weight, indices 를 추가해줬었습니다. 
+
+Shader::CreateGraphicShader 에서도 셰이더로 넘겨줄 데이터의 서술자가 있었습니다. 거기에 추가된 weight 와  indices 를 추가해주었습니다. 
+
+	D3D12_INPUT_ELEMENT_DESC desc[] =
+	{
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 20, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "WEIGHT", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 44, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },	// 추가
+		{ "INDICES", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 60, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },	// 추가
+// 행렬들 생략 
+
+
+6) MeshRenderer 클래스 
+다시 MeshRenderer 입니다. 여기서 MeshRenderer::Render 함수를 보면 
+
+void MeshRenderer::Render()
+{
+	for (uint32 i = 0; i < _materials.size(); i++)
+	{
+		shared_ptr<Material>& material = _materials[i];
+
+		if (material == nullptr || material->GetShader() == nullptr)
+			continue;
+
+		GetTransform()->PushData();
+
+		// 변경점 
+		if (GetAnimator())
+		{
+			GetAnimator()->PushData();
+			material->SetInt(1, 1);
+		}
+
+		material->PushGraphicsData();
+		_mesh->Render(1, i);
+	}
+}
+
+이전에는 트랜트폼 을 푸시하고 머테리얼 푸시 메쉬 렌더를 바로 해주고 있었는데 이제는 애니메이션이 추가 되었으니까 
+이 물체에 컴포넌트중에 Animator 가 있다면 그 정보도 푸시해줘야 합니다. 
+
+
+7) Component 클래스
+그런데 지금 GetAnimator 가 아직 없습니다. 이걸 추가해줘야 하는데 MeshRenderer 에 추가해주는것보다는 더 상위의 Component 클래스에 만들어 주면 
+다른 곳에서도 필요할때 가져다 쓸 수 있을것 같습니다.
+// Component.h 
+
+class MeshRenderer;
+class Animator;
+
+	shared_ptr<MeshRenderer> GetMeshRenderer();
+	shared_ptr<Animator> GetAnimator();
+
+// Component.cpp
+#include "MeshRenderer.h"
+#include "Animator.h"
+
+shared_ptr<MeshRenderer> Component::GetMeshRenderer()
+{
+	return _gameObject.lock()->GetMeshRenderer();
+}
+
+shared_ptr<Animator> Component::GetAnimator()
+{
+	return _gameObject.lock()->GetAnimator();
+}
+혹시 모르니까 MeshRenderer 를 가져오는것도 겸사 겸사 추가했습니다. 
+
+
+8) 다시 MeshRenderer 클래스 
+Get 함수를 추가했음에도 에러가 뜨는데 불완전한 클래스 형식이라고 합니다. 이 말은 Animator 헤더를 include 해줘야 합니다.
+
+이제 게임 오브젝트가 Animator 컴포넌트를 들고 있다면 Animator::PushData 를 해주게 됩니다. 
+
+다음은 이제 셰이더 파일을 만들고 다시 돌아오겠습니다. 
+
+
+9) animation.fx & math.fx 
+셰이더는 animation 과 math 두가지를 만들어 줄건데 같이 번갈아 보면서 살펴보겠습니다. 
+
+이중에 math.fx 에는 많은 내용의 수학적 함수들이 들어있습니다. 분명 이런 내용은 이론 부분에서도 배우지 않았는데 갑자기 추가 된것처럼 느껴집니다. 
+이 수학 함수들은 CPU 쪽에는 이미 DirectX 에서 지원하는 함수들 입니다. 이전에 파티클 시스템을 실습 할 때도 랜덤 함수가 없어서 임의로 만들어 줬던것이 기억납니다.
+
+그 DirectX 에서 지원하던 코드들을 셰이더 쪽으로 가져온것입니다. 
+
+그리고 이제 animation.fx 가 먼저 실행이 될것이고 이 셰이더는 Compute Shader , CS 단계로 실행될겁니다.
+
+struct AnimFrameParams
+{
+    float4 scale;
+    float4 rotation;
+    float4 translation;
+};
+
+StructuredBuffer<AnimFrameParams>   g_bone_frame : register(t8);
+StructuredBuffer<matrix>            g_offset : register(t9);
+RWStructuredBuffer<matrix>          g_final : register(u0);
+
+// ComputeAnimation	넘겨주는 파라미터들
+// g_int_0 : BoneCount
+// g_int_1 : CurrentFrame
+// g_int_2 : NextFrame
+// g_float_0 : Ratio
+[numthreads(256, 1, 1)]
+void CS_Main(int3 threadIdx : SV_DispatchThreadID)
+{
+    if (g_int_0 <= threadIdx.x)
+        return;
+
+    int boneCount = g_int_0;
+    int currentFrame = g_int_1;
+    int nextFrame = g_int_2;
+    float ratio = g_float_0;
+
+    uint idx = (boneCount * currentFrame) + threadIdx.x;
+    uint nextIdx = (boneCount * nextFrame) + threadIdx.x;
+
+    float4 quaternionZero = float4(0.f, 0.f, 0.f, 1.f);
+
+    float4 scale = lerp(g_bone_frame[idx].scale, g_bone_frame[nextIdx].scale, ratio);
+    float4 rotation = QuaternionSlerp(g_bone_frame[idx].rotation, g_bone_frame[nextIdx].rotation, ratio);
+    float4 translation = lerp(g_bone_frame[idx].translation, g_bone_frame[nextIdx].translation, ratio);
+
+    matrix matBone = MatrixAffineTransformation(scale, quaternionZero, rotation, translation);
+
+    g_final[threadIdx.x] = mul(g_offset[threadIdx.x], matBone);
+}
+g_bone_frame 은 ToRoot 행렬들을 담고 있는데 구조는 1차 배열이지만 2차배열처럼 사용할겁니다. 그래서 한 프레임마다 끊어서 보기 위해 CS_Main 안에 idx, nextIdx 를 
+활용해서 사용하고 있습니다. 
+
+뼈의 갯수, 현재 프레임, 다음 프레임, 둘 사이의 비율을 g_Int, g_float 로 받아주고 있습니다. 
+이 데이터들로 무엇을 하고 있냐면 
+
+g_final[threadIdx.x] 에 offset 과 matbone 이라는것을 곱해서 넣어 주고 있습니다. 
+
+먼저 g_final 은 이론 시간에 배웠던 그 Final 변환 행렬입니다. threadIdx.x 가 곧 뼈의 인덱스가 될건데 뼈마다 한 프레임에서 사용할 Final 행렬을 받아 갈겁니다. 
+
+그러면 matBone 이 무엇이냐면 그 위에서 scale, rotation, translation 을 lerp, QuaternionSlerp 이런 함수들로 어떤 계산을 해주고 있습니다. 
+lerp 의 첫번째 인자 현재 프레임 * 뼈의 갯수 + threadIdx.x 가 뜻하는것은 1차 배열인 g_bone_frame 을 2차 배열처럼 사용하기위한것이고 현재 프레임의 뼈대의 인덱스가 
+가지고 있는 SRT 들을 가지고옵니다. 그렇게 첫째 인자, 두번째 인자를 세번째 인자인 둘 사이의 비율로 적절히 섞어주는 함수가 
+lerp 입니다. 이 lerp 는 셰이더에서 기본 제공하는 함수입니다.
+
+그럼 QuaternionSlerp 는 무엇이냐면 math.fx 에 추가한 함수인데 DiercX 에서 지원하는 것입니다. Rotation 을 사용할 때 조심해야 할 것이 짐벌락 현상이었고 그것을 
+극복하기 위해 쿼터니언이라는 방법을 사용한다고 했습니다. 그것을 이용한 lerp 함수인것입니다. 이 함수의 자세한 내용은 따로 DirectX 의 문서를 찾아보면 되겠습니다.
+
+중간 정리 하겠습니다.
+animation.fx 에서 하는 일은 Animator::PushData 에서 넘겨주는 g_bone_frame, g_offset 행렬들을 현재 프레임에 맞는 뼈들을 병렬 처리를하는데 
+현재 프레임, 다음 프레임, 섞을 비율등의 정보를 가지고 잘 섞어서 읽기, 쓰기 모두 가능한 g_final 이라는 StructuredBuffer 에 저장하는 역할을 하고 있습니다.
+이렇게 계산한 결과는 GPU 의 u0 레지스터에 저장되어 있을겁니다.
+그 u0 의 정보를 가지고 deferred.fx 에서 가져다가 적절히 사용하게끔 해주면 되겠습니다.
+
+
+10) deferred.fx 
+이어서 디퍼드 셰이더를 보겠습니다. 디퍼드의 VS_Main 에서는 g_int_0 의 값이 1인지 아닌지를 체크하면서 인스턴싱으로 할 건지, 단일 오브젝트를 그려줄 건지를 
+체크 했었습니다. 
+ 
+두가지 경우 모두 단계가 추가 될겁니다. 
+
+VS_OUT VS_Main(VS_IN input)
+{
+    VS_OUT output = (VS_OUT)0;
+
+    if (g_int_0 == 1)
+    {	
+		// 추가
+        if (g_int_1 == 1)
+            Skinning(input.pos, input.normal, input.tangent, input.weight, input.indices);
+
+        output.pos = mul(float4(input.pos, 1.f), input.matWVP);
+        output.uv = input.uv;
+
+        output.viewPos = mul(float4(input.pos, 1.f), input.matWV).xyz;
+        output.viewNormal = normalize(mul(float4(input.normal, 0.f), input.matWV).xyz);
+        output.viewTangent = normalize(mul(float4(input.tangent, 0.f), input.matWV).xyz);
+        output.viewBinormal = normalize(cross(output.viewTangent, output.viewNormal));
+    }
+    else
+    {	
+		// 추가 
+        if (g_int_1 == 1)
+            Skinning(input.pos, input.normal, input.tangent, input.weight, input.indices);
+
+        output.pos = mul(float4(input.pos, 1.f), g_matWVP);
+        output.uv = input.uv;
+
+        output.viewPos = mul(float4(input.pos, 1.f), g_matWV).xyz;
+        output.viewNormal = normalize(mul(float4(input.normal, 0.f), g_matWV).xyz);
+        output.viewTangent = normalize(mul(float4(input.tangent, 0.f), g_matWV).xyz);
+        output.viewBinormal = normalize(cross(output.viewTangent, output.viewNormal));
+    }   
+
+    return output;
+}
+
+스키닝과 관련된 함수입니다. g_int_1 을 스키닝을 적용할지 안할지 골라주고 있습니다. 
+스키닝을 적용한다는게 어떤 의미이냐면 IA에 넣어준 정점데이터는 바인드 포지션의 정보들을 가지고 있을 건데 스키닝함수를 통해서 
+Final 행렬을 곱해서 애니메이션이 적용된 정점 데이터를 계산해주게 됩니다.
+위에서 말한 내용의 역할을 utils.fx 에 Skinning 함수를 만들어 줄겁니다.
+
+struct SkinningInfo
+{
+    float3 pos;
+    float3 normal;
+    float3 tangent;
+};
+
+void Skinning(inout float3 pos, inout float3 normal, inout float3 tangent,
+    inout float4 weight, inout float4 indices)
+{
+    SkinningInfo info = (SkinningInfo)0.f;
+
+    for (int i = 0; i < 4; ++i)
+    {
+        if (weight[i] == 0.f)
+            continue;
+
+        int boneIdx = indices[i];
+        matrix matBone = g_mat_bone[boneIdx];
+
+        info.pos += (mul(float4(pos, 1.f), matBone) * weight[i]).xyz;
+        info.normal += (mul(float4(normal, 0.f), matBone) * weight[i]).xyz;
+        info.tangent += (mul(float4(tangent, 0.f), matBone) * weight[i]).xyz;
+    }
+
+    pos = info.pos;
+    tangent = normalize(info.tangent);
+    normal = normalize(info.normal);
+}
+
+셰이더 코드에서는 변수에 inout 을 붙히면 cpp 에서 참조값처럼 원본 데이터를 건드릴 수 있다고 합니다. 
+그리고 각 정점들은 최대 4개의 뼈대에 가중치를 들고 있을 수 있다고 했습니다. 그 가중치를 animation.fx 에서 계산한 결과인 matBone 을 연산한 결과에 
+곱해줍니다. 그렇게 해서 최종적인 pos, tangent, normal 이 나올겁니다. 
+
+여기까지 스키닝이 완료되었다고 하면 로컬 좌표계에서 한번에 월드 좌표계 까지 가는게 아니라 위에 이론부분에서 배웠듯이 쭉 상위 뼈대의 좌표계를 기준으로 
+변환해서 타고 올라가 Root 까지 오게 된겁니다. 모든 정점들이 Root 까지 왔다면 그때의 모든 정점들은 이제 그 프레임에서의 최종 정점데이터라고 할 수 있겠습니다.
+이 최종 상태에서 다음 단계로 넘어가기 위해서는 기존에 하던 그대로 WV 행렬을 곱해서 넘길 수 있게 됩니다. 
+
+결국 Skinning 이라는 함수는 스킨, 정점들이 자신이 관련된 뼈대의 ToRoot 를 가중치 만큼씩 영향을 받도록 하는 함수인겁니다.
+
+이 Skinning 이 이번 시간의 주요 목표였습니다. 이걸 적용하기위해 필요한 데이터를 로드, 파싱해서 우리 프로젝트에 맞게 적용 시키고, 추가된 정보들이 잘 작동하도록 
+기존 코드들도 바꾸고 데이터를 잘 조합해서 Final, weight, indices 데이터들을 만들어서 Skinning 을 구현한겁니다. 
+
+- 에러 메세지 
+이쯤에서 다시 빌드를 해서 에러 메세지가 있는지 확인하였습니다. 
+
+undeclared identifier 'g_mat_bone' 
+이라는 에러메세지가 발생했습니다. 위치는 utils.fx 에 추가했던 Skinning 함수 내에서 발생했습니다. 여기서 말하는 g_mat_bone 은 
+Compute Shader 단계에서 계산해준 결과물을 말하는 겁니다.  
+
+이 g_mat_bone 에 디퍼드 셰이더 에서 접근할 수 있도록 글로벌로 들고 있게 추가해주겠습니다.
+
+우리 코드에서는 Animator::PushData 에서 마지막에 
+// Compute Shader 
+	_boneFinalMatrix->PushComputeUAVData(UAV_REGISTER::u0);
+
+// Graphics Shader
+	_boneFinalMatrix->PushGraphicsData(SRV_REGISTER::t7);
+
+이 부분들입니다. 위에 u0 에 푸시했던 _boneFinalMatrix 은 컴퓨트셰이더에서 계산해주도록 넘겨준것이고 계산이 완료된 데이터를 다시 
+그래픽스셰이더 에서 사용하도록 t7 에 푸시 해주고 있습니다.
+
+cpp 에서 푸시 해주면 GPU에서도 받아줘야 하는데 그 부분을 어디서 관리했냐면 params.fx 에서 관리하고 있었습니다. 
+// params.fx
+ 
+	// 위는 생략	
+	Texture2D g_tex_0 : register(t0);
+	Texture2D g_tex_1 : register(t1);
+	Texture2D g_tex_2 : register(t2);
+	Texture2D g_tex_3 : register(t3);
+	Texture2D g_tex_4 : register(t4);
+
+	StructuredBuffer<Matrix> g_mat_bone : register(t7);
+
+	SamplerState g_sam_0 : register(s0);
+ 
+
+ 이렇게 g_mat_bone 을 수정해주었으니까 다시 빌드를 해보겠습니다.
+
+ 다시 에러메세지가 발생하였는데 
+ 
+ invalid subscript 'weight' 
+라는 메세지가 떳습니다. 위치는 deferred.fx 의 VS_Main 의 받는 인자입니다. 
+VS_IN 에 weight 가 없다는 말인데 위에 VS_IN 을 보니 아직 추가가 되지 않았습니다. 
+
+EnginePch.h 의 struct Vertex 랑 Shader::CreateGraphicShader 의 인풋 desc 에는 추가 해줬는데 막상 셰이더 코드는 수정하지 않았었습니다.
+
+VS_IN에 weight 와 indices 를 같이 추가 해줬습니다.
+
+struct VS_IN
+{
+    float3 pos : POSITION;
+    float2 uv : TEXCOORD;
+    float3 normal : NORMAL;
+    float3 tangent : TANGENT;
+    float4 weight : WEIGHT;		// 추가
+    float4 indices : INDICES;	// 추가
+
+    row_major matrix matWorld : W;
+    row_major matrix matWV : WV;
+    row_major matrix matWVP : WVP;
+    uint instanceID : SV_InstanceID;
+};
+
+VS_IN 도 수정되었으니 다시 빌드를 해보겠습니다.
+
+다시 에러메세지, 이번에는 Skinning 을 못찾겠다고 합니다. 이건 간단한데 deferred.fx 에 아직 utils.fx 를 include 해주지 않아서 그렇습니다.
+
+#include "utils.fx"
+
+이제 다시 빌드하면 정상적으로 빌드가 되었습니다.
+
+
+- 테스트 
+
+이제 얼추 다 구현한것 같으니 테스트를 해보겠습니다. 테스트 준비는 Resources 에서 테스트할 리소스를 만들어 주는것부터 시작 합니다. 
+
+	Resources 
+
+	여기서 할 일은 먼저 오늘 애니메이션과 관련된 animation.fx 라는 셰이더를 만들었으니까 이걸 추가 해야 할 것입니다.
+	Resources::CreaetDefaultShader 의 끝 부분으로 가면 최근 만들었던 셰이더가 터레인 이었고 그 밑에 새로 추가해주겠습니다. 
+	
+	// ComputeAnimation
+	{
+		shared_ptr<Shader> shader = make_shared<Shader>();
+		shader->CreateComputeShader(L"..\\Resources\\Shader\\animation.fx", "CS_Main", "cs_5_0");
+		Add<Shader>(L"ComputeAnimation", shader);
+	}
+
+	그리고 이 ComputeAnimation 셰이더와 관련된 머테리얼도  추가 해주겠습니다.
+	
+	Resources::CreaeteDefaultMaterial
+	{	
+		// ComputeAnimation
+		{
+			shared_ptr<Shader> shader = GET_SINGLE(Resources)->Get<Shader>(L"ComputeAnimation");
+			shared_ptr<Material> material = make_shared<Material>();
+			material->SetShader(shader);
+
+			Add<Material>(L"ComputeAnimation", material);
+		}
+	}
+
+	셰이더 말고 나머지 머테리얼파라미터들이나 텍스쳐, 메쉬 같은 데이터 들은 FBX 를 로드하면서 생성되도록 해놨기 때문에 여기서는 만들지 않아도 될것입니다.
+
+이 다음으로 할 것은 SceneManager 로 돌아가서 용가리 오브젝트가 애니메이션을 테스트 하게끔 해주면 될것입니다.
+
+->	SceneManager 
+
+	그런데 여기서 이전 강의에서 드래곤 오브젝트를 잘 출력하도록 만들어 놓았고 그 오브젝트가 이미 들고 있던 애니메이션 데이터를 이제 우리 코드에서 
+	실행하려고 하는겁니다. 그래서 SceneManager::LoadTestScene 에서 많이 바뀔 내용은 없는데 어떤 애니메이션을 틀어줄지 골라주는 스크립트를 추가해주겠습니다.
+
+	#include "TestDragon.h"
+	{
+		shared_ptr<MeshData> meshData = GET_SINGLE(Resources)->LoadFBX(L"..\\Resources\\FBX\\Dragon.fbx");
+
+		vector<shared_ptr<GameObject>> gameObjects = meshData->Instantiate();
+
+		for (auto& gameObject : gameObjects)
+		{
+			gameObject->SetName(L"Dragon");
+			gameObject->SetCheckFrustum(false);
+			gameObject->GetTransform()->SetLocalPosition(Vec3(0.f, 0.f, 300.f));
+			gameObject->GetTransform()->SetLocalScale(Vec3(1.f, 1.f, 1.f));
+			scene->AddGameObject(gameObject);
+			gameObject->AddComponent(make_shared<TestDragon>());	// 추가
+		}
+	}
+
+	아직 만들지는 않았지만 헤더도 미리 추가 해두었습니다.
+
+예전에 카메라를 움직이는 테스트 스크립트인 TestCameraScript 에 이어서 TestDragon 을 만들어 줄겁니다.
+
+->	TestDragon 
+
+	Engine 프로젝트 -> Object 필터 -> Test 핕터 아래에 TestDragon 이라는 클래스를 만들어줬습니다.
+
+	이 클래스에서 구현해줄 내용은 숫자키 1번과 2번을 이용할것인데 1번 버튼을 누르면 다음 순서 애니메이션을 플레이, 
+	2번 버튼을 누르면 이전 순서의 애니메이션을 플레이 하는 내용을 구현해줄겁니다. 
+
+	TestCameraScript 때와 마찬가지로 유니티의 구조를 빌려서 MonoBehaviour 컴포넌트를 상속받아줄겁니다.
+
+	코드는 단순합니다. 선언부는 MonoBehaviour를 상속받고 public 으로 열어놓은 멤버 함수 Update() 를 오버라이드 해주겠습니다.
+
+	정의부는 일단 인풋을 받을것이기 때문에 Input.h , 애니메이션을 플레이해주는 기능을 가질 것이니까 Animator.h  두가지를 include 해주었습니다.
+	#include "pch.h"
+	#include "TestDragon.h"
+	#include "Input.h"
+	#include "Animator.h"
+
+	void TestDragon::Update()
+	{
+		if (INPUT->GetButtonDown(KEY_TYPE::KEY_1))
+		{
+			int32 count = GetAnimator()->GetAnimCount();
+			int32 currentIndex = GetAnimator()->GetCurrentClipIndex();
+
+			int32 index = (currentIndex + 1) % count;
+			GetAnimator()->Play(index);
+		}
+
+		if (INPUT->GetButtonDown(KEY_TYPE::KEY_2))
+		{
+			int32 count = GetAnimator()->GetAnimCount();
+			int32 currentIndex = GetAnimator()->GetCurrentClipIndex();
+
+			int32 index = (currentIndex - 1 + count) % count;
+			GetAnimator()->Play(index);
+		}
+	}
+
+	Update 에서는 Input 의 GetButtonDown 으로 1을 눌렀는지 2를 눌렀는지를 체크해주고 있습니다.
+	조건문 안에서는 애니메이션의 갯수를 가져오고 현재의 애니메이션이 그중에 몇번 인덱스인지를 가져옵니다. 
+
+	그리고 index 라는 변수를 따로 만들어서 현재 인덱스 currentIndex 에 1씩 더하고 빼면서 % count 로 나머지를 구해서 그 값을 인덱스로 사용해 
+	Animator 의 Play(index); 를 해줍니다.
+
+	여기서 에러메세지가 떠 있을것입니다. 아직 Input 클래스에 1 번 , 2 번을 옵션에 넣어놓지 않았기 때문입니다.
+
+
+->	Input
+
+	enum class KEY_TYPE
+	{
+		UP = VK_UP,
+		DOWN = VK_DOWN,
+		LEFT = VK_LEFT,
+		RIGHT = VK_RIGHT,
+
+		W = 'W',
+		A = 'A',
+		S = 'S',
+		D = 'D',
+
+		Q = 'Q',
+		E = 'E',
+		Z = 'Z',
+		C = 'C',
+
+		KEY_1 = '1',	// 1, 2, 3, 4 를 추가
+		KEY_2 = '2',
+		KEY_3 = '3',
+		KEY_4 = '4',
+
+		LBUTTON = VK_LBUTTON,
+		RBUTTON = VK_RBUTTON,
+	};
+
+
+스크립트도 추가하였으니까 빌드하고 실행해보니 프로그램이 제대로 작동을 하지 않습니다. 
+
+어느 부분에서 문제가 있는지를 알려주셨는데 MeshData 쪽의 문제였습니다. MeshData 에서는 FBXLoader 객체를 불러서 FBX 파일을 로드하여 
+우리 코드에서 mesh와 material 을 들고 있도록 해주고 있었는데 
+
+그중에 게임 오브젝트에 그 mesh와 material 을 담은 meshRenderer 를 세팅해주는 MeshData::Instantiate 에서 누락된 코드가 있다고 합니다. 
+
+->	MeshData
+	지금까지 Instantiate 에서는 로드한 MeshRenderer 들을 임시변수 gameObject 에 담아서 
+	MeshData->Instantiate() 를 호출한 게임오브젝트에 push_back 해주고 있었습니다.
+	그러면 MeshRenderer 의 갯수만큼의 크기의 vector<GameObject> 가 SceneManager 에 넘어가는데 그 오브젝트들을 for 문으로 각각 출력해주면 용가리가 되었었습니다.
+
+	여기서 추가해야될 코드는 어떤 역할이냐면 MeshRender 들을 하나씩 for 문을 돌때 하나하나를 info라는 이름으로 관리하고 있었는데 
+	이 info 가 	애니메이션이 있다면 추가하는 게임오브젝트에 Animator 컴포넌트를 추가해주고 추가한 Animator 에 Mesh 에서 들고 있는 정보중 Bone, AnimClip 을 
+	추가해서 연결해주는 코드를 추가해줘야합니다.
+
+	#include "Animator.h"
+
+	vector<shared_ptr<GameObject>> MeshData::Instantiate()
+	{
+		vector<shared_ptr<GameObject>> v;
+
+		for (MeshRenderInfo& info : _meshRenders)
+		{
+			shared_ptr<GameObject> gameObject = make_shared<GameObject>();
+			gameObject->AddComponent(make_shared<Transform>());
+			gameObject->AddComponent(make_shared<MeshRenderer>());
+			gameObject->GetMeshRenderer()->SetMesh(info.mesh);
+
+			for (uint32 i = 0; i < info.materials.size(); i++)
+				gameObject->GetMeshRenderer()->SetMaterial(info.materials[i], i);
+
+			if (info.mesh->IsAnimMesh())
+			{
+				shared_ptr<Animator> animator = make_shared<Animator>();
+				gameObject->AddComponent(animator);
+				animator->SetBones(info.mesh->GetBones());
+				animator->SetAnimClip(info.mesh->GetAnimClip());
+			}
+
+			v.push_back(gameObject);
+		}
+
+		return v;
+	}
+
+
+이제는 용가리 오브젝트가 Animator 컴포넌트도 들고 있고 그 Animator 도 용가리의 Bone 데이터와 AnimClip 을 알고 있게 되었습니다.
+ 
+아직 더 문제가 남아있습니다. MeshRenderer 클래스입니다.
+
+->	MeshRenderer
+	
+	여기서 이번에 추가해준 내용은 MeshRenderer::Render 를 할 때 오브젝트 자신이 Animator 를 가지고 있다면 Animatot->PushData 를 해서 
+	Bone Final Matrix 를 구해준다음 다시 GPU t7 레지스터에 푸시해주고 나서 셰이더에 이 물체는 애니메이션이 있다는 의미로 
+	material->SetInt(1,1); 를 해주고 있었습니다.
+
+	그런데 이 코드를 아까 추가할때 Instancing 이 적용된 버전의 MeshRenderer::Render 에 만 추가 했었습니다. 
+	일반 버전 Render 에도 똑같이 추가해주어야 하겠습니다.
+
+
+이제 정말 준비가 완료되었습니다. 
+
+다시 빌드를 하고 실행을 해보았습니다. 
+
+...
+
+실행에 1 분 50 초 가 걸렸습니다. 
+
+이렇게 오래걸리는건 처음 경험해보는데 왜 이렇게 오래걸리는지는 첫번째 디버그 모드이기 때문이기도 하고 
+두번째 FBXLoader 에서 LoadKeyframe 이라는 함수안에서 ToRoot 행렬을 계산해주는 부분이 루트노드부터 내려가면서 계산하는 방법이 아니라 
+가장 말단 노드 부터 계산해 나가는 방법이기 때문에 그렇습니다. 이부분은 개선의 여지가 있긴하지만 일단 우리 프로젝트에서는 넘어가기로 했기 때문에 
+그냥 두고 1분 50초 씩 기다리겠습니다.
+
+* 만약 이 부분을 고쳐야 한다. 포트폴리오를 잘 만들고 싶다 라면 이 부분을 어떻게 개선하느냐면 MeshData의 MeshRenderer 에 담겨있는 
+  Mesh, Material, Animation 과 Bone 정보들을 따로 추출 할 수 있게 Load ,Save 기능을 만들어주면 될것입니다. 
+
+
+-	결론 
+
+이번에 스키닝 애니메이션 기법에 대해 알아봤습니다. 이 내용에서 중요한 것은 이제 FBX 이런게 아니라 
+스키닝 기법에서는 뼈대 Bones 라는 것을 이용하고 그 Bones에 달라붙은 정점들 Skins 이라는 정보들을 어떤 뼈대에 붙어서 움직여야할지 
+뼈대는 계층구조로 이루어져있고 각 뼈대의 Born Space에서 상위 Bone Space 결국은 Root 스페이스 까지 Skin 정보들을 변환해서 월드 좌표계로 
+변환할 준비를 하는것이 중요한 내용이었습니다.
+
+그리고 겸사 겸사 FBX 파일을 가지고 실습을 하면서 FBX 파일이 생각보다 많은 정보를 가지고 있다는것도 알 수 있었습니다. 
+FBX 처럼 Mesh 와 Animation 정보를 한번에 관리하는 방법도 있고 나눠서 관리하는 방법도 있다고 합니다.
