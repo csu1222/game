@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Player.h"
 #include "Board.h"
+#include <stack>
 
 void Player::Init(Board* board)
 {
@@ -15,32 +16,6 @@ void Player::Init(Board* board)
 	_path.clear();
 	_path.push_back(pos);
 
-	/*
-	// 길찾기 문제에 자주 사용되는 테크닉
-	// 방향을 왼쪽으로 틀 경우
-	switch (_dir)
-	{
-	case DIR_UP:
-		_dir = DIR_LEFT;
-		break;
-	case DIR_LEFT:
-		_dir = DIR_DOWN;
-		break;
-	case DIR_DOWN:
-		_dir = DIR_RIGHT;
-		break;
-	case DIR_RIGHT:
-		_dir = DIR_UP;
-		break;
-	}
-	// 허나 이러면 코드가 너무 장황해짐
-
-	// 이럴때를 위해서 환경설정때 Dir 을 Up 부터 반시계 방향으로 차례대로 지정,
-	// 그리고 총 갯수도 들고 있게 했음
-	// 위의 switch case 문을 간단하게 표현하면
-
-	_dir = (_dir + 1) % DIR_COUNT;
-	*/
 
 	// 앞의 방향을 방향의 크기만큼의 Pos 배열로 만듭니다.
 	Pos front[DIR_COUNT] =
@@ -56,7 +31,7 @@ void Player::Init(Board* board)
 		int32 rightDir = (_dir - 1 + DIR_COUNT) % DIR_COUNT;
 		
 		//	1 - 현재 바라보는 방향을 기준으로 오른쪽으로 갈 수 있는지 체크  
-		if (CanGo(_pos + front[rightDir]))
+		if (CanGo(pos + front[rightDir]))
 		{
 			//	OK.플레이어의 방향을 오른쪽으로 90도 회전 후 앞으로 한 보 전진
 			_dir = rightDir;
@@ -79,6 +54,36 @@ void Player::Init(Board* board)
 			_dir = (_dir + 1) % DIR_COUNT;
 		}
 	}
+
+	stack<Pos> s;
+
+	for (int i = 0; i < _path.size() - 1; i++)
+	{
+		if (s.empty() == false && s.top() == _path[i + 1])
+			s.pop();
+		else
+			s.push(_path[i]);
+	}
+
+	// 목적지 도착 
+	if (_path.empty() == false)
+		s.push(_path.back());
+
+	// 스택에서 벡터로 꺼내기
+	vector<Pos> path;
+
+	while (s.empty() == false)
+	{
+		path.push_back(s.top());
+		s.pop();
+		// 스택 특성상 경로가 뒤집혀서 나옵니다.
+	}
+	
+	// 다시 뒤집어 주기 
+	std::reverse(path.begin(), path.end());
+
+	_path = path;
+
 }
 
 void Player::Update(int32 deltaTick)
