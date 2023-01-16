@@ -2,16 +2,71 @@
 #include <vector>
 #include <list>
 #include <stack>
+#include <queue>
 using namespace std;
 
-// Stack (LIFO Last_In_First_Out 후입선출)
+// Queue (FIFO Firt_In_First_Out 선입선출)
 
-// [1][2][3][4] << 밀어넣음
-// ex) 되돌리기 (Ctrl + Z)
+// front << [1][2][3][4] << rear(back)
+// ex) 대기열(은행, 음식점, 게임 매칭)
 
+template<typename T>
+class ArrayQueue
+{
+public:
 
-template<typename T, typename Container = vector<T>>
-class Stack
+	void push(const T& value)
+	{
+		// TODO: 다 찼는지 체크 
+		if (_size == _container.size())
+		{
+			// 증설 작업 
+			int newSize = max(1, _size * 2);
+			vector<T> newData;
+			newData.resize(newSize);
+
+			// 데이터 복사 
+			for (int i = 0; i < _size; i++)
+			{
+				int idx = (_front + i) % _container.size();
+				newData[i] = _container[idx];
+			}
+
+			// 데이터 스왑
+			_container.swap(newData);
+			_front = 0;
+			_back = _size;
+		}
+
+		_container[_back] = value;
+		_back = (_back + 1) % _container.size();
+		_size++;
+	}
+
+	void pop()
+	{
+		_front = (_front + 1) % _container.size();
+		_size--;
+	}
+
+	T& front()
+	{
+		return _container[_front];
+	}
+
+	bool empty() { return _size == 0; }
+	int size() { return _size; }
+
+private:
+	vector<T>	_container;
+	
+	int			_front = 0;
+	int			_back = 0;
+	int			_size = 0;
+};
+
+template<typename T>
+class ListQueue
 {
 public:
 	void push(const T& value)
@@ -21,42 +76,35 @@ public:
 
 	void pop()
 	{
-		_container.pop_back();
+		_container.pop_front();
 	}
 
-	T& top()
+	T& front()
 	{
-		return _container.back();
+		return _container.front();
 	}
 
 	bool empty() { return _container.empty(); }
 	int size() { return _container.size(); }
 
 private:
-	Container _container;
+	list<T>	_container;
 };
 
 int main()
 {
-	// 스택 생성 
-	Stack<int> s;
+	ArrayQueue<int> q;
 
-	// 데이터 밀어넣기
-	s.push(1);
-	s.push(2);
-	s.push(3);
+	for (int i = 0; i < 100; i++)
+		q.push(i);
 
-	while (s.empty() == false)	// 스택이 비었나?
+	while (q.empty() == false)
 	{
-		// 최상위 원소가 무엇?
-		int data = s.top();
+		int value = q.front();
+		q.pop();
 
-		// 최상위 원소를 삭제
-		s.pop();
-
-		cout << data << endl; 
+		cout << value << endl;
 	}
 
-	// 사이즈는?
-	int size = s.size();
+	int size = q.size();
 }
