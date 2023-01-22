@@ -137,8 +137,6 @@ void Player::Bfs()
 	const int32 size = _board->GetSize();
 	vector<vector<bool>> discovered(size, vector<bool>(size, false));
 
-	// vector<vector<Pos>> parent;
-	// parent[A] = B; A는 B로 인해 발견함
 	map<Pos, Pos> parent;
 
 	queue<Pos> q;
@@ -152,22 +150,15 @@ void Player::Bfs()
 		pos = q.front();
 		q.pop();
 
-		// 방문! 
-		
-		// 목적지라면 break
 		if (pos == dest)
 			break;
 
-		// 위,왼쪽,아래,오른쪽 의 방향각각 을 체크 
 		for (int32 dir = 0; dir < 4; dir++)
-		{	
+		{
 			Pos nextPos = pos + front[dir];
-			
-			// nextPos 가 갈수 있는 타일인지?
+
 			if (CanGo(nextPos) == false)
 				continue;
-
-			// nextPos 가 갈 수 있다면 이미 탐색했던 타일인지?
 			if (discovered[nextPos.y][nextPos.x])
 				continue;
 
@@ -175,13 +166,11 @@ void Player::Bfs()
 			discovered[nextPos.y][nextPos.x] = true;
 			parent[nextPos] = pos;
 		}
-
 	}
-
 
 	_path.clear();
 
-	// 거꾸로 거슬러 올라간다
+	// 거꾸로 
 
 	pos = dest;
 
@@ -189,13 +178,14 @@ void Player::Bfs()
 	{
 		_path.push_back(pos);
 
-		// 부모와 자신이 같다면 시작점이다
+		// 입구이면 break
 		if (pos == parent[pos])
 			break;
 
 		pos = parent[pos];
 	}
 
-	// 거꾸로 거슬러 올라간걸 다시 뒤집는다.
+	// _path를 뒤집는다
+
 	std::reverse(_path.begin(), _path.end());
 }

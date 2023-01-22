@@ -265,3 +265,72 @@ BFS 로 최단경로를 구하는 실습을 해봤는데 이 방법에서는 탐
 상하좌우로 움직이는 비용을 1이라고 했을때 대각선은 1은 아니고 1.4 정도 의 비용이 들건데 우리가 구현한 BFS 에서는 이런 이동의 가중치를 둘 수 없다는점이 
 아쉽습니다.
 그래서 이 부분을 보완해주는 다익스트라 알고리즘에 대해 다음 시간에서 알아볼것입니다. 
+
+
+
+BFS 코드 백업
+
+	const int32 size = _board->GetSize();
+	vector<vector<bool>> discovered(size, vector<bool>(size, false));
+
+	// vector<vector<Pos>> parent;
+	// parent[A] = B; A는 B로 인해 발견함
+	map<Pos, Pos> parent;
+
+	queue<Pos> q;
+
+	q.push(pos);
+	discovered[pos.y][pos.x] = true;
+	parent[pos] = pos;
+
+	while (q.empty() == false)
+	{
+		pos = q.front();
+		q.pop();
+
+		// 방문! 
+		
+		// 목적지라면 break
+		if (pos == dest)
+			break;
+
+		// 위,왼쪽,아래,오른쪽 의 방향각각 을 체크 
+		for (int32 dir = 0; dir < 4; dir++)
+		{	
+			Pos nextPos = pos + front[dir];
+			
+			// nextPos 가 갈수 있는 타일인지?
+			if (CanGo(nextPos) == false)
+				continue;
+
+			// nextPos 가 갈 수 있다면 이미 탐색했던 타일인지?
+			if (discovered[nextPos.y][nextPos.x])
+				continue;
+
+			q.push(nextPos);
+			discovered[nextPos.y][nextPos.x] = true;
+			parent[nextPos] = pos;
+		}
+
+	}
+
+
+	_path.clear();
+
+	// 거꾸로 거슬러 올라간다
+
+	pos = dest;
+
+	while (true)
+	{
+		_path.push_back(pos);
+
+		// 부모와 자신이 같다면 시작점이다
+		if (pos == parent[pos])
+			break;
+
+		pos = parent[pos];
+	}
+
+	// 거꾸로 거슬러 올라간걸 다시 뒤집는다.
+	std::reverse(_path.begin(), _path.end());
