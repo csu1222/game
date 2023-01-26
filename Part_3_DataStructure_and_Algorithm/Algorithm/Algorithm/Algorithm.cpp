@@ -9,6 +9,70 @@ using NodeRef = shared_ptr<struct Node>;
 
 struct Node
 {
+	Node() {}
+	Node(const string& Data) : data(Data) { }
+
+	string			data;
+	vector<NodeRef>	children;
+};
+
+NodeRef CreateTree()
+{
+	NodeRef root = make_shared<Node>("옥탑방");
+	{
+		NodeRef node = make_shared<Node>("2층");
+		root->children.push_back(node);
+		{
+			NodeRef leaf = make_shared<Node>("201호");
+			node->children.push_back(leaf);
+		}
+		{
+			NodeRef leaf = make_shared<Node>("202호");
+			node->children.push_back(leaf);
+		}
+	}
+	{
+		NodeRef node = make_shared<Node>("1층");
+		root->children.push_back(node);
+		{
+			NodeRef leaf = make_shared<Node>("101호");
+			node->children.push_back(leaf);
+		}
+		{
+			NodeRef leaf = make_shared<Node>("102호");
+			node->children.push_back(leaf);
+		}
+	}
+	return root;
+}
+
+void PrintTree(NodeRef root, int depth)
+{
+	for (int i = 0; i < depth; i++)
+		cout << "-";
+	cout << root->data << endl;
+	for (NodeRef& child : root->children)
+	{
+		PrintTree(child, depth + 1);
+	}
+}
+
+int GetHeight(NodeRef root)
+{
+	int height = 1;
+
+	for (NodeRef& child : root->children)
+	{
+		height = max(height, GetHeight(child) + 1);
+	}
+
+	return height;
+}
+/* 
+using NodeRef = shared_ptr<struct Node>;
+
+struct Node
+{
 	Node() { }
 	Node(const string& _data) : data(_data) { }
 
@@ -89,6 +153,7 @@ int GetHeight(NodeRef root)
 	}
 	return height;
 }
+*/
 
 int main()
 {
@@ -98,4 +163,5 @@ int main()
 
 	int h = GetHeight(root);
 
+	cout << "Tree Height : " << h << endl;
 }
