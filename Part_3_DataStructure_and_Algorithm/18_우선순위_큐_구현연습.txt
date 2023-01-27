@@ -1,0 +1,258 @@
+
+
+        우선순위 큐 구현 연습
+
+
+이전시간에 배운 힙 트리의 내용을 이번시간에 실습해보겠습니다.
+
+일단 STL 에도 우선순위 큐 priority_queue 가 구현이 되어있습니다. 
+사용하는 방법도 일반 queue 와 그다지 다를것이 없다고 합니다.
+
+priority_queue<int> pq;
+
+	pq.push(100);
+	pq.push(300);
+	pq.push(200);
+	pq.push(500);
+	pq.push(400);
+
+이렇게 pq 를 생성하고 값들을 조금 섞어서 푸시해줬습니다.
+
+이제 이 데이터를 꺼내서 출력 해보겠습니다.
+
+	while (pq.empty() == false)
+	{
+		int value = pq.top();
+		pq.pop();
+
+		cout << value << endl;
+	}
+
+데이터를 꺼내는 방법은 같습니다. top 으로 맨위의 데이터를 가져오고 pop으로 꺼냅니다. 
+그런데 일반 queue 는 FIFO 의 규칙으로 데이터를 꺼내게 되니까 위에서 데이터를 push 한 대로 
+100, 300, 200, 500, 400 순으로 출력이 되겠지만 priority_queue 는 데이터가 정렬이 되어서 나옵니다.
+
+실제 출력값이 500, 400, 300, 200, 100 순으로 출력이 되었습니다.
+즉 우리가 이전시간에 공부한 힙 트리 구조라는것을 알 수 있습니다.
+
+그러면 이번에는 값이 큰 순서가 아니라 작은 순서로 꺼내 사용하고 싶다면 어떻게 해야 하는가 입니다. 
+
+꼼수 같은 방법으로 데이터들을 push 해줄 때 값들에 모두 - 를 붙혀 음수로 만들어서 push 하고 꺼낼때 다시 - 를 곱해서 양수로 만들어 꺼내는 방법입니다. 
+	priority_queue<int> pq;
+
+	pq.push(-100);
+	pq.push(-300);
+	pq.push(-200);
+	pq.push(-500);
+	pq.push(-400);
+
+	while (pq.empty() == false)
+	{
+		int value = -pq.top();
+		pq.pop();
+
+		cout << value << endl;
+	}
+이런 방법은 일부 코딩 책에 소개되는 방법이라고 합니다. 
+
+이 방법보다 좀 더 정식같은 방법이 있는데 priority_queue 를 F12 로 타고 들어가보면 템플릿 문법으로 
+세가지 인자를 받는다는것을 알 수 있는데 가장 먼저 담길 데이터의 타입, 데이터를 담을 컨테이너, _Pr 이라고 데이터를 어떤 기준으로 담을지를 골라줄 수 
+있습니다. 
+
+	priority_queue<int, vector<int>, greater<int>> pq;
+
+	pq.push(100);
+	pq.push(300);
+	pq.push(200);
+	pq.push(500);
+	pq.push(400);
+
+	while (pq.empty() == false)
+	{
+		int value = pq.top();
+		pq.pop();
+
+		cout << value << endl;
+	}
+이렇게 설정해주면 의도한 대로 작은 값부터 정렬됩니다.
+
+이제 이렇게 이미 만들어 져있는 완성품을 훑어 보았으니 이 기능들을 직접 구현해보면서 좀 더 이해해보는 시간을 가져보겠습니다.
+
+- 코드 
+
+위에서 알아봤던 기능들 push, top, pop, empty 등을 만들어 보겠습니다. 
+
+template<typename T, typename Container = vector<T>>
+class Priority_queue
+{
+public:
+	void push(const T& value)
+	{
+
+	}
+
+	void pop()
+	{
+
+	}
+
+	T& top()
+	{
+
+	}
+
+	bool empty()
+	{
+
+	}
+private:
+	Container 		_heap = {};
+}
+
+이런식으로 기본 골자가 이루어져 있을겁니다. private 에서 실제 가지고 있들 데이터를 기본은 vector<T> 인 컨테이너 타입으로 만들었습니다. 
+이전 시간에도 말했듯이 힙 트리는 트리이긴 하지만 모든 트리의 노드들이 꽉 채워져 있을것이기 때문에 데이터를 벡터로 표현할 수도 있다고 했습니다. 
+
+다음으로 empty() 매우 간단하게 그냥 _heap.empty() 만 리턴하면됩니다. 
+
+	bool empty() { return _heap.empty(); }
+
+그리고 top() 도 간단한데 큐에서 top 은 queue 에서와 같이 컨테이너에서 가장 위에있는 데이터를 참조하는 것이었습니다. 
+
+	T& top()	{ return _heap[0];	}
+
+이제 실질적으로 복잡해지는것은 push 와 pop 입니다. 
+
+먼저 push 를 보면 이전시간에 말했듯이 힙 트리에 데이터를 추가한다면 일단은 트리의 가장 마지막부분에 데이터를 추가한 다음 그 부모노드의 값과 자신을 비교해 
+가면서 서로 도장깨기를 해 자기 자리를 찾아가는것이었습니다. 
+
+그렇기 때문에 push 에서 가장 먼저할일은 추가할 데이터를 _heap 의 맨 뒤에 밀어 넣는것입니다.
+다음은 부모노드와의 도장깨기로 가능한 높이 올라가는것입니다. 
+
+	void push(const T& value)
+	{
+		// 우선 힙 구조 부터 맞춰준다.	
+		_heap.push_back(value);
+
+		// 도장깨기 시작
+		int now = static_cast<int>(_data.size()) - 1;
+
+		// now > 0 이란것은 루트노드까지 도달하면 종료
+		while (now > 0)
+		{
+			// 부모 노드와 비교해서 더 작으면 패배
+			int next = (index - 1) / 2;
+
+			if (_heap[now] < _heap[next])
+				break;
+
+			// 데이터 교체 
+			::swap(_heap[now], _heap[next]);
+			now = next;
+			_size++;
+		}
+	}
+
+일단 _heap의 맨 뒤에 데이터를 추가 하고, 현재 위치(_heap 의 맨뒤) 를 구한다음 while 을 돕니다. 조건은 now가 0보다 큰 동안 
+now가 0이 된다면 _heap 의 맨앞, 꼭대기까지 온것이기 때문에 반복을 멈춥니다. 
+now의 부모노드의 인덱스를 구합니다(next). now 의 데이터와 next 의 데이터를 비교해서 now 가 작다면 여기가 추가된 데이터가 있을 자리이니까 break; 
+아니라면 두 데이터를 교체(STL 의 ::swap을 이용해서 편하게) 후 now를 next로 인덱스도 바꿔주고 반복문 처음으로 돌아갑니다. 
+
+다음은 pop() 입니다. pop은 즉 이전시간에서 최상위 데이터 꺼내기입니다. 
+
+
+과정은 일단 최상위 데이터를 꺼낸 다음 그냥 이상태에서는 트리 구조가 깨지기 때문에 
+트리의 가장 뒤에 있는 꼬꼬맹이를 최상위 노드로 가져옵니다. 먼저 트리의 구조라도 맞춰주고 시작한다는 겁니다. 
+
+	void pop()
+	{
+		_heap[0] = _heap.back();
+		_heap.pop_back();
+
+		int now = 0;
+
+		while (true)
+		{	
+			int left = now * 2 + 1;
+			int right = now * 2 + 2;
+
+			// 리프에 도달한 경우 
+			// 일단 왼쪽과 비교 
+			if (left >= _heap.size())
+				break;
+
+			int next = now;
+
+			if (_heap[next] < _heap[left])
+				next = left;
+
+			// now 와 left 중 승자가 이번엔 오른쪽과 비교 
+
+			// 그 전에 right 가 유효한지 체크 
+			if (right < _heap.size() && _heap[next] < _heap[right])
+				next = right;
+
+			// 왼쪽/오른쪽 두 값모두 현재값 보다 작으면 종료
+			if (next == now)
+				break;
+			
+			// 데이터 스왑
+			::swap(_heap[now], _heap[next]);
+			now = next;
+		}
+	}
+
+_heap 의 최상위 데이터를 확인하는것은 top() 에 있으니 pop 에서는 데이터를 삭제하는 부분부터 시작합니다. 
+먼저 _heap 의 가장 끝의 값을 0번 인덱스로 복사 한 후 pop_back 을 했습니다. 가장뒤에 있던 노드의 인덱스가 0번이라고 now 에 기록합니다. 
+이제 while을 돕니다. now 로 부터 왼쪽, 오른쪽 자식노드의 인덱스를 left, right 로 구합니다. 그리고 다음번 시도때 now의 노드가 이동할 인덱스라는 의미에서 next 를 만들어 줬습니다.
+일단은 next의 값은 now 입니다. 
+이제 좌우 노드의 값과 now의 값을 비교해야하는데 그 전에 예외처리를 해줘야 하는데 어떤 상황이냐면 만약 now가 리프까지 가서 더이상 
+left, right 인덱스가 유효하지 않을때 입니다. 
+여러가지 방법이 있겠지만 여기서는 왼쪽 체크 비교 후 오른쪽 체크 비교 하는식으로 하겠습니다. 
+왼쪽 체크를 하는데 left 가 _heap의 전체 사이즈 보다 크거나 같다면 유효하지 않은 범위이기 때문에 바로 break 해줍니다. 이때 now 는 리프에 도달한겁니다.
+이 체크를 통과하면 왼쪽 자식 노드는 유효합니다. 이제 next의 값과 left 의 값을 비교해서 left 가 더 크다면 next 에 left 를 기록합니다. 
+이번에는 오른쪽을 체크 비교할 차례입니다. 마찬가지로 right 가 _heap의 사이즈 보다 작아야 하고 그리고 next의 값과 right 의 값을 비교해서 
+right 값이 더 크다면 next 에 right 를 기록합니다. 
+이렇게 구한 next 와 now 의 값을 swap 하고 now 도 next 로 변경합니다. 
+
+
+이제 프로젝트를 빌드 하고 실행 해보면 처음 실습했던때와 마찬가지고 큰 숫자 순서로 정렬되서 출력됩니다.
+
+그러면 다음 단계로 큰순서 대로 정렬이 아니라 작은 순서로 정렬을 하고 싶다면 템플릿 옵션을 추가해주면 되었었는데 
+이부분은 아직 데이터 타입과 컨테이너 종류만 설정할 수 있었습니다. 
+어느 기준으로 정렬할지도 추가해주겠습니다. 
+
+Priority_queue 의 템플릿을 조금 수정해주겠습니다. 지금 만들었던 부분뒤에 추가합니다. 
+
+template<typename T, typename Container = vector<T>, typename Predicate = less<T>>
+class Priority_queue
+{
+	// ... 
+
+private:
+	// ... 
+	Predicate 		_predicate = {};
+}
+멤버 변수로도 받아줍니다. 
+
+이걸 어떻게 사용하냐면 지금 만들었던 코드중에 값을 비교하는 부분이 하드 코딩으로 비교 하던곳을 _predicate 로 감싸주면 됩니다. 
+
+// 예시 
+
+void push(const T& value)
+{
+	// ... 
+
+	if (_heap[now] < _heap[next])
+				break;
+	// 이 부분을 아래와 같이 변경 
+	if (_predicate(_heap[now], _heap[next]))
+				break;
+}
+
+이렇게 pop 에서도 next 와 left 를 비교하는 곳, next 와 right 를 비교하는곳을 _predicate 로 감싸주면 됩니다. 
+
+기본설정인 less 는 왼쪽이 작다는 의미입니다. less 와 반대인 greater 로 설정해주면 작은 수부터 정렬이 될것입니다. 
+
+
+이렇게 해서 우선순위 큐를 구현해보았습니다. 앞으로도 가장 작은 순서, 가장 큰 순서로 정렬되어 데이터를 뽑아야 한다면 
+이 우선순위 큐를 활용한다는것을 떠올려주면 좋겠습니다.
