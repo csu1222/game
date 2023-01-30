@@ -12,7 +12,9 @@ void Player::Init(Board* board)
 
 	//Bfs();
 
-	AStar();
+	//AStar();
+
+	AStar_2();
 }
 
 void Player::Update(int32 deltaTick)
@@ -347,6 +349,151 @@ void Player::AStar()
 	}
 
 	// _path를 뒤집는다
+
+	std::reverse(_path.begin(), _path.end());
+}
+
+void Player::AStar_2()
+{
+	Pos start = _pos;
+
+	Pos dest = _board->GetExitPos();
+
+
+	enum
+	{
+		DIR_COUNT = 8,
+	};
+
+	const int32 size = _board->GetSize();
+
+	Pos front[] =
+	{
+		Pos{ -1, 0 },	// 위
+		Pos{  0,-1 },	// 왼쪽
+		Pos{  1, 0 },	// 아래
+		Pos{  0, 1 },	// 오른쪽
+		Pos{ -1,-1 },	// 왼-위
+		Pos{  1,-1 },	// 왼-아래
+		Pos{  1, 1 },	// 오른-아래
+		Pos{ -1, 1 },	// 오른-위
+	};
+
+	int32 cost[] =
+	{
+		10,
+		10,
+		10,
+		10,			// 여기까지 위,왼,아래,오른 코스트
+		14,
+		14,
+		14,
+		14,			// 여기까지는 대각선 코스트
+	};
+
+
+
+	// 클로즈 리스트
+	map<Pos, bool> closed;
+	//vector<vector<bool>> closed(size, vector<bool>(size, false));
+
+	// 오픈 리스트
+	priority_queue<PQNode, vector<PQNode>, greater<PQNode>>	pq;
+	// 해당 노드 까지 최선의 코스트 합
+	 map<Pos, int32> best;
+	//vector<vector<int32>> best(size, vector<int32>(size, INT32_MAX));
+
+	// 방문한 노드들의 부모 노드
+	map<Pos, Pos> parent;
+	// 초기값
+	{
+		int32 g = 0;
+		int32 h = 10 * (abs(dest.y - start.y) + abs(dest.x - start.x));
+
+		pq.push(PQNode{ g + h , g , start });
+		//best[start.y][start.x] = g + h;
+		best[start] = g + h;
+ 		parent[start] = start;
+	}
+
+	// while 루프
+
+	while (pq.empty() == false)
+	{
+		// 최선의 노드 선택
+		PQNode node = pq.top();
+		pq.pop();
+
+		// 노드가 이전에 발견했던 노드인지 
+		// 이후에 발견한 노드가 혹시 코스트가 더 좋은지 체트
+
+		/*if (closed[node.pos.y][node.pos.x])
+			continue;
+		if (best[node.pos.y][node.pos.x] < node.f)
+			continue;*/
+
+		if (closed.find(node.pos) != closed.end())
+			continue;
+		if (best.find(node.pos) != best.end() && best[node.pos] < node.f)
+			continue;
+
+		// 방문
+		// closed[node.pos.y][node.pos.x] = true;
+
+		closed[node.pos] = true;
+
+		// 목적지에 도달 했으면 종료
+		if (node.pos == dest)
+			break;
+
+		// 방향따라 루프
+		for (int dir = 0; dir < DIR_COUNT; dir++)
+		{
+			// 다음 방향의 노드 
+			Pos nextNode = node.pos + front[dir];
+			
+			// 다음 노드로 갈 수 있는지 체크
+			if (CanGo(nextNode) == false)
+				continue;
+			
+			// 다음 노드의 비용 계산 
+			int32 g = node.g + cost[dir];
+			int32 h = 10 * (abs(dest.y - nextNode.y) + abs(dest.x - nextNode.x));
+			
+			// 다음 노드가 이전에 발견한것보다 좋은 코스트 인지
+			/*if (best[nextNode.y][nextNode.x] <= g + h)
+				continue;*/
+
+			if (best.find(nextNode) != best.end() && best[nextNode] <= g + h)
+				continue;
+
+			// 코스트가 좋다면 오픈리스트에 추가 
+			pq.push(PQNode{ g + h , g , nextNode });
+			parent[nextNode] = node.pos;
+			//best[nextNode.y][nextNode.x] = g + h;
+			best[nextNode] = g + h;
+		}
+	}
+
+	// _path에 담기 
+	
+	// 거꾸로 담을거임
+
+	// 초기화 
+	_path.clear();
+	_pathIndex = 0;
+
+	Pos pos = dest;
+
+	while (true)
+	{
+		_path.push_back(pos);
+
+		if (pos == parent[pos])
+			break;
+
+		pos = parent[pos];
+	}
 
 	std::reverse(_path.begin(), _path.end());
 }
