@@ -1,0 +1,523 @@
+
+
+        이진 탐색 트리 
+
+
+지난시간에 이어서 본격적으로 이진 탐색 트리를 배워보겠습니다. 
+
+이전 시간에서 배운 이진 탐색은 사실 이번시간의 맛보기 였습니다. 
+이진 탐색을 배열을 사용해서 실습 했었는데 이러면 중간에 데이터를 추가 삭제하는것이 어렵기 때문에 트리 구조 까지 와야 한다고 했습니다. 
+
+이진 탐색 트리에서 이진 트리라는것은 부모 노드 아래로 최대 두개의 자식노드가 올 수 있는 구조 라고했습니다. 
+
+     [ ]
+   [ ] [ ] 
+
+이런 구조는 힙 트리를 배울때도 알아 봤으니까 비슷하게 구현할 수 있을것입니다. 
+그런데 힙 트리 에 비해서 달라져야 할 내용은 부모노드 기준으로 왼쪽에 오는 자식노드는 부모노드보다 확실히 작아야 하고 
+오른쪽 노드는 부모 노드보다 큰 값이 와야 합니다. 
+그리고 이 구조는 루트 노드와 직속 자식노드에만 적용되는것이 아니라 이후로도 계속 적용되는 내용입니다.
+
+// 잘못된 예    9 가 10 보다 오른쪽에 있으면 잘못된 이진 탐색 트리 
+        [10]
+    [5]      [20]
+           [9]  [30]
+
+
+-- 실습 
+
+실습을 할 BinarySearchTree 라는 클래스를 Algorithm 프로젝트에 추가 해주겠습니다. 
+
+
+이제 이진 탐색 트리를 구현해볼건데 이 트리는 기본적으로 노드라는 개념을 가지고 만들었습니다. 
+
+- 노드 
+struct Node
+{
+	Node*	parent = nullptr;
+	Node*	left = nullptr;
+	Node*	right = nullptr;
+	int		key = {};
+};
+
+지금은 왼쪽 오른쪽 자식노드와 종종 필요할수도 있는 parent 그리고  key 를 들고 있습니다. 그런데 이때 key 말고도 vlaue 라는 실제 데이터를 같이 들고 있을수 있는데 
+이번에는 그냥 key가 곧 value 인 걸로 취급 하겠습니다. 
+
+그리고 key 의 타입도 그냥 int 로 만들었는데 범용적으로 사용하려면 템플릿 타입으로 만들어 줘도 될것입니다. 
+
+이제 이렇게 만든 노드를 가지고 BinarySearchTree 를 구현해보겠습니다. 
+먼저 이 BinarySearchTree 객체는 루트 노드를 들고 있을겁니다. 루트 노드만 들고 있으면 루트로 부터 연결된 전체 트리를 알 수 있을겁니다. 
+
+private:
+    Node*   _root = nullptr;
+
+- 인서트
+다음으로 가장 먼저 만들어 볼 기능은 Insert 입니다. 트리에 노드를 추가하는 기능입니다. 
+
+void BinarySearchTree::Insert(int key)
+{
+	// 인자로 받은 key 를 들고 있는 새로운 노드를 만듭니다.
+	Node* newNode = new Node();
+	newNode->key = key;
+
+	// 가장 먼저 루트 노드가 nulltpr 이라면 새로 추가된 노드가 루트노드가 됩니다.
+	if (_root == nullptr)
+	{
+		_root = newNode;
+		return;
+	}
+
+	// 트리의 리프까지 내려갈것입니다. 
+	Node* node = _root;
+	Node* parent = nullptr;
+
+	// node 가 nullptr이 아닐때 까지 내려간다는 것은 트리의 가장 리프까지 간다는 말입니다. 
+	while (node)
+	{
+		parent = node;
+		if (key < node->key)
+			node = node->left;
+		else
+			node = node->right;
+	}
+
+	// 위의 while을 통과했다면 node는 트리의 리프이고 parent 는 리프 노드의 부모노드입니다.
+	newNode->parent = parent;
+
+	// keyNode 와 parent 의 key 값을 비교해서 왼쪽, 오른쪽을 정합니다. 
+	if (newNode->key < parent->key)
+		parent->left = newNode;
+	else
+		parent->right = newNode;
+}
+
+이렇게 Insert 함수를 간단하게 만들었습니다. 이 방법 말고도 구현하느 방법은 더 많다고 합니다. 
+예를들어서 stuct Node 가 자신이 리프노드인지 아닌지를 bool 타입 변수로 들고 있게 해서 
+이진 탐색 트리 의 리프가 그냥 nullptr 이 아닌 더미 노드를 만들어 놓는 방법도 있습니다. 이 방법은 이전에 연결 리스트를 구현할때와 비슷한 방법입니다. 
+
+일단 지금 실습에서는 리프노드를 그냥 nullptr로 비워놓은 구조로 만들겠습니다. 
+
+이렇게 만든 Insert 를 어떤 식으로 사용하는지 Algorithm.cpp 에 BinarySearchTree 를 include 해서 사용해보겠습니다. 
+
+// Algorithm.cpp
+// ... 
+#include "BinarySearchTree.h"
+
+int main()
+{
+	BinarySearchTree bst;
+
+	bst.Insert(10);
+	bst.Insert(20);
+	bst.Insert(30);
+}
+
+일단은 이렇게 데이터를 추가해보았습니다. 
+
+추가하긴 했는데 정상적으로 추가되었는지 너무 궁금합니다. 확인하려면 출력을 해보긴 해야할겁니다. 
+
+- 트리 출력 
+테스트용으로 출력 함수를 만들어 주겠습니다. 
+그런데 생각해보면 배열은 그냥 데이터 순서대로 쭉 출력해주면 되었지만 트리같은경우는 어떤 방식으로 출력해야 할지 생소합니다. 
+
+트리를 출력하는데 몇가지 데이터를 출력하는 순서 정책이 있습니다.
+
+void BinarySearchTree::Print_Inorder(Node* node)
+{
+	// 전위 순회 (preorder traverse)
+	// 중위 순회 (inorder )
+	// 후위 순회 (postorder)
+
+	//   [중]
+	// [좌][우]
+
+	if (node == nullptr)
+		return;
+
+	cout << node->key << endl;
+
+	Print_Inorder(node->left);
+	Print_Inorder(node->right);
+}
+
+여기서는 cout 으로 출력하는것을 노드를 방문했다고 치겠습니다. 
+그럴때 위에서 먼저 node 자신을 먼저 방문한 다음 노드의 왼쪽 , 오른쪽 순으로 재귀적으로 접근하는것이 전위 순회법입니다. 
+
+중위 순회법은 
+	Print_Inorder(node->left);
+
+	cout << node->key << endl;
+	
+    Print_Inorder(node->right);
+이렇게 먼저 왼쪽에 접근부터 하고 자신을 방문 후 오른쪽으로 접근 하는 방법입니다. 
+
+후위 순회법은 
+	Print_Inorder(node->left);
+
+    Print_Inorder(node->right);
+
+	cout << node->key << endl;
+이런식입니다. 
+
+이렇게 보면 이 세가지가 뭘 말하는지 잘 외워지지 않습니다. 그래서 강사님은 
+   [중]
+ [좌][우]
+라는 구조를 기본으로 외우고 
+
+전위 : [중]이 앞에 온다.
+중위 : [중]이 가운데 온다.
+후위 : [중]이 뒤에 온다.
+
+라고 외우셨다고 합니다.
+
+일단 이렇게 만들고 다시 Print_Inorder 를 그냥 실행하면 _root 부터 순회하도록 오버로딩 해주겠습니다. 
+
+public:
+	void Print_Inorder() { Print_Inorder(_root); }
+	void Print_Inorder(Node* node);
+
+이렇게 하고 다시 Algorithm.cpp 로 와서 만들었던 bst 를 순회 출력 해보겠습니다. 
+
+
+int main()
+{
+	BinarySearchTree bst;
+
+	bst.Insert(10);
+	bst.Insert(20);
+	bst.Insert(30);
+
+	bst.Print_Inorder();
+}
+
+// 결과는 10, 20, 30 순으로 출력 
+현재 구조는 이런식인겁니다. 
+    [10]
+      [20]
+        [30]
+전위 순회법 특성상 자신을 방문하고 왼쪽 먼저 가야하는데 현재 왼쪽 노드들이 없어서 오른쪽으로 간 다음 자신 출력하고를 반복하고 있는 상태입니다. 
+
+지금 처럼 출력하면 그냥 숫자의 나열로 출력되기 때문에 가독성이 안좋습니다. 
+이걸 도와줄 Print 함수들을 만들어 주겠습니다. 
+
+	void Print();
+	void Print(Node* node, int x, int y);
+
+그리고 콘솔에 좌표를 이용해서 데이터의 위치를 잡아주기 위해 Maze 프로젝트의 ConsoleHelper::SetCursorPosition 를 가져다 사용하겠습니다.
+
+// BinarySearchTree.cpp 
+void SetCursorPosition(int x, int y)
+{
+	HANDLE output = ::GetStdHandle(STD_OUTPUT_HANDLE);
+	COORD pos = { static_cast<SHORT>(x), static_cast<SHORT>(y) };
+	::SetConsoleCursorPosition(output, pos);
+}
+
+멤버 함수가 아니라 그냥 BinarySearchTree.cpp 에서 사용할 헬퍼 함수로 만들었습니다. 
+그리고 이리저리 만들다 보니 이렇게 만드는게 출력 결과물이 그럴듯 하다고 합니다. 
+
+void BinarySearchTree::Print(Node* node, int x, int y)
+{
+	if (node == nullptr)
+		return;
+
+	SetCursorPosition(x, y);
+	cout << node->key << endl;
+	Print(node->left, x - (5 / (y + 1)), y + 1);
+	Print(node->right, x + (5 / (y + 1)), y + 1);
+}
+
+커서위치를 설정해주는 부분은 전부 이해할 필요 없이 강사님의 시행착오상 출력했을때 그럴듯 하게 나오는 수식이라고 합니다. 
+여기서 x 는 콘솔창에서 한줄에 가로 방향으로 얼마나 가 있는지 y 는 콘솔창의 줄을 의미합니다. 
+
+그렇게 해서 기본 Print 함수에서는 _root 노드부터 시작해서 10, 0 좌표에 출력하기 시작할겁니다. 
+
+public:
+	void Print() { Print(_root, 10, 0); }
+	void Print(Node* node, int x, int y);
+
+Algorithm.cpp 의 main 함수에 
+
+bst.Print(); 
+라고만 실행해보면 콘솔에 트리 비슷한 모양으로 출력을 해주는걸 알 수 있습니다. 
+
+잠시 우리가 실습한걸 시각적으로 확인 할 수 있게 Print 관련 기능들을 만들어 봤습니다. 
+
+이제 다시 Insert 에 이어서 본격적으로 이진 탐색 트리의 기능들을 만들어 보겠습니다. 
+
+- 탐색 기능
+먼저 Insert 로 데이터를 추가했다면 추가되어 있는 데이터 중에서 원하는 데이터가 있는지 탐색(Search) 를 해봐야 합니다. 
+
+탐색을 했다면 찾은 결과물을 반환 할겁니다. 그래서 반환 타입은 Node* 로 해줄것이고 찾는 노드를 key기준으로 찾을것 입니다. 
+그래서 시그니쳐는 이렇게 될것이고 
+
+	Node* Search(Node* node, int key);
+
+원하는 값을 찾는 방법도 Insert 와 비슷할것입니다. Insert 에서도 루트 노드부터 좌 우 노드로 내려가면서 추가될 노드의 위치를 찾아 갔었습니다. 
+
+Node* BinarySearchTree::Search(Node* node, int key)
+{
+	if (node == nullptr || key == node->key)
+		return node;
+
+	if (key < node->key)
+		return Search(node->left, key);
+	else
+		return Search(node->right, key);
+}
+코드가 되게 간략합니다. 재귀함수를 사용해서 그런데 이진 탐색 트리 또는 트리 자체가 루트 노드 기준으로만 트리인것이 아니라 자식 노드들도 
+자신이 루트노드인 트리라고 볼 수도 있습니다. 이걸 서브 트리 라고 했습니다. 
+
+그래서 가장 먼저 자신이 nullptr 즉 인자로 받은 key 와 같은 값을 가진 노드를 발견하지 못했다면 nullptr을 반환 하거나 
+아니면 인자와 같은 값을 가진 노드를 발견했으면 그 노드를 반환합니다. 
+일단 이 체크를 하고 나서 조건으로 들어갑니다. 
+
+if 문 까지 왔으면 인자 key 가 node의 key 보다 크거나 작다는 이야기입니다. 작다면 현제노드의 왼쪽 자식 노드로 다시 Search 를 하고 
+크다면 오른쪽 자식 노드로 Search 를 진행합니다. 
+
+이렇게 재귀함수를 사용해서 구현할 수 있는데 만약 재귀함수를 사용하고 싶지 않다면 어떻게 해야할까요 
+
+
+Node* BinarySearchTree::Search2(Node* node, int key)
+{
+	while (node && key != node->key)
+	{
+		if (key < node->key)
+			node = node->left;
+		else
+			node = node->right;
+	}
+	return node;
+}
+이렇게 while 문으로도 구현 할 수 있습니다. node 가 nullptr 이 아니고 key 가 node->key 와 같지 않을 동안 루프를 돕니다. 
+즉 node를 못찾았거나 찾았다면 루프를 끝냅니다. 
+
+루프 안에서는 key 값을 비교해서 node를 왼쪽으로 갈것인지 오른쪽으로 갈것인지를 골라 주고 있습니다. 
+
+재귀함수로 구현한 것과 거의 비슷한 원리로 만들어졌습니다.
+
+두 방식 재귀 함수 방식과 while 방식의 차이는 가독성과 성능에 차이가 있습니다. 
+그냥 딱 읽기에는 재귀 함수가 더 쉽게 읽히는 대신 트리의 전체 크기에 비례해 스택 메모리를 많이 쓰게 되고 
+while 방식은 조금 가독성이 떨어지는 대신 스택메모리를 추가로 사용하지 않고 탐색을 진행합니다. 
+
+- 최소값, 최대값 구하기, 다음값 구하기 기능
+이어서 만들 기능은 트리를 구성하고 있는 노드들 중 값이 가장 작은 노드, 가장 큰 노드 를 구하는 함수와 
+인자로 준 노드의 바로 다음 값을 구하는 함수를 만들어 보겠습니다.
+
+Min, Max 함수들 부터 생각해보면 가장 작은수 라는것은 이진 탐색트리에서 왼쪽 으로만 계속 타고들어간 끝 노드거나 오른쪽으로 계속 타고들어간 노드를 
+말하는겁니다. 
+
+Node* BinarySearchTree::Min(Node* node)
+{
+	if (node->left == nullptr)
+		return node;
+	
+	Min(node->left);
+}
+
+Node* BinarySearchTree::Max(Node* node)
+{
+	if (node->right == nullptr)
+		return node;
+
+	Max(node->right);
+}
+
+이렇게 다음 노드가 nullptr 일때 까지 쭉 타고 내려갑니다. 
+이걸 다시 while 문으로 구현하면 이렇습니다.
+
+Node* BinarySearchTree::Min(Node* node)
+{
+	while (node->left)
+		node = node->left;
+
+	return node;
+}
+
+Node* BinarySearchTree::Max(Node* node)
+{
+	while (node->right )
+		node = node->right;
+
+	return node;
+}
+
+그러면 인자로 준 노드의 다음값을 찾는 Next 는 어떻게 구현할까요?
+이런 이진 탐색 트리가 있다고 해보겠습니다. 
+		[20]
+	[10]    [30]
+	      [25][40]
+		        [50]
+
+이럴때 루트 노드의 Next 는 25 일겁니다. 이걸 코드로 어떻게 구현해야 하냐면 
+맨 처음에 일단 오른쪽으로 한번 내려갑니다. 그리고 30 에서 왼쪽 값이 있다면 왼쪽으로 내려갑니다. 현재 25 인데 이제 자신보다 더 왼쪽 노드가 없습니다. 
+그러면 자신이 Next 값인겁니다. 
+즉 한번 오른쪽으로 내려간다음 왼쪽으로 끝까지 내려가면 20 보다는 큰 값중 가장 작은 값을 찾을 수 있습니다. 
+
+그리고 예외상황도 있는데 인자로 준 노드 오른쪽 자식 노드가 없을 상황입니다. 
+		 [20]
+	[10]      [30]
+	       [25]   [40]
+		    [26]    [50]
+이런 구조의 이진 탐색 트리가 있다고 했을때 26 이라는 값을 가진 노드의 Next 를 찾으려고 했습니다 그러면 26 의 오른쪽 자식노드가 없으니 그냥 Next 가 없는 것일까요?
+아닙니다. 26 다음은 30 입니다. 그러면 어떤 로직으로 30이 Next라는것을 찾을 수 있을지 생각 해보면 
+인자node 의 부모를 먼저 구해보겠습니다. 부모는 지금 25 입니다. 이제 이 부모가 일단 존재하는지 그리고 내가 부모의 오른자식인지 (즉 부모가 나보다 작은지) 를 체크해서 
+맞다면 자신을 부모로 치환하고 부모는 부모의 부모로 치환합니다. 그러면 다음 반복때의 자신은 25 이고 부모는 30 입니다. 그러면 부모는 존재하고
+자신은 부모의 왼쪽 자식이니까 반복을 빠져나옵니다. 그리고 부모에 해당하는 노드를 반환하면 처음 찾고자 했던 26 의 Next 값이 나옵니다. 
+
+말로 설명하니 이해가 잘 가지 않습니다. 
+
+한가지 더 예를 들어 보면 이번에는 50 의 Next 를 구해보겠습니다. 50 의 오른 자식 노드가 없으니까 부모를 봅니다. 부모가 자신 보다 작습니다. 
+한단계 더 거슬러 올라가면 아직작고 루트 노드인 20 까지 거슬러 올라가보면 20 의 부모노드는 없습니다.(nullptr) 이러면 부모가 nullptr 인지의 체크를 
+통과하지 못하고 nullptr 을 반환하게 됩니다. 
+
+코드로 보면 이렇습니다.
+
+Node* BinarySearchTree::Next(Node* node)
+{
+	if (node->right)
+		return Min(node->right);
+
+	Node* parent = node->parent;
+
+	while (parent && node == parent->right)
+	{
+		node = parent;
+		parent = parent->parent;
+	}
+	
+	return parent;
+}
+
+한번 오른쪽으로 간다음 왼쪽끝 값을 구하는것을 Min(node->right) 로 표현한것도 개인적으로 참신했습니다. 
+
+그리고 오른 자식 노드가 없을 경우의 처리도 스스로는 떠올리지 못한 방법입니다. 
+
+
+- 삭제 기능 
+다음은 삭제 기능입니다. 그런데 이 삭제 기능이 가장 어렵고 까다롭다고 합니다. 
+노드를 추가할때는 자신의 위치만 찾아서 추가되는데 이것과는 상황이 다릅니다. 
+		 [20]
+	[10]      [30]
+	       [25]   [40]
+		    [26]    [50]
+왜 까다로운지 일단 삭제할때의 세가지 상황이 있습니다. 
+일단 삭제할 데이터를 찾는데 그런데 만약 삭제할 대상이 child 가 하나도 없다면 가장 이상적인 상황입니다. (10을 삭제하는 상황)
+그러면 그냥 삭제할 대상과 부모의 커넥션을 끊고 대상을 날려주면 끝입니다. 
+- 10 을 삭제 한다면 20 과의 연결만 끊고 10을 날려주면 끝
+
+두번째 케이스로 지워야 할 대상의 child 가 딱 하나만 있다고 해보겠습니다. (25 를 삭제한다고 하겠습니다.)
+그러면 삭제할 대상을 지우고 끝이 아니라 하나 있는 자식 노드를 자신의 자리로 올리고 삭제되면 됩니다. 
+- 26 을 25 자리에 올리고 25는 삭제 
+
+그나만 자식이 아예 없거나 하나만 있는경우는 다행이라고 할 수 있습니다. 하지만 마지막으로 자식이 둘 다 있는경우를 보겠습니다. 
+
+마지막 양쪽 자식이 모두 있는 노드를 삭제하려고 한다면 (20 을 삭제한다고 하겠습니다.)
+이 상황에서는 자신의 자리에 그냥 두 자식중 큰 값을 가진 노드를 올리는것이 아니라 트리 전체에서 자신의 다음 값(Next) 를 자기 위치로 올려야 합니다. 
+삭제할 노드의 Next 노드를 삭제할 노드에 복사를 해줍니다. 그리고 Next 노드를 삭제해주면 되는데 이 부분을 역시 재귀적으로 처리해야 합니다. 
+- 20의 자리에 25 를 복사하고 나서 25 를 삭제하는데 하나의 자식 26 이 있기 때문에 26을 25 자리로 올리고 삭제합니다.
+
+이제 코드로 구현해보겠습니다. 
+
+Delete 함수를 두가지 만들어 줄건에 인자로 key 를 받는 버전과 Node* 자체를 받는 버전을 만들어 줄겁니다. 
+
+void BinarySearchTree::Delete(int key)
+{
+	Node* deleteNode = Search(_root, key);
+	Delete(deleteNode);
+}
+
+void BinarySearchTree::Delete(Node* node)
+{
+
+}
+
+key 를 받는 버전에서 아까 만들었던 Search 함수를 이용해서 트리안에서 key 값을 가진 노드를 탐색합니다. 그리고 그 노드를 노드를 받는 버전의 Delete에 넣습니다. 
+
+다음으로 만들어 줄것은 Replace 라는 헬퍼 함수입니다. 이 함수가 하는일은 인자로 두개의 Node* 를 받아서 첫번째 인자의 자리에 두번째 인자를 교체해서 넣는겁니다. 
+이 기능은 위에서 Delete 할때의 세가지 상황에서 자주 쓰이기 때문에 따로 함수로 빼주는겁니다. 
+
+void BinarySearchTree::Replace(Node* u, Node* v)
+{
+	if (u->parent == nullptr)
+		_root = v;
+	else if (u == u->parent->left)
+		u->parent->left = v;
+	else
+		u->parent->right = v;
+
+	if (v)
+		v->parent = u->parent;
+}
+
+코드를 언뜻 보면 잘 읽히지 않습니다. 그래서 한줄씩 천천히 읽어보겠습니다. 먼저 이 함수는 u 가 대체될 노드이고 v 가 u 자리에 들어갈 노드입니다. 
+
+u의 부모가 nullptr 인지를 체크해주고 있는데 이 뜻은 u가 루트 노드인지를 확인하는겁니다. 그래서 이 조건에 맞는다면 _root = v 로 교체하고 있습니다. 
+그리고 u의 부모 노드가 있다고 했을때도 두가지 경우를 체크해주고 있습니다. u가 u의 부모의 왼쪽 자식인지 오른쪽 자식인지를 알아야 부모가 v를 가리킬때 
+어떻게 가리켜야 할지 알 수 있습니다. 
+
+그리고 나서 v의 부모가 u의 부모라고도 가리켜 줘야하는데 이때 v가 nullptr 인지 아닌지를 체크합니다.
+왜 null 체크를 하냐면 만약 v가 nullptr 이라고 한다면 삭제할 노드의 자식노드가 없을때 일텐데 그 때에도 이 Replace 를 같이 사용할수 있도록 하기 위해서입니다. 
+자식이 있을때는 부모를 가리켜 줘야 하고 그게 아니고 자식이 없다면 v 는 nullptr 일것이기 때문에 parent 를 가리킬 필요가 없습니다. 
+
+이제 Delete 를 도와줄 Replace 도 만들었으니 다시 Delete 를 만들어 보겠습니다.
+
+
+void BinarySearchTree::Delete(Node* node)
+{
+	if (node == nullptr)
+		return;
+
+	if (node->left == nullptr)
+		Replace(node, node->right);
+	else if (node->right == nullptr)
+		Replace(node, node->left);
+	else
+	{
+		// 다음 데이터 찾기
+		Node* next = Next(node);
+		node->key = next->key;
+		Delete(next);
+	}
+}
+
+일단 먼저 지우려고 하는 노드가 nullptr 이라면 뭔가 잘못된것이기 때문에 에러메세지를 출력한다던가 크래쉬를 내야 하는데 일단 그냥 리턴하는걸로 하겠습니다. 
+
+그리고 나서 node->left 가 nullptr 인지를 묻고 있습니다. 이게 무슨의미냐면 
+
+		 [20]
+	[10]      [30]
+	       [25]   [40]
+		    [26]    [50]
+
+이런 트리에서 지울 트리가 10 이거나 25 이거나 40일때를 말합니다. 25, 40 일때는 오른쪽 자식이 있지만 10일때는 오른쪽 자식도 없는데 
+
+삭제기능을 설명할때 세가지 상황을 들면서 세가지 상황에 따라 코드를 짤수도 있지만 한번에 여러 상황을 포함해서 처리를 해줄 수 도 있습니다. 
+지금 이 경우에는 Replace 에서 v 가 nullptr 일때도 상정 했으니 node->left 가 nullptr 이라는 상황에서 모두 사용 가능합니다.
+
+왼쪽 자식이 없는 조건을 지나 왔으면 왼쪽 자식은 있다는 말이 됩니다. 
+그다음은 이번에 오른쪽 자식이 있는지를 체크합니다. 마찬가지로 Replace(node, node->left) 를합니다.
+
+이제 위의 두 조건을 지나왔으면 양쪽의 자식노드들이 모두 있는 경우 입니다. 
+이럴때는 지우고자 하는 노드의 next 를 복사하고 next를 지워 준다고 했습니다. 이 next를 지우는 곳을 재귀함수로 처라해서 next 의 자식노드가 어떻게 있던지 
+처리되도록 해주었습니다. 
+
+여기서 끝나면 좋겠지만 C++ 에서는 만든 객체는 손수 delete 해줘야 합니다. 이 delete 를 어디서 해줄지는 잘 생각해서 골라주면 되는데 
+Replace 가 끝날때 추가 해주면 될것 같습니다. 
+
+
+- 정리 
+이렇게 해서 이진 검색 트리를 한번 간략하게 구현해봤습니다. 실제 원하는 데이터를 넣어서 실행해보면 원하는 결과가 나올겁니다. 
+
+이 이진 검색 트리 자체를 만드는것이 대단히 중요한 것 이라기 보다는 한번쯤은 직접 구현해 보면서 코딩 연습이 되고
+그리고 다음에 배울 균형 이진 트리의 기초가 됩니다. 
+
+또 이렇게 만든 이진 검색 트리에서는 무언가 불만인점이 있습니다. 
+		 [20]
+	[10]      [30]
+	       [25]   [40]
+		    [26]    [50]
+
+이런 모델을 만들었던것 처럼 이 트리에 값을 넣는 순서에 따라 한쪽으로 치우쳐진 트리가 만들어 질 수도 있습니다. 
+한쪽으로 치우쳐진 이진 검색 트리는 장점이었던 탐색에 걸리는 시간복잡도가 그냥 배열일때 처럼 O(N) 에 가까워집니다. 
+이런 문제는 다음 시간에서 해결해 보겠습니다.
