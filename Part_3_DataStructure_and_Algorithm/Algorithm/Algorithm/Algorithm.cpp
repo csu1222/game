@@ -29,14 +29,12 @@ int main()
 	bst.Print();
 	this_thread::sleep_for(1s);
 
-	bst.Insert(40);
+	bst.Delete(20);
 	bst.Print();
 	this_thread::sleep_for(1s);
 
-	bst.Insert(50);
+	bst.Delete(10);
 	bst.Print();
 	this_thread::sleep_for(1s);
-
-
 
 }

@@ -27,6 +27,16 @@ void SetCursorColor(ConsoleColor color)
 	::SetConsoleTextAttribute(output, static_cast<SHORT>(color));
 }
 
+void ShowConsoleCursor(bool flag)
+{
+	HANDLE output = ::GetStdHandle(STD_OUTPUT_HANDLE);
+	CONSOLE_CURSOR_INFO cursorInfo;
+	::GetConsoleCursorInfo(output, &cursorInfo);
+	cursorInfo.bVisible = flag;
+	::SetConsoleCursorInfo(output, &cursorInfo);
+}
+
+
 BinarySearchTree::BinarySearchTree()
 {
 	_nil = new Node();
@@ -37,6 +47,13 @@ BinarySearchTree::BinarySearchTree()
 BinarySearchTree::~BinarySearchTree()
 {
 	delete _nil;
+}
+
+void BinarySearchTree::Print()
+{
+	::system("cls");
+	ShowConsoleCursor(false);
+	Print(_root, 10, 0);
 }
 
 void BinarySearchTree::Print(Node* node, int x, int y)
@@ -187,7 +204,7 @@ void BinarySearchTree::InsertFixup(Node* node)
 				//		[p(R)]   [u(B)]
 				//		  [n(R)]
 
-				if (node = node->parent->right) // Triangle 타입
+				if (node == node->parent->right) // Triangle 타입
 				{
 					node = node->parent;
 					LeftRotate(node);
@@ -215,12 +232,12 @@ void BinarySearchTree::InsertFixup(Node* node)
 				node = node->parent->parent;
 			}
 			else
-			{
+			{ 
 				//		     [pp(B)] 
 				//		 [u(B)]   [p(R)]  
 				//				[n(R)]
 
-				if (node = node->parent->left) // Triangle 타입
+				if (node == node->parent->left) // Triangle 타입
 				{
 					node = node->parent;
 					RightRotate(node);
@@ -246,28 +263,32 @@ void BinarySearchTree::Delete(int key)
 	Delete(deleteNode);
 }
 
+
+// 먼저 BST 삭제 실행
+// 
 void BinarySearchTree::Delete(Node* node)
 {
-	//if (node == nullptr)
-	//	return;
-
-	//if (node->left == nullptr)
-	//	Replace(node, node->right);
-	//else if (node->right == nullptr)
-	//	Replace(node, node->left);
-	//else
-	//{
-	//	// 다음 데이터 찾기
-	//	Node* next = Next(node);
-	//	node->key = next->key;
-	//	Delete(next);
-	//}
 	if (node == _nil)
 		return;
 	if (node->left == _nil)
+	{
+		Color color = node->color;
+		Node* right = node->right;
+
 		Replace(node, node->right);
+
+		if (color == Color::Black)
+			DeleteFixup(right);
+	}
 	else if (node->right == _nil)
+	{
+		Color color = node->color;
+		Node* left = node->left;
+
 		Replace(node, node->left);
+		if (color == Color::Black)
+			DeleteFixup(left);
+	}
 	else
 	{
 		// 다음 데이터 찾기 
@@ -275,6 +296,118 @@ void BinarySearchTree::Delete(Node* node)
 		node->key = next->key;
 		Delete(next);
 	}
+}
+
+// 먼저 BST 삭제 실행 ...
+// - Case 1) 삭제할 노드가 Red -> 그냥 삭제! 끝!
+// - Case 2) root가 DB -> 그냥 추가 Black 삭제! 끝!
+// - Case 3) DB의 sibling 노드가 Red
+// -- s = black, p = red (s <-> p 색상교환)
+// -- DB 방향으로 rotate(p)
+// -- goto other case
+// - Case 4) DB 의 sibling 노드가 Black && sibling의 양쪽 자식도 Black
+// -- 추가 Black을 Parent 에 이전 
+// -- p가 Red 였으면 Black 이 됨.
+// -- p가 Black 이었으면 DB가 됩.
+// -- s = red
+// -- p를 대상으로 알고리즘 이어서 실행 (p 가 DB가 되었을 경우)
+// - Case 5) DB의 silbling 노드가 Black && sibling의 near child =red , far child = black
+// -- s <-> near 색상교환
+// -- far 방향으로 rotate(s)
+// -- goto case 6
+// - Case 6) DB의 sibling 노드가 Black && sibling의 for child = red
+// -- p <-> s 색상교환 (이때 p가 red 였었다면 s -> far 가 연속으로 red 가됨)
+// -- far = black
+// -- rotate(p) DB 방향으로 
+// -- 추가 Black 제거 
+//
+void BinarySearchTree::DeleteFixup(Node* node)
+{
+	Node* x = node;
+	
+	// 인자 node 가 black 이었다면 DB인 상황
+	// [Case 1][Case 2] Fixup 할 노드가 red 라면? && Fixup 할 노드가 root 라면?
+	while (x != _root && x->color == Color::Black)
+	{
+		// 지금 Fixup 을 하고 있는 대상이 그 부모의 왼쪽 자식인지 오른쪽 자식인지 대칭적으로 체크
+		//       [p]
+		// [x(B)]    [s]
+		if (x == x->parent->left)
+		{
+			// [Case 3] sibling 의 색상이 Red라면?
+			Node* s = x->parent->right;
+			if (s->color == Color::Red)
+			{
+				s->color = Color::Black;
+				x->parent->color = Color::Red;
+
+				LeftRotate(x->parent);
+				s = x->parent->right;
+			}
+
+			// [Case 4] DB 의 sibling 노드가 Black && sibling의 양쪽 자식도 Black 이라면?
+			if (s->left->color == Color::Black && s->right->color == Color::Black)
+			{
+				s->color = Color::Red;
+				x = x->parent;
+			}
+			else
+			{ 
+				// Case 5) DB의 silbling 노드가 Black && sibling의 near child =red , far child = black
+				if (s->right->color == Color::Black)
+				{
+					s->left->color = Color::Black;
+					s->color = Color::Red;
+					RightRotate(s);
+					s = x->parent->right;
+				}
+				// Case 6) DB의 sibling 노드가 Black && sibling의 for child = red
+				s->color = x->parent->color;
+				x->parent->color = Color::Black;
+				s->right->color = Color::Black;
+				LeftRotate(x->parent);
+				x = _root;
+			}
+
+		}
+		else
+		{
+			Node* s = x->parent->left;
+			if (s->color == Color::Red)
+			{
+				s->color = Color::Black;
+				x->parent->color = Color::Red;
+
+				RightRotate(x->parent);
+				s = x->parent->left;
+			}
+
+			if (s->right->color == Color::Black && s->left->color == Color::Black)
+			{
+				s->color = Color::Red;
+				x = x->parent;
+			}
+			else
+			{
+				if (s->left->color == Color::Black)
+				{
+					s->right->color = Color::Black;
+					s->color = Color::Red;
+					LeftRotate(s);
+					s = x->parent->left;
+				}
+				s->color = x->parent->color;
+				x->parent->color = Color::Black;
+				s->left->color = Color::Black;
+				RightRotate(x->parent);
+				x = _root;
+			}
+		}
+
+	}
+	 
+	// 인자 node 가 red 였다면 black으로 색칠 
+	x->color = Color::Black;
 }
 
 // u 서브트리를 v 서브트리로 교체한다
@@ -300,8 +433,7 @@ void BinarySearchTree::Replace(Node* u, Node* v)
 	else
 		u->parent->right = v;
 
-	if (v)
-		v->parent = u->parent;
+	v->parent = u->parent;
 
 	delete u;
 }

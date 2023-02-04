@@ -29,7 +29,7 @@ public:
 	BinarySearchTree();
 	~BinarySearchTree();
 
-	void	Print() { Print(_root, 10, 0); }
+	void	Print();
 	void	Print(Node* node, int x, int y);
 
 	Node*	Search(Node* node, int key);
@@ -43,6 +43,7 @@ public:
 
 	void	Delete(int key);
 	void	Delete(Node* node);
+	void	DeleteFixup(Node* node);
 
 	// u 서브트리를 v 서브트리로 교체한다
 	void	Replace(Node* u, Node* v);
