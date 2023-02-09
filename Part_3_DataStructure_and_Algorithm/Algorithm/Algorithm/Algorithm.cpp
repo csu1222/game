@@ -6,53 +6,85 @@
 using namespace std;
 #include <thread>
 
-// 오늘의 주제 : 퀵 정렬 Quick Sort
+// 오늘의 주제 : 해시 테이블 Hash Table
 
-
-// [5][1][3][7][9][2][4][6][8]
-//  p
-//    low				   high
-int Partition(vector<int>& v, int left, int right)
+// 테이블
+void TestTable()
 {
-	// 피벗 , 로우, 하이 
-	int pivot = v[left];
-	int low = left + 1;
-	int high = right;
-
-	// low 와 high 가 교차되는 때 까지 반복 
-	while (low <= high)
+	struct User
 	{
-		// 1 단계
-		// - pivot >= arr[low] 일 동안 low 를 오른쪽으로 이동
-		while (low <= right && pivot >= v[low])
-			low++;
+		int userId = 0;		// 1 ~ 999
+		string userName;
+	};
 
-		// - pivot <= arr[high] 일 동안 high 를 왼쪽으로 이동
-		while (high >= left + 1 && pivot <= v[high])
-			high--;
+	vector<User> users;
+	users.resize(1000);
 
-		// 2 단계
-		// - low < high 라면 arr[low]와 arr[high] 데이터 교체
-		if (low < high)
-			swap(v[low], v[high]);
-	}
+	// 777 번 유저 정보 세팅
+	users[777] = User{ 777, "SeaBass" };
 
-	// 3 단계
-	// - high <= low 면 빠져나오고, pivot과 arr[high] 교체
-	swap(v[left], v[high]);
+	// 777 번 유저의 이름은 무엇입니까.
+	string name = users[777].userName;
 
-	return high;
+	cout << name << endl;
 }
 
-void QuickSort(vector<int>& v, int left, int right)
+// 해시
+void TestHash()
 {
-	if (left > right)
-		return;
-	
-	int pivot = Partition(v, left, right);
+	struct User
+	{
+		int userId = 0;		// 1 ~ 999
+		string userName;
+	};
 
-	QuickSort(v, left, pivot - 1);
-	QuickSort(v, pivot + 1, right);
+	vector<User> users;
+	users.resize(1000);
+
+	const int userId = 123456789;
+	int key = (userId % 1000);  // hash < 고유번호 
+
+	// 123456789 번 유저 정보 세팅
+	users[key] = User{ userId, "SeaBass" };
+
+	// 123456789 번 유저의 이름은 무엇입니까.
+	User& user = users[key];
+	if (user.userId == userId)
+	{
+		string name = user.userName;
+		cout << name << endl;
+	}
+
+}
+
+void TestHashTableChaining()
+{
+	struct User
+	{
+		int userId = 0;		// 1 ~ 999
+		string userName;
+	};
+
+	vector<vector<User>> users;
+	users.resize(1000);
+
+	const int userId = 123456789;
+	int key = (userId % 1000);  // hash < 고유번호 
+
+	// 123456789 번 유저 정보 세팅
+	users[key].push_back(User{ userId, "SeaBass" });
+	users[789].push_back(User{ 789, "Seonguk" });
+
+	vector<User>& Bucket = users[key];
+
+	for (User& user : Bucket)
+	{
+		if (user.userId == userId)
+		{
+			string name = user.userName;
+			cout << name << endl;
+		}
+	} 
 }
 
 int main()
@@ -69,5 +101,6 @@ int main()
 		v.push_back(randValue);
 	}
 
-	QuickSort(v, 0, v.size() - 1);
+	TestHashTableChaining();
+
 }
