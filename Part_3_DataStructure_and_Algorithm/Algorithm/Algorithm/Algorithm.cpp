@@ -6,94 +6,9 @@
 using namespace std;
 #include <thread>
 
-// 단원 주제 : 최소 스패닝 트리 Minimum Spanning Tree
-// 오늘의 주제 : 상호 배타적 집합 Disjoint Set
-
-// 다른 이름으로 
-// 유니온-파인드 Union-Find (합치기-찾기)
+// 주제 : 최소 스패닝 트리 Minimum Spanning Tree
 
 
-// 예시 
-// Lineage + Battleground (혼종!)
-// 사양
-// 혈맹전 + 서바이벌
-// 1인 팀 1000명까지 (팀ID 0 ~ 999)
-// 동맹 가능 (1번팀 + 2번팀 = 새로운 팀) 
-
-void LineageBattleground()
-{
-	struct User
-	{
-		int teamId;
-		// TODO
-	};
-
-	// TODO : UserManager
-	vector<User> users;
-	for (int i = 0; i < 1000; i++)
-	{
-		users.push_back(User{ i });
-	}
-
-	// 팀 동맹 
-	// user 1번 + user 5번 동맹
-	users[5].teamId = users[1].teamId;
-
-	// 초반 동맹은 인원이 적으니 단순해 보임 
-
-	// 하지만 후반에 결국 동맹이 커진다면?
-
-	// [1][2][3][4] .... [999]
-	// [1][1][1][1]...[2][2][2][2][2] ... [999]
-	
-	// 세력대 세력의 합병은?
-	for (User& user : users)
-	{
-		if (user.teamId == 1)
-			user.teamId = 2;
-	}
-
-	// 찾기 연산	O(1)
-	// 합치기 연산  O(N)
-}
-
-class NaiveDisjointSet
-{
-public:
-	NaiveDisjointSet(int n) : _parent(n)
-	{
-		for (int i = 0; i < n; i++)
-			_parent[i] = i;
-	}
-
-	// 니 대장이 누구니?
-	int Find(int u)
-	{
-		if (u == _parent[u])
-			return u;
-
-		return Find(_parent[u]);
-	}
-
-	// u와 v를 합친다 (일단 u가 v 밑으로)
-	void Merge(int u, int v)
-	{
-		// 일단 대장을 찾는다 
-		u = Find(u);
-		v = Find(v);
-
-		if (u == v)
-			return;
-
-		_parent[u] = v;
-	}
-
-private:
-	vector<int> _parent;
-};
-
-// Union-By-Rank 랭크에 의한 합치기 최적화 
-// 높이가 낮은 트리를 높이가 높은 트리 밑으로 병합
 class DisjointSet
 {
 public:
@@ -141,19 +56,95 @@ private:
 	vector<int> _rank;
 };
 
+struct Vertex
+{
+	// int data;
+};
+
+vector<Vertex> vertices;
+vector<vector<int>> adjacent; // 인접 행렬
+
+void CreateGraph()
+{
+	vertices.resize(6);
+	adjacent = vector<vector<int>>(6, vector<int>(6, -1));	// 초기값인 -1 짜리 간선은 연결되지 않은 간선
+
+	adjacent[0][1] = adjacent[1][0] = 15;
+	adjacent[0][3] = adjacent[3][0] = 35;
+	adjacent[1][2] = adjacent[2][1] = 5;
+	adjacent[1][3] = adjacent[3][1] = 10;
+	adjacent[3][4] = adjacent[4][3] = 5;
+	adjacent[3][5] = adjacent[5][3] = 10;
+	adjacent[5][4] = adjacent[4][5] = 5;
+}
+
+// u 에서 v로 가고 그 코스트를 나타낼 구조체
+struct CostEdge
+{
+	int cost;
+	int u;
+	int v;
+
+	bool operator<(CostEdge& other)
+	{
+		return cost < other.cost;
+	}
+};
+
+// 쿠르스칼 알고리즘 반환하는것은 완성된 최소 스패닝 트리의 코스트 합
+int Kruskal(vector<CostEdge>& selected)
+{
+	int ret = 0;
+
+	selected.clear();
+
+	// edges 에 그래프의 간선들을 긁어오고 코스트가 좋은 순서대로 정렬
+	vector<CostEdge> edges;
+
+	for (int u = 0; u < adjacent.size(); u++)
+	{
+		for (int v = 0; v < adjacent[u].size(); v++)
+		{
+			// 간선이 중복되지않도록 체크 
+			if (u > v)
+				continue;
+
+			int cost = adjacent[u][v];
+			if (cost == -1)
+				continue;
+
+			edges.push_back(CostEdge{ cost, u, v });
+		}
+	}
+
+	std::sort(edges.begin(), edges.end());
+	
+
+	// 다음은 크루스칼 알고리즘대로 코스트가 좋은 간선들을 연결하기 시작하는데 
+	// 거기에 Disjoint Set 을 활용한 그룹 관리추가 
+
+	DisjointSet sets(vertices.size());
+
+	for (CostEdge& edge : edges)
+	{
+		// 같은 그룹이면 스킵 (안 그러면 사이클 발생)
+		if (sets.Find(edge.u) == sets.Find(edge.v))
+			continue;
+
+		// 두 그룹을 합친다  
+		sets.Merge(edge.u, edge.v);
+		selected.push_back(edge);
+		ret += edge.cost;
+	}
+
+	return ret;
+}
+
 int main()
 {
-	DisjointSet teams(1000);
+	CreateGraph();
 
-	teams.Merge(10, 1);
-	int teamId = teams.Find(10);
-	int teamId2 = teams.Find(1);
+	vector<CostEdge> selected;
+	int cost = Kruskal(selected);
 
-	teams.Merge(3, 5);
-	int teamId3 = teams.Find(3);
-	int teamId4 = teams.Find(5);
-	
-	teams.Merge(1, 3);
-	int teamId5 = teams.Find(10);
-	int teamId6 = teams.Find(3);
 }
