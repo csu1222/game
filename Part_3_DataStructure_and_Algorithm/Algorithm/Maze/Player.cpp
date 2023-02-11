@@ -222,7 +222,7 @@ void Player::AStar()
 
 	enum
 	{
-		DIR_COUNT = 8,
+		DIR_COUNT = 4,
 	};
 
 	Pos front[] =
@@ -362,7 +362,7 @@ void Player::AStar_2()
 
 	enum
 	{
-		DIR_COUNT = 8,
+		DIR_COUNT = 4,
 	};
 
 	const int32 size = _board->GetSize();

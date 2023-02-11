@@ -15,6 +15,18 @@ enum class TileType
 
 class Player;
 
+struct CostEdge
+{
+	int cost;
+	Pos u;
+	Pos v;
+
+	bool operator<(CostEdge& other)
+	{
+		return cost < other.cost;
+	}
+};
+
 class Board
 {
 public:
