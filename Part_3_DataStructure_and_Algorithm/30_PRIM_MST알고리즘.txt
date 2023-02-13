@@ -1,0 +1,214 @@
+
+
+        프림 (PRIM) MST 알고리즘
+
+
+이번에 배울 프림 알고리즘은 크루스칼과 쌍벽을이루도록 유명한 MST 알고리즘입니다. 
+
+프림 알고리즘은 크루스칼과 거의 비슷한데 달라지는 것은 간선을 어떻게 수집하는지 순서가 달라집니다. 
+
+먼저 크루스칼을 잠깐 복습하면 
+특징) 탐욕적인(greedy) 방법을 이용 - 지금 이 순간에 최적인 답을 선택하여 결과를 도출하자
+라는 컨샙을 가지고 있었습니다. 간선을 수집하는 매 순간에 가장 최적인 간선을 수집하였습니다. 
+
+이에 비해 오늘의 주제인 프림 알고리즘의 특징은 이렇습니다. 
+특징) 하나의 시작점으로 구성된 트리에 간선을 하나씩 수집하며 진행
+
+이게 무슨 말인지 설명을 해보자면 그래프에서 어떤 정점을 임의로 하나 고릅니다. 그러면 그 정점에 연결된 간선들 중에서 골라 
+수집 할 수 있습니다. 
+첫번째 선택된 임의의 정점에 연결된 간선중 하나를 선택했다면 거기에 연결된 정점과 트리를 이루게 됩니다. 
+이렇게 트리를 이루면 이 트리 전체를 하나의 정점처럼 간주 합니다. 다음 간선 선택 과정에서는 트리에 포함된 정점들의 
+모든 간선을 체크하는데 이때 만약 트리안의 정점들이 동시에 다른 정점 하나를 가리킨다면 둘중 우수한것만 후보에 남겨두고 
+나머지는 이제 후보에서 제외 됩니다. 
+
+이 설명을 들어보면 이전에 배웠던 다익스트라 길찾기 알고리즘과 유사해 보입니다. 
+
+다익스트라 알고리즘이 무슨 내용이었냐면 어떤 임의의 시작점을 기준으로 최단 cost 의 길들을 찾아 나가는 알고리즘이었습니다. 
+
+설명을 들어 보니 정말 비슷한데 그래도 두 알고리즘의 차이점은 있습니다. 
+
+다익스트라는 시작점을 기준 최단 cost
+프림은 트리(정점 집합)을 기준 최단 cost
+
+라는 차이가 있습니다. 다익스트라는 길을 선택해 나가면서 각 정점들을 정점하나하나라고 인식해 나가고 
+프림은 한번 선택한 경로의 정점들은 하나의 트리로 묶어서 해석합니다.
+
+두 알고리즘이 유사하다 보니 구현자체도 유사합니다. 다음 경로를 수집할때 발견한 경로를 우선순위 큐로 관리하는것도 비슷할겁니다.
+
+
+- 코드 
+
+Maze 프로젝트에서 바로 실습을 할겁니다. 
+
+이전 Kruskal 알고리즘을 활용한 GenerateMap 말고 Prim 알고리즘용 GenerateMap 함수를 새로 파줬습니다. 
+그리고 크루스칼 알고리즘에서 사용하던 CostEdge 구조체는 Borad.h 에 있었던걸 크루스칼 GenerateMap 안으로 옮겨 주었습니다. 
+프림에서는 약간 다른 버전의 CostEdge 를 사용할것이기 때문입니다. 
+
+void Board::GenerateMap_Prim()
+{
+	struct CostEdge
+	{
+		int cost;
+		Pos vtx;
+
+		bool operator<(const CostEdge& other) const
+		{
+			return cost < other.cost;
+		}
+	};
+
+	for (int32 y = 0; y < _size; y++)
+	{
+		for (int32 x = 0; x < _size; x++)
+		{
+			if (x % 2 == 0 || y % 2 == 0)
+				_tile[y][x] = TileType::WALL;
+			else
+				_tile[y][x] = TileType::EMPTY;
+		}
+	}
+}
+
+CostEdge 에 정점을 vtx 라는 변수 하나로만 관리해서 사용할것입니다. 처음에 시작할 정점으로 부터 뻗어나갈것이기 때문에 간선의 양쪽 정점을 들고 
+있지 않아도 됩니다. 
+
+다음으로 만들것은 어떤 정점과 연결된 간선의 목록을 만들어야 합니다. 
+
+	// edges[u] : u 정점과 연결된 간선 목록 
+	map<Pos, vector<CostEdge>>  edges;
+
+그리고 이 edges 에는 우리 Board 에서 만들고 있던 격자 무늬 맵의 초록색 타일들을 정점으로 간선들을 담아 줘야 합니다. 
+이때 cost 는 랜덤값으로 줬습니다. 
+
+	// edges 후보를 랜덤으로 등록 
+	for (int32 y = 0; y < _size; y++)
+	{
+		for (int32 x = 0; x < _size; x++)
+		{
+			// 벽인곳은 스킵 
+			if (x % 2 == 0 || y % 2 == 0)
+				continue;
+
+			// 우측 연결하는 간선 후보 
+			if (x < _size - 2)
+			{
+				const int32 randValue = ::rand() % 100;
+				Pos u = Pos{ y, x };
+				Pos v = Pos{ y, x + 2 };
+				edges[u].push_back(CostEdge{ randValue, v });
+				edges[v].push_back(CostEdge{ randValue, u });
+			}
+			// 아래로 연결하는 간선 후보 
+			if (y < _size - 2)
+			{
+				const int32 randValue = ::rand() % 100;
+				Pos u = Pos{ y, x };
+				Pos v = Pos{ y + 2, x };
+				edges[u].push_back(CostEdge{ randValue, v });
+				edges[v].push_back(CostEdge{ randValue, u });
+			}
+		}
+	}
+
+크루스칼 때와 비슷한데 edges 에 등록하는 부분의 코드가 다릅니다. 맵을 순회하면서 벽이 아닌 곳의 Pos 좌표를 y, x 로 받습니다. 
+우측으로 연결하는 간선 후보를 살펴보면 랜덤 밸류를 만들고 u 와 v 라는 Pos 를 구해줍니다. u는 현재 (y,x) 좌표이고 v는 간선으로 연결될 
+타일의 좌표 여기서는 (y, x+2) 입니다. 
+
+크루스칼에서는 edges를 그냥 vector<CostEdge> 로 만들었기 때문에 간선 하나만 넣어 줘도 됐는데 
+프림에서는 시작 정점에서 부터 연결해 나가는 방식이라서 map 으로 만들었었습니다. 
+    edges[u].push_back(CostEdge{ randValue, v });
+이 코드가 뜻하는 바는 u 정점에서 연결된 간선은 randValue 와 v라는 정점을 가지고 있다는 뜻인데 반대로도 이어줘야 양방향으로 간선이 
+연결되어 있다고 알 수 있습니다.
+
+이제 간선후보들을 확보했으니 본격적인 프림 알고리즘 코드를 만들어 볼겁니다. 
+
+알고리즘을 진행하면서 추적해야할 데이터 들이 몇가지 있는데 낯이 익을 겁니다. 
+
+	// 해당 정점이 트리에 포함되어 있나?
+	map<Pos, bool> added;
+	// 어떤 정점이 누구에 의해 연결 되었는지?
+	map<Pos, Pos> parent;
+	// 만들고 있는 트리에 인접한 간선 중, 해당 정점에 닿는 최소 간선의 정보
+	map<Pos, int32> best;
+
+	// 다익스트라와 거의 유사함 단!
+	// - 다익스트라에서는 best가 [시작점]을 기준으로한 cost
+	// - 프림에서는 best가 [현재 트리]를 기준으로 한 간선 cost
+
+다익스트라에서 added 와 best 는 vector로 만들었었기 때문에 생성하면서 초기화를 했지만 이번엔 map 으로 만들었으니 순회를 하면서 초기화 해주겠습니다. 
+
+	// best를 int32 가장 큰값으로 added 를 false 로 초기화
+	for (int32 y = 0; y < _size; y++)
+	{
+		for (int32 x = 0; x < _size; x++)
+		{
+			best[Pos{ y, x }] = INT32_MAX;
+			added[Pos{ y, x }] = false;
+		}
+	}
+ 
+ 그리고 첫 시작지점을 세팅해주는 코드입니다ㅏ.
+ 
+	priority_queue<CostEdge> pq;
+	const Pos startPos = Pos{ 1, 1 }; // 랜덤으로 정해도 됨
+	pq.push(CostEdge{ 0 , startPos });
+	best[startPos] = 0;
+	parent[startPos] = startPos;
+
+이제 while 문을 돌겠습니다.
+
+	while (pq.empty() == false)
+	{
+		CostEdge bestEdge = pq.top();
+		pq.pop();
+
+		// 새로 연결된 정점
+		Pos v = bestEdge.vtx;
+		// 이미 추가되었다면 스킵 
+		if (added[v])
+			continue;
+
+		added[v] = true;
+
+		// 맵에 적용
+		{
+			int y = (parent[v].y + v.y) / 2;
+			int x = (parent[v].x + v.x) / 2;
+			_tile[y][x] = TileType::EMPTY;
+		}
+
+		// 방금 추가한 정점의 인접한 간선들을 검사 
+		for (CostEdge& edge : edges[v])
+		{
+			// 이미 추가 되었으면 스킵
+			if (added[edge.vtx])
+				continue;
+
+			// 다른 경로로 더 좋은 후보가 발견 되었으면 스킵
+			if (edge.cost > best[edge.vtx])
+				continue;
+
+			best[edge.vtx] = edge.cost;
+			parent[edge.vtx] = v;
+			pq.push(edge);
+		}
+	}
+
+pq가 빌때 까지 while문을 돕니다. 최선의 간선후보를 가져와야하는데 이미 priority_queue 를 사용해서 정렬이 되어 있기 때문에 top, pop 으로 
+간단하게 가져올 수 있었습니다.
+
+bestEdge 에서 다음에 연결될 정점을 v로 가져오고 이 v가 이미 연결된 정점(added)이라면 스킵합니다. 이 스킵을 안하면 사이클이 생기기 때문에 
+최소 스패닝 트리의 조건을 만족시키지 못합니다. 
+처음 연결되는 정점이라면 added 에 등록합니다. 여기서 v 라는 정점에 연결되었다고 간주하게 되고 연결되었다면 그 사이의 간선에 길을 뚫어 줘야합니다. 
+
+크루스칼에서 길을 뚫는 코드와 비슷한데 프림에서 간선 데이터에는 다음 정점 vtx만 가지고 있기때문에 parent[vtx] 로 중간값을 구해줍니다. 
+
+다음 while 루프를 위해서 pq 에 다음으로 연결된 간선들을 찾아야 합니다. 
+edges[v] 에는 랜덤으로 등록한 간선 후보들이 담겨 있고 이걸 순회합니다. 순회에서 처음으로 하는것은 added 의 체크인데 이 체크는 위에서 
+한번 했었습니다. 간선을 찾을때 체크하던지 아니면 일단 간선을 담고 다음 순회에서 체크하던지 선택하면 됩니다. 
+
+통과해서 연결되지 않은 간선임을 알게되면 이미 더 좋은 후보가 등록되어있다면 스킵하는 코드입니다. 
+
+모두 통과했다면 best 와 parent, pq 에 등록을 해줍니다. 
+
+
