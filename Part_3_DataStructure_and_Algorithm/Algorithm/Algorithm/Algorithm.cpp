@@ -7,43 +7,82 @@ using namespace std;
 #include <thread>
 #include <Windows.h>
 
-// 주제 : 동적 계획법 
+// 주제 : 동적 계획법 연습문제 
 
-// 이항 계수 Combination
+// LIS (Longest Increasing Sequence)
 
-// 메모이제이션 (memoization)
-// n이 최대 50 인 경우를 상정할겁니다. cache 의 범위는 [n의 범위][r의 범위] 를 뜻합니다. 
-// cache에 이미 구한 답이 있는지를 알아 보기위해 같은 크기의 bool 이차 배열을 만드는것은 메모리 낭비입니다.
-// 그래서 초기 값으로 절대 오지 못할 값을 넣어 두고 그걸로 판단합니다. 
-int cache[50][50];
+// Seq ; 1 9 2 5 7
+// 부분 수열 : 일부(0개 이상) 숫자를 지우고 남은 수열 
+// ex) 1 2 5 
+// ex) 1 9 5 7
+// 순 증가 부분 수열 
+// ex) 1 2 5 
 
-int combination(int n, int r)
+// LIS : 제일 긴 [순 증가 부분 수열]의 길이 
+// 1 2 5 7 = 길이 4  
+
+int cache[100];
+vector<int> seq;
+
+int LIS(int pos)
 {
-    // 기저 사례
-    if (r == 0 || n == r)
-        return 1;
+	// 기저사항 
+	//if (pos == seq.size() - 1)
+	//	return 1;
+	
+	// 캐시 확인
+	int& ret = cache[pos];
+	if (ret != -1)
+		return ret;
 
-    // 이미 답을 구한 적이 있으면 바로 반환 
-    int& ret = cache[n][r];
-    if (ret != -1)
-        return ret;
+	// 구하기 
 
-    // 새로 답을 구해서 캐시에 저장
+	// Seq : 1 9 2 5 7
 
-    return ret = combination(n - 1, r - 1) + combination(n - 1, r);
+	// 최소 seq[pos]은 있으니 1부터 시작 
+	ret = 1;
+	
+	// 1 다음으로 올 수 있는 값들은 9, 2, 5, 7  이 올 수 있습니다.
+
+	// 1 9 = 2
+	// 1 2 -> 1 2 5 7 = 4
+	// 1 5 -> 1 5 7 = 3
+	// 1 7 -> 1 7 = 2 
+
+	for (int next = pos + 1; next < seq.size(); next++)
+	{
+		if (seq[pos] < seq[next])	// 순 증가 수열의 조건
+			ret = max(ret, 1 + LIS(next));
+	}
+
+
+	return ret;
 }
 
 int main()
 {
-    // cache를 -1로 초기화 
-    ::memset(cache, -1, sizeof(cache));
 
-    __int64 start = GetTickCount64();
+	__int32 start = GetTickCount64();
 
-    int lotto = combination(45, 6);
+	::memset(cache, -1, sizeof(cache));
 
-    __int64 end = GetTickCount64();
+	::srand(((int)time(0)));
 
-    cout << end - start << "ms" << endl;
+	for (int i = 0; i < 50; i++)
+	{
+		int randValue = rand() % 50;
 
+		if (find(seq.begin(), seq.end(), randValue) == seq.end())
+			seq.push_back(randValue);
+	}
+
+	int ret = 0;
+	for (int pos = 0; pos < seq.size(); pos++)
+		ret = max(ret, LIS(pos));
+
+	__int32 end = GetTickCount64();
+
+	cout << "ret : " << ret << endl;
+
+	cout << "time : " << end - start << " ms" << endl;
 }
