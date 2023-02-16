@@ -9,80 +9,109 @@ using namespace std;
 
 // 주제 : 동적 계획법 연습문제 
 
-// LIS (Longest Increasing Sequence)
+// TRIANGLE_PATH
+// - (0,0)부터 시작해서 아래 or 아래우측 으로 이동 가능
+// - 만나는 숫자를 모두 더함
+// - 더한 숫자가 최대가 되는 경로? 합?
 
-// Seq ; 1 9 2 5 7
-// 부분 수열 : 일부(0개 이상) 숫자를 지우고 남은 수열 
-// ex) 1 2 5 
-// ex) 1 9 5 7
-// 순 증가 부분 수열 
-// ex) 1 2 5 
+// 6
+// 1 2
+// 3 7 4
+// 9 4 1 7 
+// 2 7 5 9 4
 
-// LIS : 제일 긴 [순 증가 부분 수열]의 길이 
-// 1 2 5 7 = 길이 4  
+// 보드의 최대크기를 N*N 으로 만들겠습니다.
+int N; 
+vector<vector<int>> board;
+vector<vector<int>> cache;
+vector<vector<int>> nextX;
 
-int cache[100];
-vector<int> seq;
-
-int LIS(int pos)
+int path(int y, int x)
 {
-	// 기저사항 
-	//if (pos == seq.size() - 1)
-	//	return 1;
-	
+	// 기저 사항 둘 중 하나 선택
+	//if (y == N - 1)
+	//	return board[y][x];
+	if (y == N)
+		return 0;
+
 	// 캐시 확인
-	int& ret = cache[pos];
+	int& ret = cache[y][x];
 	if (ret != -1)
 		return ret;
 
-	// 구하기 
+	// 문제 적용 
+	// board[y][x] + path(y + 1, x);
+	// board[y][x] + path(y + 1, x + 1);
 
-	// Seq : 1 9 2 5 7
-
-	// 최소 seq[pos]은 있으니 1부터 시작 
-	ret = 1;
-	
-	// 1 다음으로 올 수 있는 값들은 9, 2, 5, 7  이 올 수 있습니다.
-
-	// 1 9 = 2
-	// 1 2 -> 1 2 5 7 = 4
-	// 1 5 -> 1 5 7 = 3
-	// 1 7 -> 1 7 = 2 
-
-	for (int next = pos + 1; next < seq.size(); next++)
+	// 경로 기록
 	{
-		if (seq[pos] < seq[next])	// 순 증가 수열의 조건
-			ret = max(ret, 1 + LIS(next));
+		int nextBottom = path(y + 1, x);
+		int nextBottomRight = path(y + 1, x + 1);
+		
+		if (nextBottom < nextBottomRight)
+			nextX[y][x] = x + 1;
+		else
+			nextX[y][x] = x;
 	}
 
+	return ret = board[y][x] + max(path(y + 1, x), path(y + 1, x + 1));
 
+}
+
+int path_2(int y, int x)
+{
+	// 기저 사항 
+	if (y == N - 1)
+		return board[y][x];
+
+	// 캐시 체크
+	int& ret = cache[y][x];
+	if (ret != -1)
+		return ret;
+
+	// 문제 해결
+	{
+		int downVal = path_2(y + 1, x);
+		int downRightVal = path_2(y + 1, x + 1);
+		if (downVal < downRightVal)
+			nextX[y][x] = x + 1;
+		else
+			nextX[y][x] = x;
+	}
+
+	ret = board[y][x] + max(path_2(y + 1, x), path_2(y + 1, x + 1));
 	return ret;
 }
 
+
 int main()
 {
-
-	__int32 start = GetTickCount64();
-
-	::memset(cache, -1, sizeof(cache));
-
-	::srand(((int)time(0)));
-
-	for (int i = 0; i < 50; i++)
+	board = vector<vector<int>>
 	{
-		int randValue = rand() % 50;
+		{6},
+		{1,2},
+		{3,7,4},
+		{9,4,1,7},
+		{2,7,5,9,4},
+	};
 
-		if (find(seq.begin(), seq.end(), randValue) == seq.end())
-			seq.push_back(randValue);
+	N = (int)board.size();
+	cache = vector<vector<int>>( N, (vector<int>(N, -1)));
+	nextX = vector < vector<int>>(N, vector<int>(N));
+
+	int ret = path_2(0, 0);
+
+	std::cout << ret << endl;
+
+	// 경로 만들기 
+	int y = 0;
+	int x = 0;
+
+	while (y < N)
+	{
+		cout << board[y][x] << " -> ";
+
+		x = nextX[y][x];
+		y++;
 	}
-
-	int ret = 0;
-	for (int pos = 0; pos < seq.size(); pos++)
-		ret = max(ret, LIS(pos));
-
-	__int32 end = GetTickCount64();
-
-	cout << "ret : " << ret << endl;
-
-	cout << "time : " << end - start << " ms" << endl;
 }
