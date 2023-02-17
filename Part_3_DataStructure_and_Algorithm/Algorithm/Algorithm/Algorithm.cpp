@@ -9,109 +9,136 @@ using namespace std;
 
 // 주제 : 동적 계획법 연습문제 
 
-// TRIANGLE_PATH
-// - (0,0)부터 시작해서 아래 or 아래우측 으로 이동 가능
-// - 만나는 숫자를 모두 더함
-// - 더한 숫자가 최대가 되는 경로? 합?
+// TIC-TAC-TOE
 
-// 6
-// 1 2
-// 3 7 4
-// 9 4 1 7 
-// 2 7 5 9 4
+// [.][.][.]
+// [.][o][x]
+// [.][.][o]
 
-// 보드의 최대크기를 N*N 으로 만들겠습니다.
-int N; 
-vector<vector<int>> board;
-vector<vector<int>> cache;
-vector<vector<int>> nextX;
+vector<vector<char>> board;
 
-int path(int y, int x)
+enum
 {
-	// 기저 사항 둘 중 하나 선택
-	//if (y == N - 1)
-	//	return board[y][x];
-	if (y == N)
-		return 0;
+	DEFAULT = 2,
+	WIN = 1, 
+	DRAW = 0,
+	LOSE = -1,
+};
 
-	// 캐시 확인
-	int& ret = cache[y][x];
-	if (ret != -1)
-		return ret;
+bool IsFinished(const vector<vector<char>>& board, char turn)
+{
+	// 좌우 
+	for (int i = 0; i < 3; i++)
+		if (board[i][0] == turn && board[i][1] == turn && board[i][2] == turn)
+			return true;
+	// 상하
+	for (int i = 0; i < 3; i++)
+		if (board[0][i] == turn && board[1][i] == turn && board[2][i] == turn)
+			return true;
+	// 대각선
+	if (board[0][0] == turn && board[1][1] == turn && board[2][2] == turn)
+		return true;
+	if (board[0][2] == turn && board[1][1] == turn && board[2][0] == turn)
+		return true;
 
-	// 문제 적용 
-	// board[y][x] + path(y + 1, x);
-	// board[y][x] + path(y + 1, x + 1);
-
-	// 경로 기록
-	{
-		int nextBottom = path(y + 1, x);
-		int nextBottomRight = path(y + 1, x + 1);
-		
-		if (nextBottom < nextBottomRight)
-			nextX[y][x] = x + 1;
-		else
-			nextX[y][x] = x;
-	}
-
-	return ret = board[y][x] + max(path(y + 1, x), path(y + 1, x + 1));
-
+	return false;
 }
 
-int path_2(int y, int x)
+// board의 9칸에 '.', 'o', 'x' 세가지 경우의 수가 올수 있습니다. 3^9 = 19683
+
+// Hashkey 함수로 cache에 담을 board의 상태를 정수로 표현합니다. 3진법의 원리를 응용했습니다. 
+int HashKey(const vector<vector<char>>& board)
 {
-	// 기저 사항 
-	if (y == N - 1)
-		return board[y][x];
+	int ret = 0;
 
-	// 캐시 체크
-	int& ret = cache[y][x];
-	if (ret != -1)
-		return ret;
-
-	// 문제 해결
+	for (int y = 0; y < 3; y++)
 	{
-		int downVal = path_2(y + 1, x);
-		int downRightVal = path_2(y + 1, x + 1);
-		if (downVal < downRightVal)
-			nextX[y][x] = x + 1;
-		else
-			nextX[y][x] = x;
+		for (int x = 0; x < 3; x++)
+		{
+			ret = ret * 3;
+
+			if (board[y][x] == 'o')
+				ret += 1;
+			else if (board[y][x] == 'x')
+				ret += 2;
+		}
 	}
 
-	ret = board[y][x] + max(path_2(y + 1, x), path_2(y + 1, x + 1));
 	return ret;
 }
 
+// cache 를 board에 올수 있는 모든 경우의 수 만큼 크기를 줬습니다.
+int cache[19683];
+
+int CanWin(vector<vector<char>>& board, char turn)
+{
+	// 기저 사례
+	if (IsFinished(board, 'o' + 'x' - turn))
+		return LOSE;
+
+
+	// 캐시 확인
+	int key = HashKey(board);
+	int& ret = cache[key];
+	if (ret != DEFAULT)
+		return ret;
+	
+	// 해결
+
+	// [.][x][.]
+	// [.][o][.]
+	// [.][.][.]
+
+	int minValue = DEFAULT;
+
+	for (int y = 0; y < 3; y++)
+	{
+		for (int x = 0; x < 3; x++)
+		{
+			if (board[y][x] != '.')
+				continue;
+			
+			// 착수 
+			board[y][x] = turn;
+
+			// 확인
+			minValue = min(minValue, CanWin(board, 'o' + 'x' - turn)); // 상태방이 패배하는게 제일 좋은 케이스
+
+			// 취소 
+			board[y][x] = '.';
+		}
+	}
+
+	if (minValue == DRAW || minValue == DEFAULT)
+		return ret = DRAW;
+
+	return ret = -minValue;
+}
 
 int main()
 {
-	board = vector<vector<int>>
+	board = vector<vector<char>>
 	{
-		{6},
-		{1,2},
-		{3,7,4},
-		{9,4,1,7},
-		{2,7,5,9,4},
+		{'o', '.', 'x'},
+		{'o', 'o', 'x'},
+		{'.', '.', '.'},
 	};
 
-	N = (int)board.size();
-	cache = vector<vector<int>>( N, (vector<int>(N, -1)));
-	nextX = vector < vector<int>>(N, vector<int>(N));
+	for (int i = 0; i < 19683; i++)
+		cache[i] = DEFAULT;
 
-	int ret = path_2(0, 0);
+	int win = CanWin(board, 'x');
 
-	std::cout << ret << endl;
-
-	// 경로 만들기 
-	int y = 0;
-	int x = 0;
-
-	while (y < N)
+	switch (win)
 	{
-		cout << board[y][x] << " -> ";
-
-		x = nextX[y][x];
-		y++;
+	case WIN:
+		cout << "Win" << endl;
+		break;
+	case DRAW:
+		cout << "Draw" << endl;
+		break;
+	case LOSE:
+		cout << "Lose" << endl;
+		break;
 	}
 }
