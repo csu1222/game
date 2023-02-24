@@ -1,34 +1,49 @@
 ﻿#include "pch.h"
 #include <iostream>
 #include "CorePch.h"
-
 #include <thread>
+#include <atomic>
 
-void HelloThread()
+
+// Atomic : Atom(원자)  All-or-Nothing
+
+// DB 에서의 Atomic 예시
+// 
+// - A 라는 유저 인벤에서 집행검을 빼고 
+// - B 라는 유저 인벤에 집행검을 추가 
+// -- 위의 두줄을 아토믹하게 실행해야 합니다. 
+
+atomic<int32> sum = 0;
+
+void Add()
 {
-	cout << "Hello Thread" << endl;
+	for (int i = 0; i < 100'0000; i++)
+	{
+		//sum++;
+		sum.fetch_add(1);
+	}
 }
 
-void HelloThread_2(int32 num)
+void Sub()
 {
-	cout << num << endl;
+	for (int i = 0; i < 100'0000;  i++)
+	{
+		//sum--;
+		sum.fetch_add(-1);
+	}
 }
 
 int main()
 {
+	Add();
+	Sub();
 
-	vector<std::thread> v;
+	cout << sum << endl;
 
-	for (int i = 0; i < 10; i++)
-	{
-		v.push_back(std::thread(HelloThread_2, i));
-	}
+	std::thread t1(Add);
+	std::thread t2(Sub);
+	t1.join();
+	t2.join();
 
-	for (int i = 0; i < 10; i++)
-	{
-		if (v[i].joinable())
-			v[i].join();
-	}
-
-	cout << "Hello Main" << endl;
+	cout << sum << endl;
 }
