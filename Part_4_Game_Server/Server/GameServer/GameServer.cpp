@@ -3,47 +3,64 @@
 #include "CorePch.h"
 #include <thread>
 #include <atomic>
+#include <mutex>
 
+// Lock 기초 
 
-// Atomic : Atom(원자)  All-or-Nothing
+vector<int32> v;
 
-// DB 에서의 Atomic 예시
-// 
-// - A 라는 유저 인벤에서 집행검을 빼고 
-// - B 라는 유저 인벤에 집행검을 추가 
-// -- 위의 두줄을 아토믹하게 실행해야 합니다. 
+// Mutual Exclusive (상호배타적)
+mutex m;
 
-atomic<int32> sum = 0;
-
-void Add()
+// RAII(Resource Acquisition Is Initialization)
+template<typename T>
+class LockGuard
 {
-	for (int i = 0; i < 100'0000; i++)
+public:
+	LockGuard(T& m)
 	{
-		//sum++;
-		sum.fetch_add(1);
+		_mutex = &m;
+		_mutex->lock();
 	}
-}
-
-void Sub()
-{
-	for (int i = 0; i < 100'0000;  i++)
+	~LockGuard()
 	{
-		//sum--;
-		sum.fetch_add(-1);
+		_mutex->unlock();
+	}
+
+private:
+	T* _mutex;
+};
+
+void Push()
+{
+	for (int32 i = 0; i < 10000; i++)
+	{
+		// 자물쇠 잠그기
+		//std::lock_guard<std::mutex> lockGuard(m);
+		std::unique_lock<std::mutex> uniqueLock(m, std::defer_lock);
+		uniqueLock.lock();
+		//m.lock();
+
+		v.push_back(i);
+
+		if (i == 5000)
+		{
+			// m.unlock();
+			break;
+		}
+
+		// 자물쇠 풀기
+		//m.unlock();
 	}
 }
 
 int main()
 {
-	Add();
-	Sub();
+	std::thread t1(Push);
+	std::thread t2(Push);
 
-	cout << sum << endl;
-
-	std::thread t1(Add);
-	std::thread t2(Sub);
 	t1.join();
 	t2.join();
 
-	cout << sum << endl;
+	cout << v.size() << endl;
 }
