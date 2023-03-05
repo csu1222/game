@@ -4,83 +4,57 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <Windows.h>
 
-class SpinLock
+mutex  m;
+queue<int32> q;
+HANDLE handle;
+
+void Producer()
 {
-public:
-	void lock()
+	while (true)
 	{
-		// CAS (Compare-And_Swap)
-
-		bool expected = false;
-		bool desired = true;
-
-		// CAS 의사 코드 
-		/*if (_locked == expected)
 		{
-			expected = _locked;
-			_locked = desired;
-			return true;
-		}
-		else
-		{
-			expected = _locked;
-			return false;
-		}*/
-
-		while (_locked.compare_exchange_strong(expected, desired) == false)
-		{
-			expected = false;
-
-			//this_thread::sleep_for(std::chrono::milliseconds(100));
-			this_thread::sleep_for(0ms);
-			// this_thread::yield();
-			 
+			unique_lock<mutex> lock(m);
+			q.push(100);
 		}
 
-	}
+		::SetEvent(handle);
 
-	void unlock()
-	{
-		//_locked = false;
-		_locked.store(false);
-	}
-
-private:
-	atomic<bool> _locked = false;
-};
-
-int32 sum = 0;
-mutex m;
-SpinLock spinLock;
-
-void Add()
-{
-	for (int i = 0; i < 100000; i++)
-	{
-		lock_guard<SpinLock> gaurd(spinLock);
-		sum++;
+		this_thread::sleep_for(1000ms);
 	}
 }
 
-void Sub()
+void Consumer()
 {
-	for (int i = 0; i < 100000; i++)
+	while (true)
 	{
-		lock_guard<SpinLock> gaurd(spinLock);
-		sum--;
+		::WaitForSingleObject(handle, INFINITE);
+
+		unique_lock<mutex> lock(m);
+
+		if (q.empty() == false)
+		{
+			int32 data = q.front();
+			q.pop();
+			cout << data << endl;
+		}
 	}
 }
 
 int main()
 {
+	// 커널 오브젝트 
+	// Usage Count		몇개나 참조하고 있는가
+	// Signal (파란불) / Non-Signal (빨간불)  << bool 
+	// Auto / Manual  << bool 
+	handle = ::CreateEvent(NULL/*보안속성*/, FALSE/*bManualReset*/, FALSE/*bIntialState*/, NULL/*Name*/);
 
-
-	thread t1(Add);
-	thread t2(Sub);
+	thread t1(Producer);
+	thread t2(Consumer);
 
 	t1.join();
 	t2.join();
 
-	cout << sum << endl;
+	::CloseHandle(handle);
 }
