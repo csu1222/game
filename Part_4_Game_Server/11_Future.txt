@@ -1,0 +1,345 @@
+
+
+
+        Future
+
+
+이전시간에 알아본 조건변수 Condition Variable 은 멀티쓰레드 환경에서 공용데이터를 여러 쓰레드가 같이 
+수정하려는 상화에서 좀 더 효율적으로 동작하게끔 할 수 있었습니다.
+특히나 서버에서 Producer, Consumer 역할을 처리하는 코드를 실습해봤습니다.
+
+하지만 경우에 따라 그런 복잡한 상황이 아니라 좀 더 가벼운 상황에서 순서를 보장해서 이벤트를 알려주는 상황이 
+있을 수 있습니다. 그러니까 단발 이벤트 같은 경우는 굳이 조건변수 까지 가지 않고 해결 할 수 있는 방법이 존재 하는데 
+
+그것이 std::future 미래 객체에 대해 배우겠습니다.
+사실 이전에 배웠던 mutex나 조건변수에 비하면 활용도가 조금 떨어지는것 같긴 한데 그럼에도 불구하고 C++11에 공식적으로
+추가된 내용이다 보니 알아보고 넘어가는게 좋을것같습니다.
+
+오늘의 주인공을 사용하기 위해서는 새로 future 라이브러리를 추가해줘야합니다.
+
+그리고 나서 왠지는 모르겠지만 Calculator 라는 어떤 계산을 하는 함수를 하나 만들었습니다.
+
+
+
+그리고 Main 함수에 이 Calculator 함수를 호출했는데 
+
+int main()
+{
+	// 동기(Synchronus) 실행
+	int64 sum = Calculator();
+}
+
+여태껏 모르고 그냥 써왔지만 이렇게 함수를 호출하는 방법을 동기(Synchronus) 실행 이라고 합니다. 
+이게 무슨 말이냐면 평소 알고있던 방식 대로 Main 함수에서 한줄씩 코드를 실행하다가 Calculator 함수를 만나면 위의 
+Calculator함수의 정의부로 가서 그 안의 코드들을 실행한 다음 다시 Main함수로 돌아와서 이어 코드를 실행하는 방식이었습니다. 
+이게 동기 방식의 호출, 실행 이라고 합니다. 
+
+그런데 이때 만약 Calculator 함수가 대단히 복잡해서 100초가 걸린다고 치면 Main 함수도 Calculator 함수 에서 100초를 기다렸다가
+다음 줄로 넘어가야 합니다. 경우에 따라 Calculator가 오래걸리지만 중요하지 않은 함수라면 비동기 방식으로 다른 쓰레드에게 
+넘기던가 아니면 나중에 실행하도록 할 수 있습니다. 
+그 예시가 새로 쓰레드 객체를 만들어서 Calculator 역할을 하도록 생성하고 join() 하는 방법이 있을겁니다. 
+
+int main()
+{
+	// 동기(Synchronus) 실행
+	int64 sum = Calculator();
+
+	
+	thread t(Calculator);
+
+	// TODO
+
+	t.join();
+}
+
+그러면 이 방법에서는 Calculator를 다른 쓰레드에 시켰으니까 함수가 완료될 때쯤 그 결과를 다시 받아와야하는데 
+방법중 하나가 전역 변수를 하나 만들어서 Calculator 함수 내에 그 전역 변수에 복사해 주는 방법이 있을겁니다. 
+
+int64 result;
+int64 Calculator()
+{
+	int32 sum = 0;
+
+	for (int32 i = 0; i < 100'000; i++)
+		sum += i;
+
+	result = sum;
+	
+	return sum;
+}
+
+하지만 이 방법에는 아쉬운점이 있는데 데이터를 넘겨받기 위해 전역 변수를 사용해야 한다는게 아쉽고 거기에 더해서 이런 비동기 적으로 실행하는 
+함수가 한두개가 아니게 되면 그때마다 전역변수를 늘리는것도 별로 안좋을것 같습니다. 그렇다고 그때 그때 result 변수 하나가지고 
+공용으로 사용한다면 어느 쓰레드가 사용할때 마다 lock으로 잠가두고 사용해야 할텐데 그러면 프로그램의 속도가 매우 제학적이 될겁니다. 
+뿐만아니라 어떤 함수를 비동기로 실행하려고 할때 마다 쓰레드 객체를 만들고 또 join 해야하고 하는게 번거로울 수도 있습니다. 
+
+정말 Calculator 하나만 외주를 줘서 실행시키고 싶은겁니다. 
+식당에 비유하면 잠깐 바빠져서 사람을 써야하는데 정식직원을 고용했다가 일만 시키고 해고 하는것 말고 단기 알바를 구하면 좋겠다 라는 상황입니다. 
+
+간단하게 외주를 맡기는 방법이 오늘의 주제인 std::future 인겁니다. 
+
+future 객체를 사용하는 방법은 아래와 같습니다. 
+	// std::future
+	{
+		std::future<int64> future = std::async(std::launch::async, Calculator);
+	}
+
+future객체는 위에서 말했듯이 비동기적 방식으로 실행되는데 코드의 진행 순서로 말하면 Main 에서 한줄씩 코드를 실행하다가 future 객체를 만드는 
+코드에서 객체를 만들어 주고 다음줄로 그냥 넘어갑니다. 이때 future에서 Calculator가 바로 실행이 될 수도 있고 아닐수도 있습니다. 그건 모르고 
+Main 함수의 쓰레드는 그냥 진행합니다. 
+할 일을 하다가 나중에 future객체의 결과물이 필요해지면 get 메소드로 값을 꺼내올 수 있습니다. 
+
+	{
+		std::future<int64> future = std::async(std::launch::async, Calculator);
+
+		// TODO 
+
+		int64 sum = future.get();
+	}
+
+그러면 이렇게 생각할 수 있을겁니다. 값이 필요해서 get 메소드로 값을 가져오는거면 그냥 동기방식으로 그때 함수를 실행하는것과 뭐가 다른가?
+이게 asnyc 를 만들 때 옵션에 따라 완전히 달라집니다. 
+
+future 객체를 생성할때 사용하는 async 는 인자로 실행 정책과 실행할 함수를 받습니다. 
+std::launch::async라는 코드를 f12로 따라 들어가보면 async 와 deferred 라는 두가지 정책이 있는걸 알 수 있습니다. 
+그리고 만들 수 있는 옵션은 3가지 입니다. 
+
+	1) deferred   		-> lazy evaluation 지연해서 실행하세요 
+	2) asnyc    		-> 별도의 쓰레드를 만들어서 실행하세요 
+	3) deferred | asnyc -> 둘 중 알아서 골라주세요 
+
+만약 asnyc의 첫번째 인자를 deferred로 주었다면 정말로 그냥 get() 할때 Calculator를 그때서야 실행하는것과 같습니다. 
+이게 무슨 의미가 있는가 생각이 들 수 있지만 이게 필요한 경우가 종종 생깁니다. 
+예를 들면 클라이언트에서 서버에게 어떤 좌표로 움직이겠다고 요청을 했다고 하겠습니다. 그런데 서버가 매우 바빠서 이 일을 할 여유가 없다고 하면 
+이럴때 좌표를 움직이겠다는 요청사항을 future객체로 만들어서 서버가 여유로울 때 호출하는 식으로 사용할 수 있습니다. 
+이것도 어찌 보면 비동기 방식이라고 할 수 있습니다. 동기 방식이라는게 코드가 위치한 그곳에서 바로 호출하는것이기 때문입니다.
+쓸모가 있다고 해도 이 deferred 방식이 완전 깔끔하고 유용한것 같지는 않죠
+
+두번째 방식 asnyc방식은 이건 사실상 멀티쓰레드 환경이 되는겁니다. 이 future객체를 asnyc로 생성하면 그 순간부터 새로운 쓰레드를 할당받아서 
+Calculator를 병렬로 실행해주게 되고 그러면 Main 쓰레드는 자신의 할일을 하는 동안 병렬적으로 처리를 한다음 
+최종적으로 get 으로 결과물을 받아주려고 할때 만약 연산이 끝나있는 상태라면 그 결과를 받아주고 아직 끝나지 않았다면 
+나머지 연산을 끝내고 그 결과물을 받아오게됩니다. 
+
+
+중요한 부분이니까 한번더 실행 과정을 집어보겠습니다. 
+
+/*
+동기화 방식
+Main쓰레드 진행 -> Calculator() 함수안으로 가서 그 코드를 모두 실행후 다시 Main 함수로 반환 -> Calculator 함수 이후의 코드로 진행 
+
+비동기화 방식
+1) deferred 옵션으로 lazy evaluation 방식으로 실행하면 
+Main쓰레드 진행 -> Calculator()함수 역할을 할 future 객체를 생성까지만 함 -> 이후 Main 함수의 코드를 진행 
+-> 진짜 Calculator가 필요한 시점에 future.get() 을 실행하면 이 시점에 Main쓰레드가 Calculator 함수 안으로 진행
+
+2) asnyc 옵션
+Main쓰레드 진행 -> Calculator() 함수 역할을 할 future 객체를 asnyc로 생성하는 시점에 별도의 쓰레드가 생성되어서 병렬적으로 Main쓰레드와 
+future쓰레드가 진행 -> Main 함수를 진행하다가 Calculator의 값이 필요해서 future.get() 을 함 
+-> future쓰레드가 실행완료 상태라면 값을 바로 반환, 실행이 끝나지 않았다면 나머지 연산을 한 수 값을 반환 
+*/
+
+asnyc 정책의 future 객체를 사용함으로 사실상 멀티쓰레드 환경을 구성한것인데 명시적으로 thread 객체를 만드고 join 까지 하지 않고 
+future 객체를 만들면서 한번에 처리하고 해당 값이 필요할때 get으로 가져오는 이점이 있습니다. 
+
+future 객체가 사용되는 상황은 이런게 있다고 합니다. 
+데이터시트 로딩을 개선할때 사용되는데 서버를 띄울때 데이터시트를 로딩하는데 이 데이터파일이 굉장히 많습니다. 
+몬스터 ai 라거나 플레이어 스텟이라거나 보스 몬스터 정보라던가 굉장히 많은 기획적 요소들을 파일로 빼서 관리하게되고 서버를 실행할때 
+이런 데이터 파일들을 로딩하게 되는데 게임이 오래되어서 덩치가 커지게되면 다 로드하는데 엄청나게 느려지는겁니다. 
+그래서 이걸 future객체를 사용해서 각각 병렬적으로 로드하게 변경하게한겁니다. 
+이걸 그냥 쓰레드로 만들어도 되겠지만 서버를 실행하는 초반에만 잠시 사용할 쓰레드를 굳이 만들고 소멸하는걸 관리하는것 보다는 그냥 
+함수를 비동기적으로 사용할때 사용하면 되겠습니다. 
+
+여기까지 future에 대해 간단히 알아봤고 
+
+그런데 경우에 따라서 future.get() 을 할때 future객체가 일감을 끝냈는지 아닌지를 알고 싶을 수도 있습니다. 
+바로 get 을 하게되면 futrue의 작업이 끝났는지 아닌지 모른다고 했었는데 이걸 알아보는 겁니다. 
+
+	future.wait_for(1ms);
+
+future객체의 메소드중 wait_for라고 인자로 준 시간만큼을 기다리는게 있습니다. 그리고 이 메소드의 반환 타입을 보면 future_status
+타입을 반환하는걸 알 수 있습니다. 반환값도 받아줘 보겠습니다.
+
+		std::future_status status = future.wait_for(1ms);
+
+		if (status == future_status::ready)
+		{
+
+		}
+
+그리고 그 반환값이 ready 상태라면 준비가 된 상태라는게 되고 준비가 되었을때 필요한 어떤 내용들을 채워 줄 수 있습니다. 
+
+참고로 future.wait 라는 메소드는 futrue객체의 작업이 끝날때까지 기다리는겁니다. 
+그냥 get() 곧바로 때리는것과 wait 후 get 하는것은 별 차이가 없긴합니다. 
+
+이 future 라는 것을 요약해보면 
+언젠가 미래에 결과물을 뱉어 줄거야 라는 약속을 하고 있는겁니다. 
+미래에 지연해서 실행을 하건 별도의 쓰레드를 만들어서 병렬로 실행하건 나중에 결과물을 뱉어주겠다는 겁니다. 
+
+
+- 추가 디테일
+위에 까지 future의 기초적인 내용이었는데 future 객체에 들려줄 함수가 평범한 전역함수 일 수도 있고 아니면 다른 객체의 메소드일 수도 있습니다. 
+
+
+		// 추가 디테일 : future가 들고 있을 함수가 다른 객체의 메소드라면?
+		
+		class Knight
+		{
+		public:
+			int64 GetHP() { return 100; }
+		};
+
+		std::future<int64> future2 = std::async(std::launch::async, GetHP);
+
+이렇게 Knight라는 클래스의 멤버 함수를 그냥 들고 있게 해주면 통과가 되지 않습니다. 
+
+GetHP는 독립적으로 존재하지않는 Knight 클래스에 소속되어있는 멤버 함수이다 보니 인자로 주는 방법이 달라집니다. 
+	
+		class Knight
+		{
+		public:
+			int64 GetHP() { return 100; }
+		};
+
+		Knight knight;
+		std::future<int64> future2 = std::async(std::launch::async, &Knight::GetHP, knight);
+
+이렇게 Knight::GetHP 라고 줘야 하고 또 클래스 자체는 설계도일 뿐이고 클래스로 만든 객체에 실제 함수가 생성되기때문에 
+객체를 만들고 3번째 인자로 그 객체도 줘야합니다. 
+
+
+- 추가 future객체 만드는 방법 2
+
+또 추가로 알아볼것은 future 객체가 꼭 std::async 를 통해서만 만들수 있는건 아니라는겁니다. 
+예를 들어서 이번시간 처음에 전역 변수를 따로 만들어서 저장하는 방법을 future 로 재현하고 싶다고 해보겠습니다. 
+
+위의 async 로 future객체에 값을 받아주고 있던게 사실상 다른 쓰레드를 만들어서 함수를 실행시킨후 그 결과를 받아주고 있었는데 
+그걸 다른쓰레드에서 데이터를 밀어 넣는 과정만 추가해주고 싶다고 하겠습니다. 말이 어려운데 일단 한번 코드로 보겠습니다. 
+
+void PromiseWorker(std::promise<string>&& promise)
+{
+	promise.set_value("Secret Message");
+}
+
+int Main()
+{
+	// std::promise
+	{
+		// 미래(std::futur)에 결과물을 반환해줄꺼라 약속(std::promise) 해줘 (계약서?)
+		std::promise<string> promise;
+		std::future<string> future = promise.get_future();
+
+		thread t(PromiseWorker, std::move(promise));
+
+		string message = future.get();
+		cout << message << endl;
+
+		t.join();
+	}
+}
+
+이런 형태로 사용되는데 promise라는 객체를 이용한 future 객체를 만드는 두번째 방법입니다. 
+먼저 promise 객체를 만들어 주는데 이번에는 string 타입을 반환하는 객체를 만들었습니다. 그러면 같은 타입은 string 타입을 받는 future 객체도 
+만들어 주고 promise.get_future() 라는 메소드로 future 객체와 promise 객체를 연결했습니다. 
+
+이제는 다른 쓰레드를 만들어서 promise의 값을 세팅하는 함수를 실행하면 나중에 필요한때에 future.get으로 세팅된 promise객체의 값을 받아올수
+있습니다.
+
+그래서 간단하게 promise의 값을 직접 세팅하는 함수 PromiseWorker 를 만들었고, 새로운 쓰레드 t에 PromiseWorker 와 PromiseWorker의 인자로 
+promise도 넘겨줘서 함수를 병렬로 실행시킨후 
+
+future에 get으로 가져옵니다. 
+
+이런식으로 promise, future 짝을 맞춰서 사용하면 전역변수를 만들어서 다른 쓰레드의 결과값을 받아오는걸 쓰지 않아도 됩니다. 
+
+		thread t(PromiseWorker, std::move(promise));
+
+이부분에 중단점을 잡고 디버깅해보면 이 코드가 실행되기 전에는 Main 쓰레드에서 promise, future 객체 둘 두 pending(보류중) 상태입니다. 
+줄 단위 실행을 통해서 t쓰레드에 std::move로 promise 를 넘겨 주게되면 promise 객체는 Main 쓰레드에서 empty 상태가 됩니다. 
+이제 Main쓰레드에서는 promise를 건드리면 안되는 상태가 됩니다. 그 다음에 future.get() 을 실행하는 순간에
+데이터가 message 변수에 넣어지게 되면서 future도 empty 상태가 됩니다. 
+이부분에서 future.get은 딱 한번만 호출해야한다는 것도 알 수 있었습니다. 
+
+여기까지 future객체를 만드는 두가지 방법을 알아 봤습니다. async를 사용해서 비동기 방식으로 함수를 실행하고 필요한 순간에 get 해오는 방법
+그리고 promise 객체도 만들어서 future의 내용물을 채워주는 역할을 하고 있었습니다. 직접 새로운 쓰레드를 만들고 promise의 값을 세팅하는 
+함수와 promise객체 자체도 move로 넘겨주면 이후 필요할때 future.get 을 하면 그 값을 받아오는 방식이었습니다. 
+
+
+- 추가 future객체 만드는 방법 3
+
+다음 future객체를 만드는 방법은 packaged_task 라는 걸 사용하는 방법입니다. 
+
+int64 Calculator()
+{
+	int32 sum = 0;
+
+	for (int32 i = 0; i < 100'000; i++)
+		sum += i;
+
+	return sum;
+}
+
+void TaskWorker(std::packaged_task < int64(void)> && task)
+{
+	task();
+}
+
+int Main()
+{
+	// packaged_task
+	{
+		std::packaged_task<int64(void)> task(Calculator);
+		std::future<int64> future = task.get_future();
+
+		std::thread t(TaskWorker, std::move(task));
+
+		int64 sum = future.get();
+		cout << sum << endl;
+
+		t.join();
+	}
+}
+
+이런식으로 사용됩니다. 사용법이 얼추 promise와 비슷한데 packaged_task의 차이점은 객체를 만들때 반환 타입을 템플릿에 주는게 아니라 
+실행할 함수의 시그니처를 템플릿에 줍니다. 
+그리고 future에 get_future 를 해서 연결해주는것은 똑같고 새로운 쓰레드 t에 넘겨줄 함수인 TaskWorker의 내용도 task의 직접 
+값을 세팅하는게 아니라 그냥 보통 함수 실행하듯이 실행해주게되면 됩니다. 
+사실상 Calculator함수를 packaged_task 라는 상위 개념으로 묶어준것이고 그 껍데기인 task를 호출해버립니다. 
+
+그러면 Calculator의 반환 타입인 int64 데이터를 받아서 무언가 하는게 아니라 그 결과물 자체가 future를 통해 받아올 수 있습니다. 
+
+future에서 값을 받아오는것은 promise 때와 같이 사용됩니다. 
+
+
+이렇게 future객체를 사용하는 세가지 방법을 알아봤는데 생각보다 깔끔하지 않고 어느 상황에 어느 방법을 사용해야하는지도 
+잘 모르겠습니다. 
+
+- 요약  
+오늘 주제인 future를 사용하는 이유는 mutex, condition_variable 까지 않고 단순한 일을 시킬 수 있는 방법을 알아보고 있는겁니다. 
+
+이전시간 까지 주제였던 mutex, condition_variable 은 Producer, Consumer 같이 무한 루프를 돌면서 계속 일 할 쓰레드에 사용되는 
+개념이고 
+future는 단발성으로 어떤 결과만 받고 싶을때 사용하는 개념입니다. 
+물론 future 객체를 어떻게 만들어 주는지는 상황에 따라 다르게 됩니다. 함수자체를 비동기로 실행할것인지, 아니면 promise 객체를 만들어서 
+promise 객체가 다른 쓰레드에서 함수를 실행하도록 하는지 그리고 도 비슷한 packaged_task 도 있습니다. 
+
+packaged_task와 async로 함수를 병렬 실행하는것의 차이점이 무엇인지 궁금해집니다. 
+먼저 async 는 인자로 주는 함수를 실행하기 위한 전용 쓰레드를 하나 만드는겁니다. 
+반면 packaged_task에서는 생성한 쓰레드에 여러개의 task를 만들어서 전달하면 다른 함수도 사용할 수 있을겁니다.  
+
+	// 결론)
+	// mutex, condition_variable 까지 가지 않고 단순한 애들을 처리할 수 있는 방법
+	// 특히나, 한번 발생하는 이벤트에 유용하다!
+	// 닭잡는데 소잡는 칼을 쓸 필요 없다!
+	// 1) async
+	// 원하는 함수를 비동기적으로 실행
+	// 2) promise
+	// 결과물을 promise를 통해 future로 받아줌 
+	// 3) packaged_task
+	// 원하는 함수의 실행 결과를 packaged_task를 통해 future로 받아줌 
+
+그래서 promise와 packaged_task는 정말 사용할 일이 별로 없을것이고 가끔가야 async는 사용할 일이 있을것이라고 합니다.
+
+중요도는 떨어지지만 경우에 따라 유용할 수 있는 future에 대해 알아봤습니다. 
+
+(이번 시간에 나온 비동기 실행이라는 용어가 곧 멀티쓰레드와 같은 의미가 아니라는걸 꼭 기억해야 하겠습니다. 
+async를 실행하면서 정책을 deferred로 주면 같은 쓰레드인데 실행 순서만 뒤로 늦추는 것도 비동기 실행이었습니다. )
