@@ -20,7 +20,7 @@ void Push()
 		int32 value = rand() % 100;
 		s.Push(value);
 		
-		//this_thread::sleep_for(100ms);
+		this_thread::sleep_for(1ms);
 	}
 }
 
@@ -28,14 +28,17 @@ void Pop()
 {
 	while (true)
 	{
-		int32 data = 0;
-		if (s.TryPop(OUT data))
-			cout << data << endl;
+		auto data = s.TryPop();
+		if (data != nullptr)
+			cout << (*data) << endl;
 	}
 }
 
 int main()
 {
+	shared_ptr < int32> ptr;
+	bool result = std::atomic_is_lock_free(&ptr);
+
 	thread t1(Push);
 	thread t2(Pop);
 	thread t3(Pop);
