@@ -1,0 +1,412 @@
+
+
+        Lock Free Queue
+
+
+이번 시간은 락 프리 큐에 대한 실습입니다.
+
+락 프리 큐는 락 프리 스택에 비해 한단계 더 어렵다고 합니다. 게다가 이번 파트에서 사용하지도 않을것이기 때문에 
+한번 배우고 이해해보려 노력은 해보겠지만 잘 이해가 가지 않는다고 한다면 넘어가도 무방합니다. 
+꼭 필요해 질 때 다시 배워보면 되는 정도 입니다. 
+
+먼저 본 실습에 앞서 멀티쓰레드 환경 기준이 아닌 싱글 쓰레드 기준으로 락 프리 큐를 만들어 보는 시간부터 가져 볼겁니다. 
+
+락프리 큐도 노드 기반으로 만들겠습니다. 
+	struct Node
+	{
+		shared_ptr<T> data;
+		Node* next = nullptr;
+	};
+
+
+그리고 락프리 큐를 복사하는것을 금지하기 위한 코드도 추가합니다. 
+	LockFreeQueue(const LockFreeQueue&) = delete;
+	LockFreeQueue& operator= (const LockFreeQueue&) = delete;
+
+스택은 컨테이너의 맨 앞을 가리키는 노드인 _head 가 있었고 이 _head에 Push도 하고 Pop도 했었습니다. FILO 선입 후출의 원리로 동작했기 때문인데 
+큐는 FIFO 선입 선출 원리로 동작하기 때문에 Push는 _head에 하는것은 같고 Pop을하는 곳은 _tail이라는 맨 마지막 노드를 가리키는 포인터를 들고 있을겁니다.
+private:
+	Node* _head;
+	Node* _tail;
+
+처음에 데이터가 없을때를 가정해보면 _head와 _tail 둘다 nullptr 인 상태로 있을겁니다. 그런데 이런 형태로 만들게되면 나중에 _head에 데이터를 뽑아쓰고 
+_tail에 데이터를 밀어넣거나 하는 식으로 만들어 줘야 하는데 _head 와 _tail이 각자 따로 떨어져 있게 되면 나중에 락프리로 변환하기가 어렵습니다. 
+그래서 중간에 어떤 더미 노드를 하나 만들어서 _head와 _tail이 참조하고 있게끔 할것입니다. 
+실질적으로 데이터가 비었는지를 판별할때 _head 와 _tail이 같은 더미노드를 가리키고 있는지를 체크해서 판별해주게 될겁니다. 
+
+	LockFreeQueue() : _head(new Node), _tail(_head)
+	{
+
+	}
+
+기본생성자에서 _head에 아무것도 없는 노드를 생성해주고 _tail도 _head를 참조하게 해주겠습니다. 
+
+이제 Push를 만들어 볼것입니다. 여러 버전이 있겟지만 여기서는 인자로 const T& 타입의 인자를 받아서 Push하는 버전을 만들어 보겠습니다.
+	void Push(const T& value)
+	{
+		shared_ptr<T> newData = make_shared<T>(value);
+
+		Node* dummy = new Node();
+
+		Node* oldTail = _tail;
+		oldTail->data.swap(newData);
+		oldTail->next = dummy;
+
+		_tail = dummy;
+	}
+푸시 하는 방법은 기존 더미노드뒤에 새로운 노드를 만들어서 데이터를 넣어주는게 아니라 기존에 있던 더미노드에 추가할 데이터를 넣고 그 뒤에 
+새로운 더미데이터를 붙힌다음 _tail이 새로운 더미를 가리키고 있게 하겠습니다.
+
+다음으로 TryPop입니다.
+ 	shared_ptr<T> TryPop()
+	{
+		Node* oldHead = PopHead();
+		if (oldHead == nullptr)
+			return shared_ptr<T>();
+
+		shared_ptr<T> res(oldHead->data);
+		delete oldHead;
+
+		return res;
+	}
+
+먼저 oldHead에 Pop할 데이터를 헬퍼 함수인 PopHead로 꺼내오고 그 노드가 비었는지를 체크하고 있습니다. 
+oldHead가 nullptr 이라면 빈 shared_ptr을 반환하고 아니라면 oldHead의 데이터를 꺼내서 반환하고 그전에 oldHead는 삭제합니다. 
+
+헬퍼 함수인 PopHead입니다. 
+	Node* PopHead()
+	{
+		Node* oldHead = _haed;
+		if (oldHead == _tail)
+			return nullptr;
+		
+		_head = oldHead->next;
+		return oldHead;
+	}
+별것 없이 꺼낼 데이터인 _head가 비어있는지를 확인하는데 처음에 더미 노드를 넣어 두었으니 _head와 _tail이 같다면 더미노드 밖에 없는 빈 큐 라는 것이기 때문에 
+그렇게 체크하고 있습니다. 
+
+지금 만든 이 LockFreeQueue는 단일 쓰레드만 동작한다는 가정에서 만든것이고 
+
+그러나 불행하게도 이걸 멀티쓰레드 환경에 적용한다고 하면 경합이 붙는 곳이 생각보다 많습니다. 
+경합이 붙는 부분은 하나 씩 살펴보겠습니다. 
+
+먼저 Push입니다. 
+
+	void Push(const T& value)
+	{
+		shared_ptr<T> newData = make_shared<T>(value);
+
+		Node* dummy = new Node();
+
+		Node* oldTail = _tail;
+		oldTail->data.swap(newData);
+		oldTail->next = dummy;	
+
+		_tail = dummy;
+	}
+스택보다 큐가 더 어렵다고 하는데 그 이유가 스택은 Push 할때 새로 넣어줄 데이터를 각 쓰레드의 스택메모리에 따로 데이터를 생성해서 밀어 넣는 부분에서만 
+경합을 하기 때문에 어찌 됐건 데이터 자체는 혼자 다루고 있어서 경합이 붙지 않았습니다. 
+
+그런데 큐에경우에는 데이터를 다룰 때 Push는 _tail 쪽으로 넣어주고 Pop은 _head 쪽으로 빼게 되는데 그래서 Push나 Pop 둘다 공용으로 다루고 있는 노드를 건드리게 
+됩니다. 
+그래서 위의 Push 코드에서는 oldTail에 _tail을 복사해오고 하는 부분 부터 위험하고 
+
+Pop에서는 
+ 	shared_ptr<T> TryPop()
+	{
+		Node* oldHead = PopHead();
+		if (oldHead == nullptr)
+			return shared_ptr<T>();
+
+		shared_ptr<T> res(oldHead->data);
+		delete oldHead;
+
+		return res;
+	}
+
+PopHead 로 _head의 데이터를 가져오는 부분부터 경합이 일어날 가능성이 생겨서 위험합니다. 
+
+
+이제 이 위의 코드를 기준으로 경합문제를 해결한 LockFreeQueue를 만들어 보겠습니다. 
+락프리 프로그래밍은 이미 많은 연구가 이뤄진 만큼 문제를 해결하기 위한 많은 알고리즘들이 있겠지만 이번에는 바로 이전 LockFreeStack 을 구현한 방법중에 
+레퍼런스 카운팅을 관리하는 방법으로 구현해볼겁니다. 
+
+대략적인 방법은 스택때와 비슷한데 추가적인 경합이 생겨서 그부분을 처리해줘야 합니다. 
+
+	struct Node;
+
+	struct CountedNodePtr
+	{
+		int32 externalCount; // 참조권 카운트
+		Node* ptr = nullptr;
+	};
+
+	struct NodeCounter
+	{
+		uint32 internalCount : 30;	// 참조권 반환 관련
+		uint32 externalCountRemaining : 2;	// Push & Pop 다중 참조권 관련 
+	};
+	
+	struct Node
+	{
+		Node()
+		{
+			NodeCounter newCount;
+			newCount.internalCount = 0;
+			newCount.externalCountRemaining = 2;
+
+			count.store(newCount);
+
+			next.ptr = nullptr;
+			next.externalCount = 0;
+
+		}
+
+		void ReleaseRef()
+		{
+			// TODO
+		}
+
+		atomic<T> data;
+		atomic<NodeCounter> count;
+		CountedNodePtr next;
+	};
+추가되는 구조체들입니다. CountedNodePtr는 스택 때도 다뤘던 내용입니다. 동시에 데이터에 접근할때 참조할 번호표를 뽑는 externalCount와 데이터를 포인터로 
+같이 들고 있는 형태이고 
+NodeCounter 에서는 internalCount와 externalCountRemaining 이라는 uint32 카운트를 들고 있는데 뒤에 : 30, : 2 라는 부분은 
+uint32 타입이기는 하지만 각각 30비트와 2비트만 사용하겠다는 의미이고 이렇게 쪼개면 두 데이터가 합쳐서 32 비트 안에 들어가게 됩니다. 
+internalCount는 참조권을 얻은 쓰레드들이 실제 데이터 사용권을 다투고 데이터를 삭제할때 사용되는 카운트였고 externalCountRemaining는 아직 어떤 역할을 할지 
+안나왔지만 진행하면서 알아볼겁니다. 
+사용할 노드는 data를 아토믹 객체로 들고 있을것이고 또 NodeCounter도 아토믹 객체로 들고 있을겁니다. 다음 노드를 가리키는 next는 CountedNodePtr로 들고 있습니다.
+사실 스택에 비해서 count를 더 들고 있는겁니다. 
+
+노드의 생성자에서는 count의 기본값을 internalCount 는 0, externalCountRemaining 은 2로 초기화 합니다. 
+next 는 ptr = nullptr, externalCount = 0 으로 초기화 합니다.
+
+또 ReleaseRef 라는 함수의 내용은 나중에 채워줄겁니다. 
+
+_head와 _tail도 타입을 바꿔줍니다. 
+private:
+	atomic<CountedNodePtr> _head;
+	atomic<CountedNodePtr> _tail;
+
+스택에서 사용하던 것과 비슷한 내용입니다. 참조카운트를 관리해서 동시에 삭제하지 못하도록 하는 용도였습니다. 
+
+
+이제 Push를 다시 만들어볼것입니다. 
+락 프리 큐에서 데이터를 밀어넣어주는 과정은 _tail 쪽으로 데이터를 넣어주는 방법인데 이미 _tail은 더미 노드를 가리키고 있을겁니다. 
+데이터를 추가할때 더미 데이터 앞에 새로운 데이터를 넣어주는게 아니라 기존에 있던 더미데이터에 새로운 데이터를 덮어 씌우고 그 뒤로 새로 더미노드를 만들어 
+붙힌다음 그걸 _tail이 가리키고 있게 할것입니다. 
+
+그리고 나서 Push에 접근할 여러 쓰레드들에게 _tail에 접근할 번호표를 뽑게 하는 헬퍼 함수를 만들겁니다. 
+IncreaseExternalCount라고 하는데 이전 락 프리 스택에서 만들어봤던 IncreaseHeadCount 와 거의 비슷한 동작을 할겁니다.
+대신 큐에서는 Pop 이나 Push 에서 각각 _head 와 _tail에 접근하게 되는데 두 군데에 공용으로 사용될겁니다. 
+아무튼 이 IncreaseExternalCount 에서 동작하는 내용은 
+- 1. while문을 돕니다. CountedNodePtr 타입의 newCounter 라는 새로운 포인터를 만들고 여기에 인자로 받은 oldCounter를 대입합니다. 
+  2. newCounter의 externalCount를 1 증가 시킵니다. 
+  3. 조건문 으로 CAS를 할것입니다. _tail.compare_exchange_strong(oldCounter, newCounter) 이 참이라면 oldCounter.externalCount = newCounter.externalCount
+     후 break 
+이 함수에서는 가장 먼저 들어온 쓰레드가 _tail의 externalCount 와 oldTail이 같기 때문에 승리가 될것이고 그러면 oldTail의 externalCount를 newCounter의 값으로 갱신합니다. 
+그게 아니라고 하면 다시 루프를 돌면서 경합에서 승리자가 될때 까지 시도를 하게 됩니다. 
+
+아무튼 이 참조권 경쟁을 통과 한 쓰레드들은 참조를 할 권리만 얻은것이지 수정, 삭제는 다시 소유권 경쟁을 뚫고 이긴 쓰레드가 권리를 가집니다. 
+소유권 획득 할 때는 IncreaseExternalCount에 인자로 _tail과 oldTail을 주고 실행한 후에는 동시에 Push하는 쓰레드 하나당 새로 추가하는 노드의 externalCount가 1씩 증가한 상태가 
+됩니다.
+그리고 가장 먼저 도착한 쓰레드인것을 판별하기 위해서 
+T* oldData = nullptr 이라는 변수와 oldTail.ptr->data 와 CAS를 합니다. 이전 _tail이 가리키던 더미노드는 더미 데이터 이다 보니 data가 nullptr 입니다. 
+둘이 같다면 Push 함수의 맨처음 만들어 뒀던 newData.get() 으로 oldTail의 값을 바꿔줍니다. 이 후로는 oldTail.ptr->data 가 nullptr이 아니기 때문에 
+늦은 쓰레드는 여기에 접근하지 못합니다. 
+
+CAS 를 통과한 조건문 안에서는 oldTail.next 를 만들어 뒀던 dummy로 이어줍니다. 그리고 나서 기존의 _tail이 dummy를 가리키도록 해줘야 하는데 
+oldTail = _tail.exchange(dummy); 
+이런 코드로 바꿔 주고 있습니다. 의미는 _tail의 값을 oldTail에 대입해준 다음 dummy를 tail에 대입해주는 걸 원자적으로 동작하도록 합니다. 
+
+이제 데이터 추가가 끝났으니 참조 카운트들을 줄여줘야 합니다. 
+	static void FreeExternalCount(CountedNodePtr& oldNodePtr)
+	{
+		Node* ptr = oldNodePtr.ptr;
+		const int32 countIncrease = oldNodePtr.externalCount - 2;
+
+		NodeCounter oldCounter = ptr->count.load();
+
+		while (true)
+		{
+			NodeCounter newCounter = oldCounter;
+			newCounter.externalCountRemaining--; // TODO
+			newCounter.internalCount += countIncrease;
+
+			if (ptr->count.compare_exchange_strong(oldCounter, newCounter))
+			{
+				if (newCounter.internalCount == 0 && newCounter.externalCountRemaining == 0)
+					delete ptr;
+
+				break;
+			}
+		}
+	}
+
+FreeExternalCount(oldTail);
+이런 헬퍼 함수를 사용해서 카운트를 줄여주는데 이 함수의 내용은 인자로 먼저 CountedNodePtr 을 참조값으로 받습니다. 받은 포인터의 count들을 줄여주려는겁니다. 
+함수안에서 먼저 3개의 변수를 만듭니다.
+사용이 끝나서 카운트를 줄여줄 oldNodePtr 의 ptr을 받는 Node* ptr, oldNodePtr를 참조하고 있는 쓰레드의 카운트에다 2를 빼준 countIncrease, 
+oldCounter의 internalCount와 externalCountRemaining을 관리하고 있는 count를 받아주는 oldCounter 세가지 변수를 먼저 만들고 난 뒤에 
+무한 루프를 돕니다. 
+루프 안에서는 매 시도 마다 oldCounter 를 수정할 newCounter를 만듭니다. 들고 있는 데이터들을 externalCountRemaining은 1을 빼주고 internalCount는 countIncrease
+를 더해주는데 이것은 참조하고 있다는 카운트를 1 줄여주려는 부분입니다. 
+하지만 항상 한번에 하나의 쓰레드가 이 작업을 시도하고 있다고 보장할 수 없기 때문에 CAS 를 통해 경합을 해봐야 합니다. 
+
+가장 먼저 도착한 쓰레드는 당연히 ptr->count 와 oldCounter가 같을테니 CAS 를 통과하면서 ptr->count 를 newCounter로 교체합니다. 
+그 안에서 다시 조건문을 체크하는데 newCounter.internalCount == 0 이란 소리는 락프리 스텍에서의 의미와 같습니다. 
+externalCount는 초기값 1부터 시작해 하나의 쓰레드가 참조할때 마다 1씩 증가하게 되고 internalCount는 초기값 0부터 시작해서 쓰레드마다 이 데이터를 사용하지 않게 되면 
+1씩 줄여주는 데 이 값이 0 인지를 체크하는것은 internalCount에 더해줄 countIncrease가 0 이었다는 말이고 이것은 externalCount 가 2 인 상태 즉 하나의 쓰레드만 
+이 데이터를 참조하고 있다는것입니다. 
+
+그리도 또 newCounter.externalCountRemaining 도 0인지를 체크하고 있는 의미가 무었이냐면 
+우리가 IncreaseExternalCount 라는 헬퍼함수에서 데이터에 쓰레드가 참조할때 마다 externalCount를 1씩 증가시켜주고 있었습니다. 
+이 작업을 Push에서도 할 수 있고 Pop할 때도 할 수 있습니다. 여기서 묘한 상황이 생길수 있는게 지금은 _tail 쪽에 데이터를 Push 하고 있는 입장이었는데 
+간발의 차이로 어떤 쓰레드에서는 같은 데이터를 중간에 꺼내가가지고 데이터를 날리게 되면 이미 없는데이터를 delete해버리게 됩니다. 
+그래서 두번째 카운터인 externalCountRemaining을 둬서 2에서 시작해서 0이 된다는 말은  Push에서도 다 사용했고 Pop에서도 다 사용했다는 보장이 됩니다. 
+정리하면 Push, Pop 두 함수에서 공유하고 있는 데이터를 어느 한쪽이 먼저 끝났다고 해서 맘대로 삭제하지 못하고 두 함수 모두에서 완전히 사용되었다는걸 보장하기위한 카운트 입니다. 
+
+이 FreeExternalCount 를 통과하면서 완전히 데이터를 삭제 할 수도 있고 아니면 일단 데이터의 internalCount와 externalCountRemaining을 갱신해주는 걸로 끝날 수도 있습니다. 
+
+아무튼 여기까지 들어올 수 있는 쓰레드는 데이터에 대한 수정권, 소유권을 가진 쓰레드만 들어올 수 있었고 나머지 쓰레드들은 
+Node::ReleaseRef 를 실행하는 부분으로 가는것이었습니다. 
+
+	void ReleaseRef()
+	{
+		NodeCounter oldCounter = count.load();
+
+		while (true)
+		{
+			NodeCounter newCounter = oldCounter;
+			newCounter.internalCount--;
+
+			// 끼어들 수 있음
+			if (count.compare_exchange_strong(oldCounter, newCounter))
+			{
+				if (newCounter.internalCount == 0 && newCounter.externalCountRemaining == 0)
+					delete this;
+
+				break;
+			}
+		}
+	}
+
+이 함수는 락 프리 스택에서와 똑같이 소유권을 얻지 못한 쓰레드는 그냥 internalCount를 1 줄이고 끝나는 부분을 멤버 함수화 한것입니다. 
+노드 카운터를 가지고 오고 internalCount을 1 줄여줍니다. 
+다른 쓰레드에서도 데이터의 count 에 접근 할 수 있고 count 가 atomic<NodeCounter>이라고 해도  internalCount, externalCountRemaining 
+두개의 값으로 이뤄져있기때문에 그냥 원자적으로 동작하겠거니 건드릴 수 없고 이런 식으로 CAS를 통해서 건드립니다. 
+(이 패턴은 다음에 알아볼 read write lock 을 배울때 다시 알아볼겁니다.)
+
+여기서 끝나는게 아니고 CAS를 하고 여기서 또 데이터를 삭제할 수 있는지를 체크해주고 끝냅니다. 
+Push나 Pop 에서 FreeExternalCount 를 통해 삭제하려고 했지만 괜히 늦게 접근한 쓰레드때문에 internalCount 가 0이 아니라 삭제 하지 못했다면 
+마지막으로 나가는 쓰레드가 마무리로 데이터를 삭제해 주고 나가는겁니다. 
+
+이렇게 해서 락 프리 큐의 Push 에 대한 코드가 완료 되었습니다. 
+
+
+이어서 TryPop도 비슷한 로직으로 만들어 보겠습니다.
+ 	shared_ptr<T> TryPop()
+	{
+		CountedNodePtr oldHead = _head.load();
+
+		while (true)
+		{
+			// 참조권 획득 (externalCount를 현시점 기준 +1 을 한 애가 승리)
+			IncreaseExternalCount(_head, oldHead);
+
+			Node* ptr = oldHead.ptr;
+			if (ptr == _tail.load().ptr)
+			{
+				ptr->ReleaseRef();
+				return shared_ptr<T>();
+			}
+
+			// 소유권 획득 ( head = ptr->next 로 바꾼 애가 승리)
+			if (_head.compare_exchange_strong(oldHead, ptr->next))
+			{
+				T* res = ptr->data.exchange(nullptr);
+				FreeExternalCount(oldHead);
+				return shared_ptr<T>(res);
+			}
+
+			ptr->ReleaseRef();
+		}
+	}
+먼저 Pop할 데이터는 _head 가 가리키고 있을겁니다. 
+
+		CountedNodePtr oldHead = _head.load();
+
+이렇게 가져오고 접근하는 쓰레드들이 oldHead에 대해 참조할 순번을 정하는 참조권 획득을 먼저 해야 할겁니다. 
+		while (true)
+		{
+			// 참조권 획득 (externalCount를 현시점 기준 +1 을 한 애가 승리)
+			IncreaseExternalCount(_head, oldHead);
+
+
+		}
+
+while 문 안에서 참조권 소유권 삭제 같은 작업들이 일어날겁니다. 아까 Push에서 사용했던 IncreaseExternalCount 로 _head 와 oldHead의 
+externalCount++ 를 해주는데 여기서 잠깐 집고 넘어가야 하는점이 있습니다. 
+
+LockFreeQueue 기본생성자에서 _head를 초기화 해주는 부분을 조금 수정해야합니다. 
+	LockFreeQueue()
+	{
+		CountedNodePtr node;
+		node.ptr = new Node;
+		node.externalCount = 1;
+
+		_head.store(node);
+		_tail.store(node);
+	}
+처음 LockFreeQueue 객체를 생성했을때는 _head, _tail 모두 같은 더미노드를 가리키고 있을것이지만 이후 데이터들이 추가되면 _head, _tail 각각 
+다른 노드를 가리키고 있어서 거의 동시에 Push, Pop을 해도 서로 externalCount 에 간섭이 가지 않을겁니다. 
+
+다음은 TryPop을 했는데 데이터가 없을때 즉, oldHead 의 ptr 과 _tail.ptr 이 같을 경우입니다. 
+			Node* ptr = oldHead.ptr;
+			if (ptr == _tail.load().ptr)
+			{
+				ptr->ReleaseRef();
+				return shared_ptr<T>();
+			}
+
+그냥 텅빈 데이터를 뱉고 있습니다. 
+
+다음은 이제 본격적으로 데이터를 반환하면서 Pop하는 부분인데 직접 데이터를 수정하는 부분이다 보니 경합을 통해 승자 쓰레드를 가려야합니다. 
+
+			// 소유권 획득 ( head = ptr->next 로 바꾼 애가 승리)
+			if (_head.compare_exchange_strong(oldHead, ptr->next))
+			{
+				T* res = ptr->data.exchange(nullptr);
+				FreeExternalCount(oldHead);
+				return shared_ptr<T>(res);
+			}
+
+			ptr->ReleaseRef();
+
+가장 먼저 도착한 쓰레드가 _head와 oldHead가 일치 할 것이고 성공했다면 _head = ptr->next 로 바꿔서 oldHead를 분리합니다. 
+이 안에서 데이터를 res 라는 변수에 담아 두고 나서 기존의 oldHead.ptr 인 ptr 의 데이터를 nullptr로 밀어버립니다. 
+이제 이 데이터의 참조를 끝낼것이기 때문에 FreeExternalCount로 카운트를 줄이고 가능하다면 삭제 까지 해줍니다. 
+res를 shared_ptr<T> 로 반환합니다. 
+
+소유권 획득 경합에 진 쓰레드는 internalCount 를 1줄여주는 ReleaseRef 를 해줍니다. 
+
+
+Push와 TryPop이 생각보다 유사 했습니다. 
+
+LockFreeQueue 의 구현이 끝났으니 실습을 해보겠습니다. 
+
+
+
+락 프리 스택을 이해 하였다면 거기에 추가적인 기능이 생긴겁니다. Push나 Pop이 같은 동일한 위치에서 일어나는게 아니기 때문에 
+동시에 접근할 수도 아닐 수도 있기때문에 externalCountRemaining 이라는 개념이 들어갔습니다. 
+
+- 결론 
+락프리 프로그래밍을 배워보았는데 락을 사용하지 않는 목적은 경합 상태를 피하고 더욱 빠른 구동속도를 위한 프로그래밍 기법이었습니다. 
+하지만 실제로 사용해 보면 락을 사용하지 않는다 뿐이지 경합은 여전히 일어나고 CAS로 경합을 해결하고 있습니다. 
+거기에 락 프리 스택, 락 프리 큐 에서 데이터를 Push 하거나 Pop 하는 수정을 할때 멀티쓰레드 환경에서 같은 데이터를 여러 쓰레드가 
+참조 하고 있을 수 있기때문에 안전하게 수정, 삭제 하기 위해 참조 카운트를 세거나 하는 방식을 사용했습니다. 
+
+이런 락 프리 프로그래밍이 자주 사용되지는 않지만 의미는 있을것입니다. 큰 진행과정 같은것을 위주로 기억하면 좋겠습니다. 

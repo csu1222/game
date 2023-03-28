@@ -609,5 +609,16 @@ t2,t3 에서 TryPop
 	oldHead는 externalCount == 1, data == 10 
 	IncreaseHeadCount 에서 newCounter에 oldHead를 복사 
 	newCounter.externalCount++;
-	 
+	CAS _head(externalCount ==1 , data == 10) 과 oldHead(externalCount ==1 , data == 10) 를 비교 같다면 
+	_head = newCounter;
+	oldCounter의 externalCount 도 newCounter와 같게 2 복사 후 탈출 
+}
+{
+	// t3
+	oldHead는 externalCount == 2, data == 10 
+	IncreaseHeadCount 에서 newCounter에 oldHead를 복사 
+	newCounter.externalCount++;
+	CAS _head(externalCount ==2 , data == 10) 과 oldHead(externalCount ==2 , data == 10) 를 비교 같다면 
+	_head = newCounter;
+	oldCounter의 externalCount 도 newCounter와 같게 3 복사 후 탈출 
 }
