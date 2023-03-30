@@ -1,0 +1,300 @@
+
+
+
+            Thread Manager
+
+
+길고 어려웠던 락 프리 프로그래밍이 끝났고 배워보니 굳이 이런 어려운 코드를 사용해야하는지 생각이 듭니다. 
+어떤 이유가 있어서 꼭 락프리 프로그래밍을 해야겠다면 직접 만드는 것 보다는 마이크로소프트에서 이미 만들어 놓은 라이브러리를 활용하는게 좋을것 같습니다. 
+
+
+아무튼 본격적으로 본래 주제였던 서버 프로그래밍의 진도를 나아가 보겠습니다. 
+
+일단은 쓰레드의 표준 라이브러리의 사용법에 대해 알아보고 있었는데 
+쓰레드를 사용할 때 마다 
+
+std::thread trd; 
+
+이렇게 직접 만들어도 틀린것은 아니지만 쓰레드 하나하나 따로 관리하는것보다 총괄적으로 쓰레드를 관리하는 기능이 있으면 더 좋을것 같습니다. 
+그리고 겸사 겸사 ServerCore 에서 사용할 전역 변수, TLS 변수, 매크로 같은것들을 만들어 보겠습니다. 
+
+
+ServerCore 프로젝트를 정리해줄건데 Main이라는 필터를 만들어서 이전에 Util 필터에 있었던 CorePch, pch, Types 같은 파일들을 Main 필터 아래로 옮겨 주었습니다. 
+
+Types.h 에서 자주 사용할 타입을 추가해주겠습니다. 
+->  Types.h
+   
+    #include <mutex>
+    #include <atomic>
+
+    template<typename T>
+    using Atomic = std::atomic<T>;
+    using Mutex = std::mutex;
+    using CondVar = std::condition_variable;
+    using UnipueLock = std::unique_lock<std::mutex>;
+    using LockGuard = std::lock_guard<std::mutex>;
+
+    atomic를 템플릿 문법과 묶어서 정의 해주고 있습니다. 그냥 원래대로 사용해도 상관은 없지만 혹시나 atomic, mutex, condition_variable 등을 직접 만들어 사용하고 
+    싶을 경우도 있을 텐데 이렇게 대문자를 붙인 typedef 을 사용해서 사용하다 보면 나중에 혹시나 전체적으로 이 객체들의 내용을 바꾸고 싶어지면 
+    여기 Types.h 로 와서 변경해주면 모든 프로젝트에 수정이 될것입니다. 
+
+
+다음은 ServerCore의 Main 필터에 새로운 클래스들을 추가해줄건데 CoreGlobal, CoreTLS 는 클래스 생성으로 cpp 파일과 h 파일 하나씩을 만들어 주고 
+CoreMacro 라는 헤더 파일 하나 까지 새로 만들어 주었습니다. 
+CoreGlobal 에서는 전역으로 사용할 변수들을 관리해줄 것이고 CoreTLS은 쓰레드에서 사용할 TLS(Thread Local Storage)를 관리해줄겁니다.
+CoreMacro는 온갖 매크로 들을 이 헤더 파일에 넣어줄겁니다. 
+
+->  CorePch
+    새로 만들어준 CoreGlobal, CoreTLS, CoreMacro 를 전역헤더인 CorePch에 추가 해줘야 합니다. 
+
+    #include "CoreGlobal.h"
+    #include "CoreMacro.h"
+    #include "CoreTLS.h"
+
+그리고 Thread 라는 필터를 하나 더 만들고 그 안에 ThreadManager 라는 클래스를 추가해 헤더 와 cpp 파일을 만들어 주겠습니다. 
+
+->  CoreTLS
+    먼저 각각의 쓰레드마다 가지고 있을 TLS의 내용을 먼저 추가해주겠습니다. 
+    
+    // CoroTLS.h
+    extern thread_local uint32 LThreadId;
+
+    먼저 쓰레드마다의 아이디를 들고 있게 해줄겁니다. 굳이 이걸 만들어 주지 않아도 GetId 를 하면 고유한 아이디를 받아올 수 있기는한데 이렇게 받아온 아이디는 
+    순서대로 되어 있지 않고 중구난방으로 발급되기 때문에 알아보기 쉽게 쓰레드 생성순서대로 아이디를 관리해주겠습니다. 
+
+    // CoreTLS.cpp
+    #include "pch.h"
+    #include "CoreTLS.h"
+
+    thread_local uint32 LThreadId = 0;
+
+    일단 이렇게 들고 있게 해주고 이후에 네트워크랑 연결이 되면 거기서 쓰레드를 생성할때 마다 아이디를 발급해주게 될겁니다. 
+
+
+->  CoreMacro
+    매크로는 우리가 사용할 define 같은걸 넣어 줄건데 오늘 일단 간단하게 몇개만 넣어주겠습니다. 
+    #pragma once
+
+    #define	CRASH(cause)						\
+    {											\
+        uint32* crach = nullptr;				\
+        __analysis_assume(crash != nullptr);	\
+        *crash = 0xDEFABEEF;					\
+    }											
+
+    이 define은 일부러 크래시를 내주고 싶을때 사용하는 매크로입니다. 
+    매크로를 사용하지않고 일부러 크래시를 내고 싶어서 말도안되는 변수를 만든다거나 하면 컴파일러가 알아서 수정해버릴 수도 있기 때문에 
+    명시적으로 크래시를 내기위해서 따로 코드를 만들어 줘야하는데 
+
+    이 define을 해석해 보면 일단 각 줄마다 \ 가 붙어 있는것은 #define 을 여러줄 인식시키기 위해서 이고 
+    CRASH() 라는 매크로를 사용하면 일단 nullptr 를 가리키는 포인터 crash 를 하나 만든 다음 
+    __analysis_assume(crash != nullptr); 을 합니다. 이 코드가 의미하는것은 crash 가 실제 nullptr 이든 아니든 일단은 nullptr이 아닌것으로 간주하라는 말입니다. 
+    컴파일러에게 이런 거짓말을 한 다음 *crash 의 값으로 임의의 값을 곧바로 넣어주면 그때 프로그램이 뻗게 될겁니다. 
+
+    GameServer.cpp 에서 테스트를 해보겠습니다. 일단 ServerCore 프로젝트를 빌드해주고 
+    CRASH("Test");
+    를 실행해 보면 실행되다가 갑자기 crash 는 nullptr인데 쓰기 엑세스 위반을 했다고 크래시가 납니다. 
+
+    이렇게 인위적인 크래시를 내고 싶을때 사용할 매크로를 만들어 주고 이후에 필요한 매크로들을 이 CoreMacro에 만들어 주게 될겁니다. 
+
+    CRASH 를 응용해서 어떤 조건을 체크해서 크래시를 내고 싶을때 사용할 ASSERT_CRASH 를 추가로 만들어 주겠습니다. 
+    
+    #define ASSERT_CRASH(expr)					\
+    {											\
+        if (!(expr))							\
+        {										\
+            CRASH("ASSERT_CRASH");				\
+            __analysis_assert(expr);			\
+        }										\
+    }
+
+    int main()
+    {
+        int32 a = 3;
+
+        ASSERT_CRASH(a != 3);
+    }
+    ASSERT_CRASH 의 인자가 false 라면 크래시를 내는 매크로입니다. 
+
+
+->  CoreGlobal
+    오늘 내용중 가장 중요한 부분인 CoreGlobal 입니다. 
+    여기서는 전역으로 사용할 매니저 류의 클래스들을 만들어 주겠습니다. 
+
+    ->  ThreadManager
+        먼저 ThreadManager 의 내용을 간단하게 만들어 주겠습니다. 
+
+        // ThreadManager.h
+                
+        #include <thread>
+        #include <functional>
+
+        class ThreadManager
+        {
+        public:
+            ThreadManager();
+            ~ThreadManager();
+
+            void Launch(function<void(void)> callback);
+            void Join();
+
+            static void InitTLS();
+            static void DestroyTLS();
+
+        private:
+            Mutex			_lock;
+            vector<thread>	_threads;
+        };
+
+        ThreadManager의 헤더 내용입니다. 
+
+        클래스의 내용을 하나씩 살펴 보겠습니다. 
+        먼저 생성자입니다. 
+        ThreadManager::ThreadManager()
+        {
+            // Main Thread
+            InitTLS();
+        }
+        이후 만들어줄 InitTLS 를 해주고 있습니다. 메인 쓰레드의 TLS를 초기화 해주고 있고 
+
+        소멸자에서는        
+        ThreadManager::~ThreadManager()
+        {
+            Join();
+        }
+        쓰레드들이 소멸하기 전에 Join으로 쓰레드 끼리 묶어 주면서 소멸합니다. 
+
+        다음은 Launch 입니다.         
+        void ThreadManager::Launch(function<void(void)> callback)
+        {
+            LockGuard guard(_lock);
+
+            _threads.push_back(thread([=]()
+                {
+                    InitTLS();
+                    callback();
+                    DestroyTLS();
+                }));
+        }
+        일단 인자가 생소한데 이 인자 형태를 넣어주기 위해서 functional 이라는 라이브러리를 추가 해준겁니다. 여러가지 function 타입을 사용할수 있게 해주는데
+        여기서 사용된 funtional<void(void)> 는 <반환타입(인풋타입)> 을 뜻하는 형태입니다. 이런 시그니쳐의 callback 함수를 인자로 받아주겠다는 의미입니다. 
+        Launch 안에서는 먼저 혹시 여러 쓰레드에서 Launch를 동시에 사용할 수도 있으니 LockGuard 를 걸어주고 있고 
+        그 후 thread 들을 vector 로 담아 놓을 _threads 에 push_back을 해줍니다. 푸시 해줄 쓰레드를 람다식으로 표현하고 있는데 
+        순서대로 InitTLS, 인자로 받은 callback 함수, DestroyTLS 를 실행해주고 끝냅니다. 
+        이전에 실습해 봤던 thread 들은 이중 callback 만 실행하고 끝났던 것이었습니다. 여기에 TLS의 내용을 초기화 하고 쓰레드 종료시 그 TLS 를 정리하고 나가는 
+        것 뿐입니다. 
+
+        다음으로 Join 입니다. 
+        void ThreadManager::Join()
+        {
+            for (thread& t : _threads)
+            {
+                if (t.joinable())
+                    t.join();
+            }
+            _threads.clear();
+        }
+        _threads 의 원소들을 순회하면서 joinable 하다면 조인을 해주고 순회가 끝났다면 _threads를 clear 해주는 함수입니다. 여기서 사용하는 메소드들은 모두 
+        thread 클래스, vector 에서 사용하는 메소드들입니다. 
+
+        InitTLS 의 내용입니다. 
+        void ThreadManager::InitTLS()
+        {
+            static Atomic<uint32> SThread = 1;
+            LThreadId = SThread.fetch_add(1);
+        }
+        static Atomic<uint32> 로 SThread라는 아토믹 변수를 스태틱으로 만들었습니다. 값은 1 인데 
+        InitTLS 가 실행될 때 마다 이 SThread 의 값을 해당 쓰레드의 LThreadId 를 1 부터 증가하는 식으로 초기화 해주고 있습니다. 
+
+        DestroyTLS 의 경우는 지금은 아무런 역할이 없지만 나중에 쓰레드안에 동적으로 뭔가 생성되거나 한다면 그 데이터를 날려주는 역할을 할겁니다. 
+        일단 이번에는 텅빈 함수 그대로 놔두겠습니다. 
+
+        이렇게 생각보다 간단하게 ThreadManager 를 만들었습니다. 
+
+    이제 다시 CoreGlobal 로 돌아와서 왜 CoreGlobal 에서 ThreadManager 같은 매니저들을 관리하려고 하냐면 
+    앞으로 여러 매니저 들이 만들어 질 수도 있는데 그 각각의 매니저 객체들을 GameServer 에서 직접 하나씩 관리하는 것은 가독성도 안좋고 불편할것 같아서 입니다. 
+    그런 매니저 객체들을 CoreGlobal 에서 관리를 해줄것인데 그런 여러 매니저 객체들 사이에도 어떤 연계성이 있어서 생성하는 순서나 소멸하는 순서가 
+    정해진대로 진행되야 할 수도 있습니다. 그 역할을 CoreGlobal 내부에서 만들어 주겠습니다. 
+
+    이번 ThreadManager 를 싱글톤 패턴으로 만들어 줄 수도 있지만 일단 이번에는 전역 변수 처럼 관리해보겠습니다. 
+
+    // CoreGlobal.h
+    extern class ThreadManager* GThreadManager;
+
+    class CoreGlobal
+    {
+    public:
+        CoreGlobal();
+        ~CoreGlobal();
+    };
+    헤더에서는 GThreadManager 라고 전역으로 일단 전방선언을 해주고 
+    생성자와 소멸자만 일단 만들었습니다. 
+
+    // CoreGlobal.cpp
+    #include "pch.h"
+    #include "CoreGlobal.h"
+    #include "ThreadManager.h"
+
+    ThreadManager* GThreadManager = nullptr;
+
+    CoreGlobal::CoreGlobal()
+    {
+        GThreadManager = new ThreadManager();
+    }
+
+    CoreGlobal::~CoreGlobal()
+    {
+        delete GThreadManager;
+    }
+    GThreadManager 를 일단 nullptr로 만들어 주고 시작합니다. 
+    그리고 생성자에서 new 로 객체를 동적 생성 합니다. 
+    소멸자에서는 객체를 delete 해주고 있습니다. 
+    매우 간단하지만 일단 지금은 ThreadManager 하나 밖에 없기 때문에 이런것이고 나중에 더 많이 매니저 클래스가 만들어 지면 관계에 따라 객체의 생성, 소멸 순서를 맞춰주면 됩니다. 
+
+    앞으로 이 CoreGlobal 을 사용하려면 클라이언트 단에서 
+
+    CoreGlobal Core; 
+
+    이런식으로 그냥 객체를 생성해주게 되면 생성자에서 알아서 안에 들은 전역 매니저 객체들을 생성할겁니다. 
+
+
+여기까지 하면 일단 이번시간에 할 일은 끝난것 같고 실습을 한번 해보겠습니다. 
+GameServer.cpp 에서 실습할것입니다. 
+
+
+#include "ThreadManager.h"
+
+CoreGlobal Core;
+
+void ThreadMain()
+{
+	while (true)
+	{
+		cout << "Hello! I am thread ... " << LThreadId << endl;
+		this_thread::sleep_for(1s);
+	}
+}
+
+int main()
+{
+	for (int32 i = 0; i < 5; i++)
+	{
+		GThreadManager->Launch(ThreadMain);
+	}
+
+	GThreadManager->Join();
+}
+
+이런 코드로 실습을 해줄겁니다. CoreGlobal 을 생성하면서 전역 ThreadManager 객체 GThreadManager 를 만들었고 
+그 메소드인 Launch 를 통해 ThreadMain 이라는 함수를 실행해줄겁니다. 
+
+메인 쓰레드가 1번이고 Launch 로 생성한 쓰레드들은 2 ~ 6 번 아이디를 가지고 각각 1초에 한번씩 출력해주는 결과가 나옵니다. 
+
+새로운 무언가를 배운것은 아니고 지금까지 배웠던 내용들을 잘 래핑하고 조합해서 쓰기 편하게 정리를 해본 시간이었습니다. 
+
+앞으로 이런식으로 조금씩 내용들을 쌓아 올라가는 실습을 해나갈겁니다. 
+
+그리고 이제 다음시간에는 Reader-Writer Lock 이라는 것을 배울것인데 
+이것은 메인으로 사용할 mutex를 직접 구현해보는 시간을 가져보겠습니다. 기존 배웠던 표준 mutex를 그냥 사용해도 상관 없기는 한데 
+표준 mutex는 완전히 상호 배타적이라서 중첩해서 사용할 수 없을 뿐더러 mutex 를 거는 순간 다른 애들은 아예 접근하지 못하는 문제가 있습니다. 
+그래서 표준 말고 중첩해서 사용할 수 있는 Reader-Writer Lock 을 구현해보겠습니다. 
