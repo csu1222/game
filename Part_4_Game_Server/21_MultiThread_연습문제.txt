@@ -1,0 +1,88 @@
+
+
+
+        연습문제 
+
+
+지금까지 멀티쓰레드라는 개념을 알아보고, 또 멀티쓰레드의 장점, 문제점을 알아보면서 
+락, 락가드, CAS, 락프리 프로그래밍, 데드락, 아토믹, 스핀락, 이벤트락, 조건 변수, 데드락 감지, Future 객체, 메모리 모델, 
+TLS, Reader Writer Lock 등을 배웠었습니다. 
+
+이후로는 본격적으로 서버 엔진을 개발하기 위해서 스마트 포인터, 메모리 관리 그리고 네트워크 파트로 넘어가서 네트워크 통신에 대한 공부를 할것입니다.
+
+그전에 멀티쓰레드 파트를 마무리하는 기념으로 연습문제를 풀어보고 넘어가겠습니다. 간략한 복습할 문제입니다. 
+
+
+주제는 '소수 구하기' 입니다. 
+
+1과 자기 자신으로만 나누어 떨어지는 1보다 큰 양의 정수라고 합니다. 
+
+이 소수를 1 부터 100'0000 사이에 몇개나 있는지를 찾는 문제입니다. 
+
+소수 찾는 문제를 멀티쓰레드에 적용할 수 있는 이유는 이 일이 서로에게 영향을 주지 않기 때문에 병렬적으로 동작가능하기 때문입니다. 
+
+문제를 푸는 방식은 여러가지 있는데 
+
+#include <atomic>
+#include <thread>
+#include <vector>
+#include <iostream>
+using namespace std;
+
+atomic<int> result = 0;
+
+bool isPrime(int number)
+{
+	if (number <= 1)
+		return false;
+	if (number == 2 || number == 3)
+		return true;
+
+	for (int i = 2; i < number; i++)
+	{
+		if (!(number % i))
+			return false;
+	}
+
+	return true;
+}
+
+void ThreadCount(int start, int end)
+{
+	for (int i = start; i <= end; i++)
+	{
+		if (!(isPrime(i)))
+			continue;
+
+		result++;
+	}
+}
+
+int main()
+{
+	const int MAX_NUMBER = 100'0000;
+
+	// 1 ~ MAX_NUMBER까지의 소수 개수 
+
+	int coreCount = thread::hardware_concurrency();
+	int jobCount = (MAX_NUMBER / coreCount) + 1;
+
+	vector<thread> threads = vector<thread>(coreCount);
+
+	for (int i = 0; i < coreCount; i++)
+	{
+		int start = (i * jobCount) + 1;
+		int end = min(MAX_NUMBER, ((i + 1) * jobCount));
+		threads[i] = thread([start, end]()
+			{
+				ThreadCount(start, end);
+			});
+	}
+
+	for (thread& t : threads)
+		t.join();
+
+	cout << result << endl;
+}
+
+저는 이렇게 풀었습니다. 
