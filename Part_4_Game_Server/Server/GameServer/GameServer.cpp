@@ -6,66 +6,81 @@
 #include <windows.h>
 #include <future>
 #include "ThreadManager.h"
+#include "RefCounting.h"
 
-// 소수 구하기 
 
-/*
-	1과 자기 자신으로만 나누어 떨어지는 1보다 큰 양의 정수라고 합니다. 
+using WraightRef = TSharedPtr<Wraight>;
+using MissileRef = TSharedPtr<Missile>;
 
-*/
-
-atomic<int> result = 0;
-
-bool isPrime(int number)
+class Wraight : public RefCountable
 {
-	if (number <= 1)
+public:
+	int _hp = 150;
+	int _posX = 0;
+	int _posY = 0;
+};
+
+class Missile : public RefCountable
+{
+public:
+	void SetTarget(WraightRef target)
+	{
+		_target = target;
+		//target->AddRefCount();
+	}
+	
+	bool Update()
+	{
+		if (_target == nullptr)
+			return true;
+
+		int posX = _target->_posX;
+		int posY = _target->_posY;
+
+		// TODO : 쫓아가기
+
+		if (_target->_hp == 0)
+		{
+			_target->ReleaseRefCount();
+			_target = nullptr;
+			return true;
+		}
+
 		return false;
-	if (number == 2 || number == 3)
-		return true;
-
-	for (int i = 2; i < number; i++)
-	{
-		if (!(number % i))
-			return false;
 	}
 
-	return true;
-}
+	WraightRef _target = nullptr;
 
-void ThreadCount(int start, int end)
-{
-	for (int i = start; i <= end; i++)
-	{
-		if (!(isPrime(i)))
-			continue;
-
-		result++;
-	}
-}
+};
 
 int main()
 {
-	const int MAX_NUMBER = 100'0000;
+	WraightRef wraight(new Wraight());
+	wraight->ReleaseRefCount();
+	MissileRef missile(new Missile());
+	missile->ReleaseRefCount();
 
-	// 1 ~ MAX_NUMBER까지의 소수 개수 
+	missile->SetTarget(wraight);
 
-	int coreCount = thread::hardware_concurrency();
-	int jobCount = (MAX_NUMBER / coreCount) + 1;
+	// 레이스가 피격 당함
+	wraight->_hp = 0;
+	//delete wraight;
+	//wraight->ReleaseRefCount();
+	wraight = nullptr;
 
-	vector<thread> threads = vector<thread>(coreCount);
-
-	for (int i = 0; i < coreCount; i++)
+	while (true)
 	{
-		int start = (i * jobCount) + 1;
-		int end = min(MAX_NUMBER, ((i + 1) * jobCount));
-		threads[i] = thread([start, end]()
+		if (missile)
+		{
+			if (missile->Update())
 			{
-				ThreadCount(start, end);
-			});
+				//missile->ReleaseRefCount();
+				missile = nullptr;
+
+				break;
+			}
+		}
 	}
 
-	for (thread& t : threads)
-		t.join();
-
-	cout << result << endl;
+	//delete missile;
 }
