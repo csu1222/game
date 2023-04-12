@@ -78,15 +78,17 @@ public:
 	bool		operator!=(T* ptr) const { return _ptr != ptr; }
 	bool		operator<(const TSharedPtr& rhs) const { return _ptr < rhs._ptr; }
 	bool		operator>(const TSharedPtr& rhs) const { return _ptr > rhs._ptr; }
-	
+
+
 	// 생 포인터 반환 연산자
-	T*			operator*() { return _ptr; }
-	const T*	operator*() const { return _ptr; }
-				operator T* () const { return _ptr; }
-	T*			operator->() { return _ptr; }
-	const T*	operator->() { return _ptr; }
+	T* operator*() { return _ptr; }
+	const T* operator*() const { return _ptr; }
+	operator T* () const { return _ptr; }
+	T* operator->() { return _ptr; }
+	const T* operator->() const { return _ptr; }
 
 	bool IsNull() { return _ptr == nullptr; }
+
 
 private:
 	inline void Set(T* ptr)
@@ -98,7 +100,7 @@ private:
 
 	inline void Release()
 	{
-		if (ptr != nullptr)
+		if (_ptr != nullptr)
 		{
 			_ptr->ReleaseRefCount();
 			_ptr = nullptr;
