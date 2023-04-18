@@ -10,8 +10,14 @@
 #include "RefCounting.h"
 #include "Memory.h"
 
+class Player
+{
+public:
+	Player() { }
+	virtual ~Player() { }
+};
 
-class Knight
+class Knight : public Player
 {
 public:
 	Knight()
@@ -75,7 +81,11 @@ void operator delete[](void* ptr)
 
 int main()
 {
-	Knight* knight = A_new<Knight>(100);
+	Knight* k1 = A_new<Knight>(100);
 
-	A_delete(knight);
+
+	A_delete(k1);
+	
+	k1->_hp = 100;
+
 }
