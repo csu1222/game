@@ -9,6 +9,7 @@
 
 #include "RefCounting.h"
 #include "Memory.h"
+#include "Allocator.h"
 
 class Player
 {
@@ -81,11 +82,9 @@ void operator delete[](void* ptr)
 
 int main()
 {
-	Knight* k1 = A_new<Knight>(100);
-
-
-	A_delete(k1);
 	
-	k1->_hp = 100;
+	vector<Knight, StlAllocator<Knight>> v(100);
 
+
+	
 }
