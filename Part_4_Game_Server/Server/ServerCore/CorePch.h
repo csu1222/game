@@ -5,6 +5,7 @@
 #include "CoreMacro.h"
 #include "CoreTLS.h"
 #include "Container.h"
+#include "Memory.h"
 
 
 #include <Windows.h>
