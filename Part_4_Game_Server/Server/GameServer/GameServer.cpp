@@ -10,92 +10,65 @@
 #include "RefCounting.h"
 #include "Memory.h"
 #include "Allocator.h"
+#include "LockFreeStack.h"
 
-class Player
+DECLSPEC_ALIGN(16)
+class Data //: public SListEntry
 {
 public:
-	Player() { }
-	virtual ~Player() { }
+	SListEntry _entry;
+
+	int64 _rand = rand() % 1000;
 };
 
-class Knight : public Player
-{
-public:
-	Knight()
-	{
-		cout << "Knight()" << endl;
-	}
 
-	Knight(int32 hp) : _hp(hp)
-	{
-		cout << "Knight(hp)" << endl;
-	}
-
-	~Knight()
-	{
-		cout << "~Knight()" << endl;
-	}
-
-	//static void operator delete(void* ptr)
-	//{
-	//	cout << "Knight delete!" << endl;
-	//	::free(ptr);
-	//}
-
-	//static void* operator new(size_t size)
-	//{
-	//	cout << "Knight new! " << size << endl;
-	//	void* ptr = ::malloc(size);
-	//	return ptr;
-	//}
-
-	int32 _hp = 100;
-	int32 _mp = 10;
-};
-
-// new operator overloading (Global)
-void* operator new(size_t size)
-{
-	cout << "new! " << size << endl;
-	void* ptr = ::malloc(size);
-	return ptr;
-}
-
-void operator delete(void* ptr)
-{
-	cout << "delete!" << endl;
-	::free(ptr);
-}
-
-void* operator new[](size_t size)
-{
-	cout << "new[]! " << size << endl;
-	void* ptr = ::malloc(size);
-	return ptr;
-}
-
-void operator delete[](void* ptr)
-{
-	cout << "delete![]" << endl;
-	::free(ptr);
-}
+SListHeader* GHeader;
 
 int main()
 {
-	for (int32 i = 0; i < 5; i++)
+	GHeader = new SListHeader();
+	ASSERT_CRASH((uint64)GHeader % 16 == 0);
+
+	InitializeHead(GHeader);
+
+	for (int32 i = 0; i < 3; i++)
 	{
 		GThreadManager->Launch([]()
 			{
 				while (true)
 				{
-					Vector<Knight> v(10);
-					 
-					Map<int32, Knight> m;
-					m[100] = Knight();
+					Data* data = new Data();
+					ASSERT_CRASH((uint64)data % 16 == 0);
+
+					PushEntrySList(GHeader, (SListEntry*)data);
 
 					this_thread::sleep_for(10ms);
 				}
 			});
 	}
+
+	for (int32 i = 0; i < 3; i++)
+	{
+		GThreadManager->Launch([]()
+			{
+				while (true)
+				{
+					Data* popData = new Data();
+
+					popData = (Data*)PopEntrySList(GHeader);
+
+					if (popData)
+					{
+						cout << popData->_rand << endl;
+						delete popData;
+					}
+					else
+					{
+						cout << "NONE" << endl;
+					}
+				}
+			});
+	}
+
 	GThreadManager->Join();
 }

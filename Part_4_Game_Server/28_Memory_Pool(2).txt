@@ -1,0 +1,468 @@
+
+
+        Memory Pool 2
+
+
+이전 시간에 간단하게 메모리 풀을 만들어 봤습니다. 사실 이대로 사용해도 될정도로 동작할겁니다. 
+
+그럼에도 불구하고 좀 더 개량할 점, 아쉬운 점을 찾아 보자면 MemoryPool클래스의 Pop, Push가 동작할때 락을 건다는 것이 
+약간 아쉽습니다. 만약 한번에 여러 쓰레드를 사용한다면 메모리 풀을 꺼낼때 한번에 한 쓰레드씩만 동작할수 있다는게 아쉬운점이었습니다.
+또 메모리를 할당했다가 반납하면 queue에 담아 주고 있었습니다. 이게 왜 개선점이냐면 큐나 스택이나 벡터나 내부적인 구현이 
+동적 배열형태로 되어있습니다. 이게 왜 수정해야 하는 점인지는 코드를 보면서 알아보겠습니다. 
+
+이번시간 테스트 코드를 락 프리 스택을 가지고 만들어 볼겁니다. 멀티 쓰레드 시간에 배웠던 락프리 스택입니다. 사실은 그때 배웠던 방법 말고 
+또 락프리 스택을 만드는 방법이 있습니다. 
+먼저 알아 봤던 락 프리 스택의 방법은 스택의 데이터를 따로 노드 구조체를 만들어 실제 데이터를 들고 다음 노드를 가리키도록 해서 만들었었습니다. 
+이렇게 되면 실제 사용하려던 데이터를 만들고 거기에 또 다음 노드를 가리키는 포인터를 포함한 노드를 또 동적할당 해 두번 할당하게 됩니다.
+   
+    template<typename T>
+    struct Node
+    {
+        T data;
+        Node* node;
+    };
+
+
+이렇게 만든 노드를 가지고 Compare And Swap 연산을 통해 스택을 구현했었습니다. 
+
+그런데 사실이것보다 더 좋은 방법이 있습니다. 노드를 동적할당하는 비용을 아끼기 위해서 데이터 안에 다음 데이터를 가리키는 정보를 끼워넣는겁니다. 
+    struct SListEntry
+    {
+        SListEntry* next;
+    };
+
+    class Data //: public SListEntry
+    {
+    public:
+        SListEntry _entry;
+
+        int32 _hp;
+        int32 _mp;
+    };
+
+SListEntry 라는 사실상 Node의 node역할을하는 구조체를 하나 만들고 실제 사용할 데이터를 클래스로 만듭니다. 이때 SListEntry를 상속받거나 
+아니면 첫번째 인자로 SListEntry를 받아주면 됩니다. 
+
+이렇게 하면 Data 객체 하나만 만들어도 데이터와 다음 데이터를 가리킬수 있게 만들 수 있습니다. 
+하지만 이 방법에도 단점이 있는데 이전 Node 방식에서는 템플릿을 사용해서 다양한 타입의 데이터를 알아서 받아 줄 수 있었는데 
+지금 SListEntry를 사용한 방법에서는 처음 설계할때 부터 사용할 데이터의 타입을 정해줘야합니다. 그래서 외부 라이브러리에서 잘 설계된 클래스에서는 
+사용할 수는 없을테지만 그런 경우가 아니라 메모리 풀처럼 우리가 설계해서 사용하는 데이터에 대해서는 사용할 수 있는 방법입니다. 
+
+이 방법이 락프리 기법이다보니 난이도가 있습니다. 그래서 이리지리 시도를 해보면서 공부해보겠습니다. 
+
+
+    - 1차 시도 
+이번에 배우는 락프리 메모리 풀 만드는 방법에서는 특이하게 클래스로 만들지 않을겁니다. 
+위의 SListEntry 말고 또 하나의 struct 를 만들어 줄겁니다. 
+
+struct SListHeader
+{
+    SListEntry* next = nullptr;
+}
+
+이 SListHeader는 메모리 풀을 이루는 스택이나 큐에서 첫번째 데이터를 가리킬겁니다. 그리고 그 첫번째 데이터 안에 멤버변수로 들고 있는 next는 그 
+다음 데이터를 가리키고 쭉 이어지는 형태입니다. 
+
+실질적으로 컨테이너를 관리하는건 SList포인터로 관리를 할것이지만 각 그 포인터에 딸려있는 추가 정보들이 있을겁니다. 
+
+이번에 만들려고 하는건 스택입니다. 락프리 에서도 스택이 비교적 만들기 쉬웠습니다. 스택은 후입선출의 시스템이었고 컨테이너의 head 쪽으로 데이터를 밀어 넣고 
+꺼낼때도 head에 있는 데이터 부터 꺼내는 방식이었습니다. 
+
+그래서 필요한 기능, 함수는 이럴겁니다. 
+
+void InitializeHead(SListHeader* header)
+{
+	header->next = nullptr;
+}
+
+void PushEntrySList(SListHeader* header, SListEntry* entry)
+{
+	entry->next = header->next;
+	header->next = entry;
+}
+
+SListEntry* PopEntrySList(SListHeader* header)
+{
+	SListEntry* first = header->next;
+
+	if (first != nullptr)
+		header->next = first->next;
+
+	return first;
+}
+
+InitializeHead에서 스택을 초기화 해줄것이고 스택에 데이터를 넣을때 SListHead 쪽으로 집어 넣을 데이터의 SListEntry* 를 넣어줍니다. 또 
+데이터를 꺼낼때는 SListHeader* 에서 데이터를 꺼내올겁니다. 
+위의 코드는 일단은 멀티 쓰레드 환경은 신경쓰지 않고 싱글쓰레드 라고 가정하고 작성한 일종의 의사코드입니다. 
+
+굳이 위의 내용을 테스트 해본다면 이런 코드일겁니다. 
+#include "LockFreeStack.h"
+
+
+int main()
+{
+	SListHeader header;
+
+	InitializeHead(&header);
+
+	Data* data = new Data();
+	data->_hp = 20;
+	data->_mp = 10;
+
+	PushEntrySList(&header, (SListEntry*)data);
+
+	Data* popData = (Data*)PopEntrySList(&header);
+}
+
+헤더를 하나 먼저 만들고 초기화를 해주고 있습니다. 그리고 데이터도 동적 할당으로 생성하고 hp와 mp 값도 넣어주고 PushEntrySList를 사용할때 
+header의 주소와 data를 SListEntry* 로 캐스팅해서 넘겨주었습니다. Data 클래스의 첫번째 변수가 SListEntry 였기 때문에 캐스팅이 가능했습니다. 
+다음으로 Pop을 하는데 반환값을 받아줄 popData라는 변수를 만들어 주고 Data*로 캐스팅한 포인터를 받아줍니다. PopEntrySList에서는 SListEntry* 를 반환하고 
+위에서 만들었을때 그 뒤에 붙은 데이터 까지 포함한 Data* 로 변환하면 원래 데이터를 얻을 수 있는겁니다. 
+
+그래서 이런 비슷한 방법으로 스택을 사용하고 그걸 메모리 풀로 활용할것인데 이 코드를 이제 멀티쓰레드 환경까지 고려해야 하는겁니다. 
+
+
+    - 2차 시도 
+이제 2차 시도 에서는 멀티쓰레드 환경에서 동작하도록 Compare And Swap 을 적용할것입니다. 
+
+InitializeHead는 초기화 이기 때문에 싱글쓰레드 에서 동작하도록 둔다고 해도 Push 나 Pop은 멀티쓰레드에선 주의 해야할 부분입니다. 
+
+Push함수 부터 보면 락프리 스택의 Push는 추가할 데이터를 생성한 다음 CAS 로 스텍에 넣는 부분을 동작해야 합니다. 
+
+void PushEntrySList(SListHeader* header, SListEntry* entry)
+{
+	entry->next = header->next;
+
+	while(::InterlockedCompareExchange64((int64*)&header->next, (int64)entry, (int64)entry->next) == 0)
+    {
+
+    }
+
+}
+이번에 InterlockedCompareExchange64 이라는 함수를 사용할것인데 첫번째 인자는 비교할 정수의 주소를 넘겨줍니다. 
+두번째 세번째로는 아토믹계열함수에서는 expected, desired 순서였는데 Interlocked 계열에서는 순서가 바뀌어 있습니다. 
+그래서 두번째로 desired 역할을 할 entry, 세번째로 expected 역할을 하는 entry->next 를 넣어줍니다. 
+즉 풀어서 말하면 header->next에 있는 값이 만약 entry->next 와 비교해서 같다면 header->next의 값을 entry로 바꿔주고 
+같지 않다면 entry->next의 값을 header->next로 바꾸고 0을 리턴합니다. while을 반복합니다.
+
+다음으로 PopEntrySList 입니다. 
+함수 내부에서 새로운 변수를 만들어 header->next 로 가리키는 데이터를 꺼내 사용할려고 합니다. 새로운 변수를 expected라는 이름으로 만들어 보고 
+header->next를 집어 넣습니다. 이때 header가 가리키는게 데이터가 있다면 그대로 진행하고 다음 데이터가 없고 nullptr이라면 스택에 아무 데이터가 없다는 말이 됩니다. 
+
+스택에 데이터가 있었다면 또 InterlockedCompareExchange64 를 진행할겁니다. 주고 비교할 데이터는 header->next 이고 desired는 expected->next를 줄겁니다. 
+세번째 인자 expected 자리에는 expected 변수를 넣어줍니다. 
+다시 한번 설명하면 header->next와 expected를 비교해서 같다면 expected->next 의 값으로 header->next를 변경하고 1을 반환, 
+header->next 와 expected를 비교해서 값이 다르다면 expected의 값을 header->next로 변경하고 0을 반환하게 됩니다. 
+SListEntry* PopEntrySList(SListHeader* header)
+{
+	SListEntry* expected = header->next;
+
+	while (expected && ::InterlockedCompareExchange64((int64*)&header->next, (int64)expected->next, (int64)expected) == 0)
+	{
+
+	}
+
+	return expected;
+}
+이렇게 while 반복을해서 header->next와 expected 가 같을때 까지 반복합니다. 멀티쓰레드 환경에서는 중간에 다른 쓰레드가 끼어드는걸 방지하기 위해서 입니다. 
+
+Push에서는 여기까지 해주고 끝이었습니다. 그런데 Pop에서는 또 고려해야할점이 있습니다.
+중간에 삭제가 되는 경우인데 예시를 들면 쓰레드 1에서 CAS 를 진행하면서 스택의 첫번째 데이터를 비교하려고 합니다. 그런데 쓰레드 2번에서는 먼저 이걸 통과하였고 
+스택에 앞서 있었던 0번 데이터를 삭제 했다고 하면 이제 쓰레드1 에서 진행하던 도중 expected 가 삭제된 데이터가 되면서 크래시가 나게 됩니다. 
+
+이 문제를 해결하는 방안으로 정식 용어는 아니지만 참조권과 소유권이라는 개념을 통해 알아 보았었습니다. 데이터를 참조하고 있는 쓰레드를 카운팅하는 방법을 사용했었습니다. 
+그렇게 해결할 수 있었던 이유는 그때는 노드 방식으로 만든 락 프리 스택이었기 때문에 노드 객체를 락프리 스택 내부에서 관리를 하고 있었기 때문이었는데 
+지금은 노드 역할을 하는 SListEntry* 라는 포인터를 락 프리 스택 자체적으로 가지고 있기 때문에 조금 더 복잡합니다. 
+
+일단 위의 문제는 잠깐 두고 그러면 만약 다른 쓰레드에서 지금 Pop하려는 데이터를 삭제 하지 않는다고 가정해보겠습니다. 
+그러면 진행중 데이터가 삭제되는 경우가 없으니 다른 문제없이 잘 진행 될까요?
+이 경우도 또 다른 문제가 있는데 이 문제는 이전 락프리 스택 락프리 큐를 배울때 언급하지 않았다고 합니다. 굉장히 복잡하지만 그때 배운 방법에서는 발생하지 않는 
+문제 였기 때문입니다. 
+
+문제를 ABA Problem 이라고 하는데 
+이름에 어떤 문제인지가 설명되어있습니다. A라는 상태에서 B가 되었다가 다시 A라는 상태가 되었다는 겁니다. 
+무슨말이냐면 위에 CAS를 할때를 유심히 보면 비교한는 데이터와 예상값 expected를 비교해서 같다고 하면 원하는 값 desired가 무슨 값인지는 신경쓰지 않고 바꿔 줍니다. 
+[5000]->[6000]->[7000]  이렇게 5000번 6000번 7000번 주소를 가리키는 데이터가 있다고 하겠습니다. 그중 가장 앞의 데이터를 header가 가리키고 있습니다. 
+
+이 상황에서 CAS를 한다는것은 헤더가 가리키는 5000번 데이터를 뽑아내고 헤더가 6000번 을 가리키도록 하려는겁니다. 
+
+다시 의사코드로 말하면 "만약에 헤더가 5000번을 가리키고 있다면 헤더가 6000번을 가리키도록 넣어줘" 
+왜 자꾸 말하는지 보면 위의 코드를 쓰레드 1번이 절묘하게 두번 실행이 되서 5000번과 6000번이 Pop되었다고 해보겠습니다. 
+그러면 지금 스택에는 7000 번만 있는 상태이고 
+다른 쓰레드 2번에서 이번에는 Push를 실행해서 공교롭게도 5000번 주소를 가진 데이터를 집어 넣었다고 하겠습니다. 
+
+[5000]->[7000] 인 상태입니다. 
+
+메모리를 할당할때 곧바로 이전에 사용하던 주소를 똑같이 할당하는 경우는 매우 희박하긴 합니다. 하지만 희박하다는것은 아예 그런 일이 없다고도 말 할 수 없습니다. 
+마찬가지로 메모리 풀링을 한다고 했을때 가장 마지막으로 삭제된 영역을 다시 꺼내서 사용한다고 하면 똑같은 주소값이 다시 들어오는것도 충분히 발생할 수 있습니다. 
+
+이때 쓰레드 3번은 "만약에 헤더가 5000번을 가리키고 있다면 헤더가 6000번을 가리키도록 넣어줘"라는 코드를 실행시키고 있었다고 하면 
+[5000]->[7000] 이 상황에서 5000번 메모리는 꺼내버리고 [7000]이 남은 상태에서 헤더는 [6000]을 가리키고 있게 됩니다. 
+이러면 스택과 헤더가 분리되어 버립니다. 
+
+그래서 락프리 프로그래밍에서 CAS를 사용하면서 이런 문제도 신경써야 합니다. 
+
+이제 ABA 문제의 해결을 위해 고민을 해볼겁니다. 
+한가지 방법은 PopEntrySList 함수의 인자를 header 포인터 이외에 또 각 스택의 데이터마다 고유하게 증가되는 카운트를 하나 더 받아서 포인터의 주소에 그 값을 더한
+걸 비교하는 방법입니다. 그러면 위의 예시에서는 첫번째 있던 [5000] 과 나중에 추가된 [5000]은 카운트 값이 다르기 때문에 CAS를 통과하지 못하고 다시 시도하게 될겁니다.\
+
+
+
+    - 3차 시도 
+이제 멀티쓰레드 환경과 락프리 프로그래밍의 문제중 하나인 ABA 문제까지 해결한 3번째 코드를 보겠습니다. 
+
+마이크로 소프트에서 표준으로 제공하는 SListEntry 의 코드이기도 합니다. 
+
+헤더
+
+    DECLSPEC_ALIGN(16)
+    struct SListEntry
+    {
+        SListEntry* next;
+    };
+
+    DECLSPEC_ALIGN(16)
+    struct SListHeader
+    {
+        SListHeader()
+        {
+            alignment = 0;
+            region = 0;
+        }
+
+        union
+        {
+            struct
+            {
+                uint64 alignment;
+                uint64 region;
+            }	DUMMYSTRUCTNAME;
+
+            struct
+            {
+                uint64 depth : 16;
+                uint64 sequence : 48;
+                uint64 reserved : 4;
+                uint64 next : 60;
+            } HeaderX64;
+        };
+    };
+
+    void InitializeHead(SListHeader* header);
+    void PushEntrySList(SListHeader* header, SListEntry* entry);
+    SListEntry* PopEntrySList(SListHeader* header);
+
+SListEntry와 SListHead 앞에 DECLSPECT_ALIGN(16) 이라는 매크로가 추가 됩니다. 메모리를 16 바이트 정렬을 해달라는 의미라고 합니다. 
+16 바이트 정렬이라는 것은 주소를 16 바이트의 배수로 정렬해준다는 것이고 이걸 2진법 으로 보면 하위 4 비트가 0으로 비어 있게됩니다. 
+
+union 안에 struct를 두개 만들어 주었는데 union 문법은 안에 두 스트럭트 DUMMYSTRUCTNAME 과 HeaderX64 를 동일한 시각으로 접근할 수 있다는 것이고 
+실질적으로 SListHeader struct에는 uint64 두개가 들어가 있을겁니다. 즉 128비트 짜리라는것이고 그런데 거기에 접근할때 uint64 두개로 접근해도 되고 
+아니면 더 세부적으로 depth(16비트), sequence(48비트) 두개가 묶여서 alignment가 되는거고 reserved(4비트), next(60비트)를 묶어서 region이 되는겁니다. 
+
+그리고 SListHeader의 생성자에서 alignment와 region을 0으로 밀어주고 시작합니다. 이러면 HeaderX64안의 값들도 모두 0으로 밀린것과 같습니다. 
+
+다음으로 cpp에서 함수들의 구현부를 보겠습니다. 
+
+
+    void InitializeHead(SListHeader* header)
+    {
+        header->alignment = 0;
+        header->region = 0;
+    }
+초기화 함수에서는 header의 alignment, region둘다 0으로 밀어주고 시작하는걸로 바뀌었습니다. 
+
+    void PushEntrySList(SListHeader* header, SListEntry* entry)
+    {
+        SListHeader expected = {};
+        SListHeader desired = {};
+
+        // 16 바이트 정렬
+        desired.HeaderX64.next = ((uint64)entry >> 4);
+
+        while (true)
+        {
+            expected = *header;
+
+            // 이 사이에 변경될 수 있다
+            entry->next = (SListEntry*)(((uint64)expected.HeaderX64.next) << 4);
+            desired.HeaderX64.depth = expected.HeaderX64.depth + 1;
+            desired.HeaderX64.sequence = expected.HeaderX64.sequence + 1;
+
+            if (::InterlockedCompareExchange128((int64*)header, desired.region, desired.alignment, (int64*)&expected) == 1)
+                break;
+        }
+    }
+푸시 함수입니다. 함수 내부에서 사용할 expected와 desired라는 SListHeader를 하나씩 생성해주었습니다. 그리고 desired.HeaderX64.next에 
+두번째 인자인 entry를 오른쪽으로 비스쉬프트 4를 해준 값을 넣어주고 있습니다. 왜냐면 아까 SListEntry와 SListHeader 모두 DECLSPEC_ALIGN(16)로 
+16 바이트 정렬을 해주었었는데 그래서 entry 라는 스택에 넣어주려고하는 데이터의 주소도 하위 4비트가 비워져 있고 이걸 비트 쉬프트를 해서 next에 담아 주는겁니다. 
+
+또 아까 HeaderX64에서 next와 reserved를 합쳐서 region을 뜻한다고 하였는데 이 하위 64비트가 스택안의 데이터 주소를 가리키고 있고 상위 64 비트인 
+alignment 는 일종의 번호표로 ABA 문제를 해결하기 위한 값을 저장하고 있을겁니다. alignment중 sequence에는 데이터를 추가할때마다 1씩 증가하는 값을 저장하고 
+depth는 데이터를 push 할때는 1 증가하는값 pop한다음은 1이 감소한 값을 저장합니다. 
+
+다음으로 while(true) 를 걸어서 본격적으로 CAS를 시작합니다. 
+expected에는 아무 수정도 안한 header의 주소에 접근한 데이터를 받습니다. entry->next 에는 추가해줄 데이터의 다음 주소를 스택의 맨 앞 데이터를 가리키도록 해주었어야 합니다. 
+그 맨앞 데이터는 expected.HeaderX64.next에 주소를 저장 해두었습니다. 그리고 그값은 실제 값을 쉬프트 라이트 4만큼 해준 값이었기 때문에 다시 왼쪽으로 쉬프트 4를 해주고 
+SListEntry* 타입으로 캐스팅해서 넘겨줍니다.
+CAS가 성공한뒤 header가 가리켜줄 desired에는 depth와 sequence를 1씩 증가 시켜주었습니다.
+
+2차 시도때 64비트를 지원하는 버전의 InterlockedCompareExchange64를 사용 했었는데 이제는 SListHeader의 크기가 128이고 상위 64비트 하위 64비트의 용도를 나눠 놨기때문에 
+이번에는 InterlockedCompareExchange128를 사용합니다. 첫번째 인자는 주로 비교할 헤더의 주소를 넘겨주고, 두번째로는 성공후 바뀔 데이터의 상위 64비트, 세번째 인자는 하위 64비트,
+마지막으로 네번째 인자는 header와 비교할 데이터인 expected의 주소입니다. 성공한다면 1을 반환할것이기 때문에 성공한다면 break로 while을 빠져나와줍니다. 
+실패한다면 다시 while을 돕니다. 
+
+
+    SListEntry* PopEntrySList(SListHeader* header)
+    {
+        SListHeader expected = {};
+        SListHeader desired = {};
+        SListEntry* entry = nullptr;
+
+        while (true)
+        {
+            expected = *header;
+
+            entry = (SListEntry*)(((uint64)expected.HeaderX64.next) << 4);
+            if (entry == nullptr)
+                break;
+
+            desired.HeaderX64.next = ((uint64)entry->next) >> 4;
+            desired.HeaderX64.depth = expected.HeaderX64.depth - 1;
+            desired.HeaderX64.sequence = expected.HeaderX64.sequence + 1;
+
+            if (::InterlockedCompareExchange128((int64*)header, desired.region, desired.alignment, (int64*)&expected) == 1)
+                break;
+        }
+
+        return entry;
+    }
+Pop 함수입니다. Push와 비슷하게 진행되는데 다른점은 꺼낼 데이터를 함수 내부에서 만들어 주고 있습니다. 
+while 안에서 아까와 마찬가지로 일단 expected에 *header를 넣어주고 반환할 값인 entry는 expected.HeaderX64.next 를 uint64로 변환한 값을 다시 왼쪽 쉬프트 4를 한 값으로 
+넣어줍니다. 
+desired.HeaderX64.next 는 Pop이 끝난후 header가 가리킬 next 이니깐 entry의 >> 4 한 값이고 desired.HeaderX64.depth는 Pop을 하고 있으니까 현재 expected의 depth -1 값,
+sequence는 Pop을 하나 Push를 하나 +1 값을 준다고 했었습니다. CAS를 하고 통과해 break로 while을 빠져나왔다면 entry를 반환하면 끝입니다. 
+
+이때 이런 의문이 들 수도 있습니다. depth와 sequence가 어찌 저찌 늘고 줄면서 똑같은 값이 되어서 ABA 문제가 일어나지 않을까 생각할 수 있는데 그러자면 sequence가 한바뀌가 돌아야 합니다.
+그러기에는 너무 확률이 희박하기 때문에 그냥 alignment는 곂치지 않는다고 가정하고 진행 할 수 있는겁니다. 
+
+    - 정리 
+여기까지 ABA Problem과 마이크로 소프트에서 제공하는 SListHeader 를 배우면서 알아보고 싶었던것이 무엇이냐면 
+이전에 락프리 프로그래밍 시간에서 언급하지 않았던 ABA 문제를 해결하기 위해 포인터뿐만이 아니라 어떤 카운터를 둬서 둘을 합해 한번에 CAS를 한다라는것을 알고 싶었던겁니다. 
+
+
+테스트 코드를 보겠습니다. 
+
+DECLSPEC_ALIGN(16)
+class Data //: public SListEntry
+{
+public:
+	SListEntry _entry;
+
+	int64 _rand = rand() % 1000;
+};
+// 먼저 Data를 16바이트 정렬해서 사용해야 합니다. 데이터는 대각 랜덤값으로 줘 봤습니다. 
+
+
+SListHeader* GHeader;
+// 헤더를 전역으로 빼서 선언하였습니다. 
+
+int main()
+{
+    // 헤더를 생성하고 혹시 16바이트 정렬이 되었는지를 체크합니다.
+	GHeader = new SListHeader();
+	ASSERT_CRASH((uint64)GHeader % 16 == 0);
+
+    // 초기화
+	InitializeHead(GHeader);
+
+    // 멀티쓰레드 환경에서 테스트를 합니다. 
+
+    // Push를 하는 쓰레드 3개를 만들었습니다. 
+	for (int32 i = 0; i < 3; i++)
+	{
+		GThreadManager->Launch([]()
+			{
+				while (true)
+				{
+					Data* data = new Data();
+					ASSERT_CRASH((uint64)data % 16 == 0);
+                    // data가 16바이트 정렬되었는지 체크
+
+					PushEntrySList(GHeader, (SListEntry*)data);
+
+					this_thread::sleep_for(10ms);
+				}
+			});
+	}
+
+    // pop을 하는 쓰레드를 3개 만듭니다.
+	for (int32 i = 0; i < 3; i++)
+	{
+		GThreadManager->Launch([]()
+			{
+				while (true)
+				{
+					Data* popData = new Data();
+
+					popData = (Data*)PopEntrySList(GHeader);
+
+					if (popData)
+					{
+						cout << popData->_rand << endl;
+						delete popData;
+					}
+					else
+					{
+						cout << "NONE" << endl;
+					}
+				}
+			});
+	}
+
+	GThreadManager->Join();
+}
+
+실제로 실행해보면 다행히 잘 동작할겁니다. 
+
+
+그런데 이제는 멀티쓰레드 환경에서 완벽히 안전해 지는가 하면 그것은 아닙니다. 지금 해결한 문제는 ABA 문제를 해결한것이고 
+아직 Pop에서 중간에 데이터가 삭제되는 Use_After_Free 문제는 해결되지 않았습니다. 
+
+PopEntrySList 의 코드중 
+
+ SListEntry* PopEntrySList(SListHeader* header)
+    {
+        SListHeader expected = {};
+        SListHeader desired = {};
+        SListEntry* entry = nullptr;
+
+        while (true)
+        {
+            expected = *header;
+
+            entry = (SListEntry*)(((uint64)expected.HeaderX64.next) << 4);
+            if (entry == nullptr)
+                break;
+
+            // 이 부분에서 다른 쓰레드가 entry에 해당하는 데이터를 삭제 해버렸다면 Use_After_Free 문제가 발생합니다.
+
+            desired.HeaderX64.next = ((uint64)entry->next) >> 4;
+            desired.HeaderX64.depth = expected.HeaderX64.depth - 1;
+            desired.HeaderX64.sequence = expected.HeaderX64.sequence + 1;
+
+            if (::InterlockedCompareExchange128((int64*)header, desired.region, desired.alignment, (int64*)&expected) == 1)
+                break;
+        }
+
+        return entry;
+    }
+
+
+이번에도 락 프리 프로그래밍을 배웠지만 사실은 락프리 프로그래밍을 직접 만드는 것은 매우 추천하지 않습니다. 아무리 빠져나갈곳 없이 만들었다고 생각을 했어도 
+생각치 못한 버그가 생길 확률이 높기 때문인데 그냥 이미 만들어진 표준 락 프리를 사용하는것이 경제적일겁니다. 
+
+이 다음시간에 알아볼 마이크로 소프트 표준 SListEntry 기반의 락 프리 스택을 보면 오늘 배운 SListHeader 와 같이 128비트를 세세하게 나누어 사용하는걸 알 수 있을겁니다.
+그리고 문서에서도 16바이트 정렬을 꼭 하라고 당부를 하는데 그럴 이유가 있습니다. 
+SListHeader 에서 region 부분이 60비트의 next와 4 비트의 reserved로 이루어 져있고 next에 다음 데이터인 SListEntry 포인터를 담았습니다. 
+그리고 SListEntry포인터를 넣어줄때 비트 플레그 쉬프트를 하면서 넣고 빼었었습니다. 그럴 수 있는 이유가 16바이트 정렬을 했기 때문이고 정렬하지 않았다면 쉬프트를 할때 
+데이터 손실이 났을겁니다.
