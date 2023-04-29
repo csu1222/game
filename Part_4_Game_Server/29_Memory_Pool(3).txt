@@ -1,0 +1,273 @@
+
+
+
+        Memory Pool 3 
+
+
+이전 시간에 메모리 풀에서 사용하는 컨테이너를 락프리 스택으로 만들어 보았고 그 중에서도 노드 방식이 아닌 데이터 안에 다음 데이터를 가리키는
+포인터를 포함하고 있는 버전으로 만들었습니다. 
+이렇게 만들경우 두가지 문제점이 있었고 첫번째로는 Use After Free 문제, 두번째로는 ABA Problem 이 있었습니다. 
+
+Use After Free 문제는 락 프리 스택 내부에서 Pop 을 할때 멀티쓰레드다 보니 거의 동시에 동작하는 쓰레드 사이에서 같은 데이터를 건드리고 있는데
+한쪽이 먼저 데이터를 꺼내 삭제를 해버렸다고 하면 조금 늦은 쓰레드에서는 삭제된 메모리를 수정하려고 접근하게 되는 문제였습니다. 
+
+ABA 문제도 멀티쓰레드에서 생기는 문제입니다. 여러 쓰레드가 스택에서 데이터를 Pop 하거나 Push를 하는 도중에 스택의 내용물이 이미 
+많이 수정되었는데 우연히 CAS를 통과하게 똑같은 주소를 가진 데이터가 Push 되었다고 하면 이미 삭제된 메모리를 다음 데이터로 가리키는 문제입니다. 
+
+이중 ABA 문제를 해결하는 방법으로 스택의 맨 앞 데이터를 가리키는 Header 를 데이터의 주소 뿐만아니라 데이터를 Push, Pop 이 실행될때 마다 
+카운팅하는 데이터를 두종류 같이 만들어서 주소와 더불어 비교하게 되면 어쩌다 데이터의 주소가 같은 곳을 사용하더라도 카운팅값이 다를 테니까 
+오작동하는 일이 없을 겁니다. 
+
+여기 까지가 이전 시간에 배운 SListEntry 방식이었고 아직 이 방식에서는 Use After Free 문제를 해결하지 못했습니다. 
+
+
+오늘 강의를 시작함에 있어 먼저 해야할 일은 고생해서 배웠던 SListEntry 파일들을 지워야 합니다.
+거기에 이어서 마이크로 소프트에서 제공하는 아주 비슷한 표준 라이브러리를 가져다가 사용해보겠습니다. 
+
+이전에 사용하던 키워드들이 조금씩 달라지는데 
+
+SListEntry          -> SLIST_ENTRY 
+SListHeader         -> SLIST_HEADER
+
+InitializeHead()    -> ::InitializeSListHead()
+
+PushEntrySList()    -> ::InterlockedPushEntrySList()
+PopEntrySList()     -> ::InterlockedPopEntrySList()
+
+이 몇가지 이름만 바꿔 주면 정말 신기하게 원래 사용하던대로 잘 동작합니다.
+
+SLIST_ENTRY와 SLIST_HEADER가 어떻게 되어있는지 한번 따라 들어가보면 이전 시간에 만들었던 구조와 아주 비슷하게 되어 있는걸 볼 수 있습니다. 
+
+이때 사용하는 문법이 생소합니다. 
+예를들어 SLIST_ENTRY는 
+
+typedef struct DECLSPEC_ALIGN(16) _SLIST_ENTRY {
+    struct _SLIST_ENTRY *Next;
+} SLIST_ENTRY, *PSLIST_ENTRY;
+
+이런 문법으로 되어있는데 typedef 과 함깨 struct를 16 바이트 정렬을 하면서 _SLIST_ENTRY라고 이름을 지음과 동시에 마지막에 있는 SLIST_ENTRY 라고 두번째 별칭을 지어주고
+또한 이 struct의 포인터 타입을 PSLIST_ENTRY 라고 이름지은겁니다. 
+
+그래서 이전에 InterlockedPushEntrySList 을 할때 데이터를 SLIST_ENTRY* 타입으로 캐스팅해서 넘겨주고 있었는데 이부분을 그냥 PSLIST_ENTRY 로 캐스팅 해줄 수도 있습니다. 
+
+언젠가 락 프리 스택 방식을 사용할 일이 있다고 하면 이렇게 표준 SLIST_ENTRY 를 사용하는게 좋을것입니다. 
+주의 할 점은 이 SLIST_ENTRY 에 넣어줄 데이터는 DECLSPEC_ALIGN(16)으로 16바이트 정렬을 해서 사용해야한다는 점을 유의 해야 할것입니다. 
+
+이렇게 배운 락 프리 스택을 우리 메모리 풀에 적용시켜보겠습니다. 
+
+->  MemoryPool.h
+
+    메모리 풀에서 사용하는 컨테이너가 표준 queue 를 사용하고 락을 사용하고 있었습니다.
+    이 방법도 괜찮기는 하지만 이전에 말했다 시피 데이터를 관리하기위해 데이터 자체뿐만 아니라 다음 데이터를 가리키기 위해 또 다른 객체를 만들어 줬어야 하는게 아쉬웠습니다. 
+    그래서 이번에 공부한 SLIST_ENTRY를 적용해볼겁니다. 
+
+    16바이트 정렬하는 부분 부터 추가해보면 헤더파일 맨 위에 enum을 추가합니다. 
+    
+    enum
+    {
+        SLIST_ALIGNMENT = 16,
+    };
+
+    그리고 이전에 사용하던 MemoryHeader, MemoryPool 앞에 
+    DECLSPEC_ALIGN(SLIST_ALIGNMENT) 을 붙여줍니다. 
+
+    각각 SLIST_ENTRY 도 추가해줘야 하는데 상속을 해주는 방법 아니면 첫번째 멤버 변수에 만드는 방법이 있어습니다. 
+    그 중 MemoryHeader 는 상속하는 방법으로 추가해줍니다. 왜냐면 나중에 포인터 캐스팅까지 염두해서 입니다. 
+    상속을 받으면 MemoryHeader가 들고 있는 데이터중 맨 첫번째 데이터가 SLIST_ENTRY로 잡히기 때문에 나중이 PSLIST_ENTRY로 캐스팅이 가능한겁니다. 
+
+    다음으로 MemoryPool 클래스로 내려와서 여기도 SLIST_ENTRY를 추가해줍니다. 
+    
+	USE_LOCK;
+	queue<MemoryHeader*> _queue;
+    이전에는 이렇게 락을 사용하고 queue로 메모리 들을 관리하고 있었습니다. 이제는 이 코드 두줄을 삭제할것이고 
+    멤버 변수중 맨 앞에 SLIST_HEADER를 추가했습니다. 
+    이 헤더가 실질적으로 락 프리 스택을 관리하는 노드가 되는겁니다. 
+    
+    /*-----------------
+        MemoryHeader
+    ------------------*/
+
+    DECLSPEC_ALIGN(SLIST_ALIGNMENT) // 16바이트 정렬 
+    struct MemoryHeader	: public SLIST_ENTRY    // SLIST_ENTRY 상속 
+    {
+        // [MemoryHeader][Data]
+        MemoryHeader(int32 size) : allocSize(size) { }
+
+        static void* AttachHeader(MemoryHeader* header, int32 size)
+        {
+            new(header) MemoryHeader(size);	// placement new
+            return reinterpret_cast<void*>(++header);
+        }
+
+        static MemoryHeader* DetachHeader(void* ptr)
+        {
+            MemoryHeader* header = reinterpret_cast<MemoryHeader*>(ptr) - 1;
+            return header;
+        }
+
+        int32 allocSize;
+
+        // TODO : 필요한 정보 추가 
+    };
+
+
+    /*----------------
+        Memoty Pool
+    ------------------*/
+    DECLSPEC_ALIGN(SLIST_ALIGNMENT)     //16바이트 정렬 
+    class MemoryPool
+    {
+    public:
+        MemoryPool(int32 allocSize);
+        ~MemoryPool();
+
+        void			Push(MemoryHeader* ptr);
+        MemoryHeader*	Pop();
+    private:
+        SLIST_HEADER	_header;        // SLIST_HEADER 추가 
+        int32			_allocSize = 0;
+        atomic<int32>	_allocCount = 0;
+
+    };
+
+
+->      MemoryPool.cpp
+
+    MemoryPool::MemoryPool(int32 allocSize) : _allocSize(allocSize)
+    {
+        ::InitializeSListHead(&_header);
+    }
+    먼저 생성자에서 초기화를 해줬었습니다. SLIST_HEADER는 union으로  Alignment와 Region 이라는 int64 타입 두개를 들고 있었고 이 두 값을 모두 0으로 밀어주었습니다. 
+
+    void MemoryPool::Push(MemoryHeader* ptr)
+    {
+        ptr->allocSize = 0;
+
+        // Pool에 메모리 반납
+        ::InterlockedPushEntrySList(&_header, static_cast<PSLIST_ENTRY>(ptr));
+
+        _allocCount.fetch_sub(1);
+    }
+    다음은 먼저 Push 부터 수정해보면 이전에 USE_LOCK으로 락을 걸고 queue.push를 했던 부분을 삭제하고 바로 InterlockedPushEntrySList를 사용합니다. 
+    첫번째 변수로 &_header, 두번째로는 추가할 데이터인 MemoryHeader 를 주는데 그냥 주는게 아니라 PSLIST_ENTRY로 static_cast해서 넘겨줍니다.
+
+    
+    MemoryHeader* MemoryPool::Pop()
+    {
+        MemoryHeader* header = static_cast<MemoryHeader*>(::InterlockedPopEntrySList(&_header));
+
+        //{
+        //	WRITE_LOCK;
+        //	// Pool에 여분이 있는지?
+        //	if (_queue.empty() == false)
+        //	{
+        //		// 있으면 하나 꺼내온다 
+        //		header = _queue.front();
+        //		_queue.pop();
+        //	}
+        //}
+
+        // 없으면 새로 만든다 
+        if (header == nullptr)
+        {
+            header = reinterpret_cast<MemoryHeader*>(::_aligned_malloc(_allocSize, SLIST_ALIGNMENT));
+        }
+        else
+        {
+            ASSERT_CRASH(header->allocSize == 0);
+        }
+
+        _allocCount.fetch_add(1);
+
+        return header;
+    }
+
+    이어서 Pop 함수입니다. 이전 queue를 사용했을때는 queue에 데이터가 들었는지를 체크해서 들어 있다면 꺼냈었습니다. 
+    지금은 바로 InterlockedPopEntrySList(&_header); 로 데이터를 꺼내주는데 이때 반환 값이 PSLIST_ENTRY 입니다. 그래서 MemoryHeader* 로 캐스팅 해주고 있는데 
+    원래 Push 한 데이터 자체가 SLIST_ENTRY 를 상속한 데이터다 보니까 자연스럽게 됩니다. 
+    
+    그리고 또 그렇게 꺼낸 데이터 header가 nullptr 일때는 새로 메모리를 할당해 주는데 이때 ::malloc 으로 할당했었는데 
+    지금 SLIST_ENTRY 방식을 사용하려면 주소가 16바이트 정렬되어 있어야 했습니다. 그런데 malloc으로 새로 할당한 메모리는 16바이트 정렬되었다고 보장할 수 없습니다. 
+    그래서 보장할수 있는 _aligned_malloc을 사용합니다. 첫번째 인자로 할당할 메모리의 크기를 받고, 두번째로 정렬할 바이트 수를 넘겨줍니다. 
+
+    MemoryPool::~MemoryPool()
+    {
+        while (MemoryHeader* memory = static_cast<MemoryHeader*>(::InterlockedPopEntrySList(&_header)))
+            ::_aligned_free(memory);
+    }
+    그리고 마지막으로 MemoryPool의 소멸자 입니다. 이전 queue를 사용할 때는 while 을 돌면서 queue.empty() 를 체크해 빌 때 까지 pop() 을 하면서 
+    내용물을 꺼내 주었습니다. 
+    
+    이번 SLIST 락 프리 스택 버전에서는 곧바로 InterlockedPopEntryList 로 PSLIST_ENTRY 를 꺼내면서 캐스팅합니다. 이 포인터가 nullptr이 아니라면 
+    데이터가 있다는 말이니까 해제해주면 되는데 ::_aligned_malloc으로 할당한 메모리는 ::_aligned_free로 해제해줘야 합니다. 
+
+지금 까지 수정한 MemoryPool 파일들에서는 말 그대로 메모리 풀이 어떻게 동작할지를 만든 부분이고 
+
+이제 메모리 풀 들을 관리할 Memory 클래스를 보겠습니다. 여기서 관리하는 메모리 풀 들은 각기 객체가 필요로 하는 용량에 따라 풀로 묶어서 관리할것입니다. 
+
+
+->  Memory 파일
+
+    Memory::Allocate(int32 size) 멤버 함수에서 실제로 사용할 객체의 크기를 받고 또 그 앞에 붙일 MemoryHeader의 size를 더한 만큼의 메모리를 할당해줍니다. 
+    이때 이 총합 사이즈가 우리가 정한 정책이었던 4096 비트를 넘어선다면 그냥 기본 할당을 하고 그 이내라면 메모리 객체에서 만들어 놓은 메모리 풀들 중에서 
+    적당한 사이즈의 메모리 풀에서 Pop을 해옵니다. 이때 메모리 풀 클래스에서 봤듯이 남은 메모리가 없다면 새로 할당하고 남아있다면 그걸 반환합니다. 
+
+    그런데 이 중에 사이즈가 MAX_ALLOC_SIZE 보다 커서 기본할당을 하는 경우에도 ::_aligned_malloc , ::_aligned_free 짝으로 바꿔줘야 합니다. 
+
+    사실 지금 바꿔준 부분은 메모리 풀에 들어가지 않을 메모리들 이다 보니 굳이 16바이트 정렬을 해주지 않아도 되지만 SLIST 원칙상 정렬을 해줘야 하기 때문에 
+    수정하였습니다. 
+
+
+이번 시간에는 사실 수정한 부분이 많지 않았고 락과 queue를 사용하던 부분에서 새로운 구조체 SLSIT 를 추가하고 DECLSPEC_ALIGN(16) 같은 16바이트 정렬을 
+추가해준 것뿐입니다. 그래도 락프리 방식으로 바뀐겁니다. 
+
+락 방식에서 락 프리 방식으로 바뀐것이지만 코드상으로 어마어마한 차이가 없었고 성능상으로도 아마 별 차이가 없을것입니다. 
+
+이제 일단 테스트를 위해 GameServer로 가보겠습니다. 
+
+->  GameServer.cpp
+
+    class Knight
+    {
+    public:
+        int32 _hp = rand() % 1000;
+    };
+
+    int main()
+    {
+        for (int32 i = 0; i < 5; i++)
+        {
+            GThreadManager->Launch([]()
+                {
+                    while (true)
+                    {
+                        Knight* knight = A_new<Knight>();
+
+                        cout << knight->_hp << endl;
+
+                        this_thread::sleep_for(10ms);
+
+                        A_delete(knight);
+                    }
+                });
+        }
+
+        GThreadManager->Join();
+    }
+
+    간단하게 테스트를 해보면 커스텀한 A_new 연산자는 내부적으로 CoreMacro의 A_alloc 으로 메모리 할당을 한 후 템플릿으로 받은 Knight 의 생성자를 호출해서 그 메모리에
+    객체를 생성합니다. 그리고 A_alloc 매크로를 따라 가보면 디버그 모드일때는 PoolAllocator, 릴리즈 모드일때는 BaseAllocator로 동작하게끔 되어있습니다. 
+    지금은 디버깅 모드에서 실행하기 때문에 PoolAllocator를 따라 가는데 PoolAllocator의 Allocate, Release 함수는 GMemory 객체의 Allocate, Release를 호출합니다. 
+    GMemory는 CoreGlobal클래스에서 관리하고 있는 글로벌 객체로 비슷하게 GThreadManager, GDeadLockProfiler 가 있습니다. 
+    GMemory 에서는 Memory 객체가 있고 여기의 Allocate, Release 에서는 A_new 때부터 템플릿으로 받아온 클래스의 사이즈를 인자로 받습니다. 
+    이 클래스 사이즈에 더해서 이 클래스에 대한 정보를 담을 MemoryHeader* 라는 구조체 크기만큼을 더한 사이즈의 메모리를 할당 받습니다. 
+    이때 총합 사이즈에 따라 메모리 풀에서 꺼내 사용할지 아니면 일반 할당을 할지 갈리는데 어찌 되었든 할당받은 메모리의 시작 주소에서 적절히 가공해서 실제 데이터가 시작되는 
+    주소를 반환합니다. 
+    일반 할당을 할때도 ::_aligned_malloc 을 사용해서 16바이트 정렬해 할당하고 메모리 풀 안에서 할당할때도 16바이트 정렬해서 할당합니다. 
+    그 이유는 이번 강의에서 도입한 SLIST 버전의 컨테이너를 사용하는 메모리 풀 때문입니다. SLIST_HEADER 가 ABA 문제를 해결하기 위해 Alignment, Region 이라는 64비트크기 두개로 
+    되어 있습니다. Alignment는 메모리가 할당 될때마다 어떤 카운팅을 하는 부분이고 Region이 메모리가 할당될 주소 입니다. Region 에서도 주소가 되는 next 라는 부분이 또 나뉘어져 있는데 
+    60비트 크기로 설정되어있는데 여기에 16바이트 정렬된 주소를 비트 쉬프트 해서 넣어줄겁니다. 
+
+
+메모리 풀을 배워 보았는데 이 개념을 사용하면 자잘하게 할당하는 객체 같은 것은 매번 새로 할당 받게 되면 유저영역과 로컬영역을 왔다 갔다 해야 하지만 
+이제는 객체를 삭제할때 메모리 까지 해제하지 않고 잠시 저장 해 뒀다고 필요할때 꺼내 사용하면 유저 영역에서 해결되기 때문에 성능에 꽤 큰 향상을 가져올 수 있습니다. 

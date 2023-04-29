@@ -1,14 +1,17 @@
 #pragma once
 
+enum
+{
+	SLIST_ALIGNMENT = 16,
+};
 
-// 특정 크기 범위에 들어가는 데이터를 관리하는 메모리 풀 
 
-// 데이터 앞에 붙일 메모리 헤더 데이터의 크기는 얼마인지, 힙에 할당된 다음 메모리
-// 주소는 어디인지 등의 정보를 담는 헤더'
 /*-----------------
 	MemoryHeader
 ------------------*/
-struct MemoryHeader
+
+DECLSPEC_ALIGN(SLIST_ALIGNMENT)
+struct MemoryHeader	: public SLIST_ENTRY
 {
 	// [MemoryHeader][Data]
 	MemoryHeader(int32 size) : allocSize(size) { }
@@ -34,6 +37,7 @@ struct MemoryHeader
 /*----------------
 	Memoty Pool
 ------------------*/
+DECLSPEC_ALIGN(SLIST_ALIGNMENT)
 class MemoryPool
 {
 public:
@@ -43,10 +47,8 @@ public:
 	void			Push(MemoryHeader* ptr);
 	MemoryHeader*	Pop();
 private:
-	int32 _allocSize = 0;
-	atomic<int32> _allocCount = 0;
+	SLIST_HEADER	_header;
+	int32			_allocSize = 0;
+	atomic<int32>	_allocCount = 0;
 
-	USE_LOCK;
-	queue<MemoryHeader*> _queue;
 };
-
