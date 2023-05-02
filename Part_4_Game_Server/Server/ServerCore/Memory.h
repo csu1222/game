@@ -35,7 +35,7 @@ private:
 template<typename Type, typename... Args>
 Type* A_new(Args&&... args)
 {
-	Type* memory =	static_cast<Type*>(A_alloc(sizeof(Type)));
+	Type* memory =	static_cast<Type*>(PoolAllocator::Alloc(sizeof(Type)));
 	
 	// placement new	할당된 메모리에 생성자를 호출해주는 문법 
 	// new(객체를 만들어줄 공간) 객체의 템플릿(std::forward<Args>(인자들)...);
@@ -48,5 +48,11 @@ template<typename Type>
 void A_delete(Type* obj)
 {
 	obj->~Type();
-	A_release(obj);
+	PoolAllocator::Release(obj);
+}
+
+template<typename Type>
+shared_ptr<Type> MakeShared()
+{
+	return shared_ptr<Type>{ A_new<Type>(), A_delete<Type> };
 }
