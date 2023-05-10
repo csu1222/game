@@ -242,8 +242,8 @@ CoreMacro를 보면 디버깅 모드에서 사용하는 얼로 케이터를 Pool
 
     Pop 함수를 수정합니다. 
 
-    	template<typename... Args>
-        static Type* Pop(Args&&... args)
+    template<typename... Args>
+    static Type* Pop(Args&&... args)
         {
     #ifdef _STOMP
             MemoryHeader* ptr = reinterpret_cast<MemoryHeader*>(StompAllocator::Alloc(s_allocSize));
