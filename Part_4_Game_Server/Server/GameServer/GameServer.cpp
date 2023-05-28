@@ -32,56 +32,69 @@ int main()
 		return 0;
 	}
 
-	SOCKADDR_IN serverAddr;	// IPv4 버전
-	::memset(&serverAddr, 0, sizeof(serverAddr));	// serverAddr 일단 0으로 밀어줍니다.
-	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_addr.s_addr = ::htonl(INADDR_ANY);
-	serverAddr.sin_port = ::htons(7777);
+	// 옵션을 해석하고 처리할 주체?
+	// 소켓 코드 -> SOL_SOCKET
+	// IPv4 -> IPPROTO_IP
+	// TCP 프로토콜 -> IPPROTO_TCP
 
-	if (::bind(serverSocket, (SOCKADDR*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR)
+	// SO_KEEPALIVE = 주기적으로 연결 상태를 확인할지 여부
+	bool enable = true;
+	::setsockopt(serverSocket, SOL_SOCKET, SO_KEEPALIVE, (char*)&enable, sizeof(enable));
+
+	// S0_LINGER = 지연하다 closesocket() 을 호출하면 소켓 리소스 반환과 더불어 소켓의 연결을 끊는
+	// 동작까지도 해줍니다. 이때 커널쪽 버퍼에 데이터가 남아있다고 하면 이 남은 데이터를 마저 보낸다음 
+	// 연결을 끊을것인지 아니면 남은 데이터를 다 날릴것인지를 정해줍니다. 
+	// 옵션값으로 LINGER 라는 구조체를 받는데 이 구조체안에는 또 두가지 변수로 이루어져있습니다. 
+	// u_short타입의 on/off, linger 라는 두가지 변수가 있습니다. 
+	// onoff = 0은 바로 연결끊기, 아니면 linger 초만큼 대기 (default 0)
+	// linger = 대기 시간 
+	// 
+	LINGER linger;
+	linger.l_onoff = 1;
+	linger.l_linger = 5;
+
+	::setsockopt(serverSocket, SOL_SOCKET, SO_LINGER, (char*)&linger, sizeof(linger));
+
+	// Half-Close
+	// SD_SEND : send 막는다
+	// SD_RECIVE : recv 막는다
+	// SD_BOTH : 둘 다 막는단
+	// ::shutdown(serverSocket, SD_SEND);
+	
+	// SO_SNDBUF = 송신 버퍼 크기
+	// SO_RCVBUF = 수신 버퍼 크기
+
+	int32 sendBufferSize;
+	int32 optionLen = sizeof(sendBufferSize);
+	::getsockopt(serverSocket, SOL_SOCKET, SO_SNDBUF, (char*)&sendBufferSize, &optionLen);
+
+	cout << "송신 버퍼 크기 : " << sendBufferSize << endl;
+
+	int32 recvBufferSize;
+	optionLen = sizeof(recvBufferSize);
+	::getsockopt(serverSocket, SOL_SOCKET, SO_RCVBUF, (char*)&recvBufferSize, &optionLen);
+
+	cout << "수신 버퍼 크기 : " << recvBufferSize << endl;
+
+	// SO_REUSEADDR
+	// IP주소 및 port 재사용
 	{
-		HandleError("Bind");
-		return 0;
-	 }
-
-	while (true)
-	{	
-		SOCKADDR_IN clientAddr;
-		::memset(&clientAddr, 0, sizeof(clientAddr));
-		int32 addrLen = sizeof(clientAddr);
-
-		this_thread::sleep_for(1s);
-
-		char recvBuffer[1000];
-		int32 recvLen = ::recvfrom(serverSocket, recvBuffer, sizeof(recvBuffer), 0,
-			(SOCKADDR*)&clientAddr, &addrLen);
-
-		if (recvLen <= 0)
-		{
-			HandleError("RecvFrom");
-			return 0;
-			// 나중에 클라이언트가 여러개가 된다면 서버를 그냥 끄면 안되고 에러가 난 
-			// 클라만 끊어 줘야 합니다.
-		}
-
-		cout << "Recv Data! Data = " << recvBuffer << endl;
-		cout << "Recv Data! Len = " << recvLen << endl;
-
-		int32 errorCode = ::sendto(serverSocket, recvBuffer, recvLen, 0,
-			(SOCKADDR*)&clientAddr, sizeof(clientAddr));
-
-		if (errorCode == SOCKET_ERROR)
-		{
-			HandleError("SendTo");
-			return 0;
-			// 여기도 마찬가지로 에러가 났다고 서버 프로그램을 그냥 종료하는게 아니라 
-			// 해당하는 클라의 연결을 끊어주는 처리를 해야합니다. 
-		}
-
-
-		cout << "Send Data! Len = " << recvLen << endl;
+		bool enable = true;
+		::setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, (char*)&enable, sizeof(enable));
 	}
 
+	// IPPROTO_TCP
+	// TCP_NODELAY = Nagle 네이글 알고리즘 작동 여부
+	// 데이터가 충분히 크면 보내고, 그렇지 않으면 데이터가 충분히 쌓일때까지 대기!
+	// 장점 : 작은 패킷이 불필요하게 많이 생성되는 일을 방지
+	// 단점 : 반응 시간 손해
+	{
+		bool enable = true;
+		::setsockopt(serverSocket, IPPROTO_TCP, TCP_NODELAY, (char*)&enable, sizeof(enable));
+	}
+	
+	// 소켓 리소스 반환
+	::closesocket(serverSocket);
 	// WinSock 종료
 	::WSACleanup();
 }
