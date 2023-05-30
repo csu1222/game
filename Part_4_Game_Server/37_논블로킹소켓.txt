@@ -1,0 +1,269 @@
+
+
+        논 블로킹 소켓
+
+이전시간에 소켓의 다양한 옵션을 지정 할 수 있다는걸 알아 보았습니다.
+
+이어서 다음 시간부터는 실제로 사용할 수 있는 다양한 소켓 모델에 대해 알아볼것입니다. 
+그런데 소켓 모델이란 것을 왜 배워야 하는지 부터 알아야 할것입니다. 
+
+그래서 논 블로킹 방식의 소켓에 대한 내용을 다뤄보겠습니다. 지금 까지 배웠던 소켓 방식은 블로킹 방식입니다. 
+
+당연하게도 '블로킹 vs 논 블로킹' 두가지 방식이 있습니다. 
+
+//  블로킹 Blocking
+    
+    accept -> 접속한 클라이언트가 있을 때 
+    connect -> 서버 접속을 성공 했을 때
+    send, sencto -> 요청한 데이터를 송신 버퍼에 복사 했을 때
+    recv, recvfrom -> 수신 버퍼에 도착한 데이터가 있고 유저레벨 버퍼에 복사 했을 때
+    
+    지금까지 배우고 사용하던 함수들의 실행 성공할 조건들입니다. 
+    각 함수들이 성공을 할때 까지 동작을 멈추는데 이 성질은 온라인 게임을 만드는데 문제가 되는 성질입니다. 
+    MMORPG 게임이 있다고 치고 동시접속자의 수가 5천명이고 각 클라이언트가 서버에 접속할때마다 다른 클라들은 서버가 처리할때 까지 멈춘다는것은
+    말도 안될겁니다. 그렇다고 해서 접속중인 클라 수 만큼의 쓰레드를 만들어서 처리를 한다고 해도 쓰레드 끼리의 컨텍스트 스위칭(Context Switching)
+    이 너무 많이 일어나게되고 그만큼의 CPU의 처리능력을 잡아먹고 있을 것입니다. 
+    그래서 논블로킹 방식의 소켓을 알아야 하겠습니다. 그렇다고 논블로킹 소켓이 모든 문제를 해결하는것도 아니므로 장단점이 있을겁니다. 
+
+
+//  논 블로킹 None Blocking
+
+    먼저 코드를 처음부터 복습하는식으로 보겠습니다. 
+    서버 코드인데 윈속을 시작하고 나서 리슨소켓을 만들어 줍니다. (HandleError 로 에러코드 출력하는건 생략하겠습니다.)
+    
+	  SOCKET listenSocket = ::socket(AF_INET, SOCK_STREAM, 0);
+	  if (listenSocket == INVALID_SOCKET)
+		return 0;
+    
+    여기까지 만든 listenSocket은 TCP 방식의 블로킹 소켓입니다. 이걸 논 블로킹 방식으로 만들어 줘야하는데 생소하지만 어떻게 보면 단순하게 
+    새로운 함수를 호출해주면 됩니다. 
+    
+    u_long on = 1;
+	  if (::ioctlsocket(listenSocket, FIONBIO, &on) == INVALID_SOCKET)
+		return 0;
+
+    이 ioctsocket 이라는 함수도 공식문서에서 차근히 읽어봐도 좋을것입니다. 
+    어쨋든 이렇게 ioctsocket 함수를 호출하면 이제부터 논블로킹 방식으로 소켓을 사용할 수 있습니다. 
+
+    다음은 TCP 소켓을 만들던 그대로 진행이 됩니다. 
+    
+    SOCKADDR_IN serverAddr;
+    ::memset(&serverAddr, 0, sizeof(serverAddr));
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = ::htonl(INADDR_ANY);
+    serverAddr.sin_port = ::htons(7777);
+
+    if (::bind(listenSocket, (SOCKADDR*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR)
+      return 0;
+
+    if (::listen(listenSocket, SOMAXCONN) == SOCKET_ERROR)
+      return 0;
+
+    자신의 주소를 만들어 bind 하고 listen 함수로 접속일 들어오는걸 받아줍니다.
+    이떄 listen 함수 두번쨰 인자로 SOMAXCONN 을 주었는데 이 자리는 원래 backlog 라고 해서 한번에 최대 몇개의 클라의 연결을 허용할지를 int로 넣어주었습니다. 
+    저번 실습때는 직접 수를 넣어주었는데 SOMAXCONN를 사용하면 알아서 가능한 최대의 수를 넣어줍니다. 
+
+    이 다음 부터 코드가 달라집니다. 
+    원래 지금 순서는 accept 를 해서 클라이언트 소켓과 담당 부서에 연결해주는 부분입니다. 
+    
+    SOCKADDR_IN clientAddr;
+    int32 clientLen = sizeof(clientAddr);
+    SOCKET clientSocket = ::accept(listenSocket, (SOCKADDR*)&clientAddr, &clientLen);
+
+    이런식으로 했었는데 여기에 더해 clientSocket이 유효한지 체크하는 코드도 있었습니다. 블로킹 소켓에서는 clientSocket == INVALID_SOCKET 이되면 바로 return 0;
+    을 때려버렸는데 
+    논블로킹으로 넘어온 순간 이 clientSocket 이 INVALID_SOCKET 가 되는 상황이 꼭 문제 상황이라고 볼 수 없습니다. 
+    우리가 위에서 ioctlsocket 함수를 가지고 논블로킹 상태의 소켓으로 만들어 줬기 때문에 다른 클라에서 accept를 하고 있다면 기다리지 말고 빠져 나오라고 했었기 때문에 
+    빠져나온 모든 클라이언트 소켓이 문제가 있는 상태라는걸 보장하지 못합니다. 
+
+    그러면 이 그냥 빠져나온 소켓이 문제가 있는지 없는지를 알 수 있는 방법은 
+    
+    if (::WSAGetLastError() == WSAEWOULDBLOCK)
+				continue;
+    
+    이렇게 체크를 하면됩니다. 즉, 에러코드가 WSAEWOULDBLOCK 이라면 문제없는 소켓이니 다시 시도해보라고 하는겁니다.
+
+    그런데 지금은 continue를 사용하지 못하는 상태입니다. 그래서 accept 함수 부터 에러체크 코드까지를 루프를 돌려줍니다. 
+
+    while (true)
+    {
+      SOCKET clientSocket = ::accept(listenSocket, (SOCKADDR*)&clientAddr, &clientLen);
+      if (clientSocket == INVALID_SOCKET)
+      {
+        // 원래 블록 했어야 했는데 ... 너가 논블로킹으로 하라며?
+        if (::WSAGetLastError() == WSAEWOULDBLOCK)
+          continue;
+          
+        // Error
+        break;
+      }
+    }
+
+  종종 나오는 WSAGetLastError() 함수도 공식문서에 보면 반환되는 코드들이 많은데 각 코드마다 에러 상황들이 잘 정리 되어 있기 때문에 이후 필요하다면 디버깅때 찾아보면서 하면 
+  좋습니다. 
+
+  accept의 결과물인 clientSocket 은 사실 어떤 정수이고 그 정수에 맞는 소켓을 운영체제가 알아서 매핑해준다고 했습니다. 그래서 clientSocket을 그냥 가져다가 에러코드와 비교할 수 
+  있는건데 만약 INVALID_SOCKET(-1 을 뜻함) 이라면 지금 accept 시도에서 정상적으로 클라 서버간에 연결된게 아니라는 말입니다. 
+  그래도 이때 WSAGetLastError 로 가져온 에러코드가 WSAEWOULDBLOCK 라면 논 블로킹 소켓에서 문제될 상황은 아니고 그냥 다시 accept를 시도해보면 되고 
+  WSAEWOULDBLOCK 마저 아니다 라고하면 이제는 정말 문제가 있는 소켓이 accept를 시도한 것이기 때문에 break로 빠져나옵니다. 
+
+  위의 조건문을 다 빠져나왔다면 정상적으로 클라이언트가 연결되었다는 뜻입니다. 
+
+  이제부터 원하는 대로 클라 서버간 통신을 하면되는데 우리는 이 통신하는 부분을 클라가 송신한 문자열을 서버에서 받고 또 그대로 다시 클라로 되돌려 보내는 에코 서버의 형태로
+  실습을 하고 있었습니다. 오늘의 논블로킹 소켓 실습에서도 똑같이 해보겠습니다. 
+
+  그런데 위의 while 루프는 Accept를 위한 while 루프였습니다. 여기서 만들어진 clientSocket 은 생존주기가 이 {} 안에서 끝입니다. 하지만 이후 send, recv 를 할때 
+  clientSocket이 필요하기 때문에 첫번째루프인 Accept 루프 안에서 recv, send 가 이루어 질것입니다. 
+
+  여기서 또 문제가 생기는데 거듭 말했다시피 send, recv 에서도 함수가 실패했다고 해서 꼭 그게문제가 되지는 않습니다. 소켓이 INVALID_SOCKET라는 값을 가지게 된게 
+  정말 문제가 있어서인지 아니면 논블로킹 방식이라서 그런지를 체크해야합니다. 
+  이 체크를 recv 뿐만이 아니라 send에서도 해야합니다. 
+
+  while(true)
+  {
+    // Accept 코드
+    {
+      // 생략
+    }
+
+    // Recv 
+    while(true)
+    {
+      char recvBuffer[1000];
+      int32 recvLen = ::recv(clientSocket, recvBuffer, sizeof(recvBuffer), 0);
+      if (recvLen == SOCKET_ERROR)
+      {
+        // 원래 블록 했어야 했는데 ... 너가 논블로킹으로 하라며?
+        if (::WSAGetLastError() == WSAEWOULDBLOCK)
+          continue;
+          
+        // Error
+        break;
+      }
+      else if(recvLen == 0)
+      {
+        // 연결 끊김
+        break;
+      }
+
+			cout << "Recv Data Len = " << recvLen << endl;
+
+      // Send (recvBuffer 를 그대로 사용함)
+      while(true)
+      {
+        if(::send(clientSocket, recvBuffer, recvLen, 0) == SOCKET_ERROR)
+        {
+           // 원래 블록 했어야 했는데 ... 너가 논블로킹으로 하라며?
+          if (::WSAGetLastError() == WSAEWOULDBLOCK)
+            continue;
+          
+          // Error
+          break;
+        }
+
+				cout << "Send Data Len = " << recvLen << endl;
+				break;
+      }
+    }
+  }
+
+  이런 코드가 될것입니다. 논블로킹에서는 모든 함수에 체크를 한번더 해줘야 해서 코드가 좀 지저분해집니다. 
+
+  위의 내용을 이젠 클라이언트에서 대칭적으로 작성해주겠습니다. 
+
+  클라이언트 코드에서는 clientSocket을 만들고 ioctlsocket 함수로 소켓을 논블로킹 방식으로 바꾸고 하는 부분은 똑같습니다. 
+  그리고 클라이언트에서는 연결할곳의 주소 serverAddr 을 만들고 이걸 사용해서 connect를 했었는데 이부분 부터 보겠습니다. 
+
+  while(true)
+  {    
+		if (::connect(clientSocket, (SOCKADDR*)&serverAddr, sizeof(serverAddr) == SOCKET_ERROR))
+		{
+			// 원래 블록 했어야 했는데 ... 너가 논블로킹으로 하라며?
+			if (::WSAGetLastError() == WSAEWOULDBLOCK)
+				continue;
+
+			// 이미 연결된 상태라면 break
+			if (::WSAGetLastError() == WSAEISCONN)
+				break;
+			// Error
+			break;
+		}
+  }
+
+  connect 를 한 반환 코드가 SOCKET_ERROR 가 나와도 논블로킹에서는 한번더 확인하고 넘어가야 했습니다. 마지막 에러코드가 WSAEWOULDBLOCK 라면
+  논 블로킹 방식때문에 넘겨진 소켓이라는 뜻인데 서버쪽 accept, send, recv 함수들과는 조금 다른 의미입니다. 
+  서버쪽에서는 WSAEWOULDBLOCK 라고 하면 논블로킹으로 다음 시도를 기다리면서 루프를 도는 느낌이었는데 
+  클라이언트에서는 그냥 다음 시도로 넘어가는게 아니라 connect를 한번시도 한 후 서버에서 받아줄 때 까지 기다립니다. 클라입장에서 서버는 하나 뿐이니 때문에 
+  한번 connect 신청을 하고 기다리면 된다면 
+  서버입장에서 클라이언트는 다수이기 때문에 하나씩 기다리지 않고 처리되는대로 다음으로 넘기는 것입니다. 
+
+  아무튼 그래서 클라이언트에서 WSAEWOULDBLOCK 코드가 나서 continue를 하게 된 소켓은 다음시도때는 이미 기다리고 있는중 이라는 의미에서 
+  마지막 에러 코드를 WSAEISCONN 이라고 띄웁니다. 이 상태의 소켓은 서버에서 받아주면 알아서 다음 단계로 넘어갈 것이기 때문에 루프에서 빠져나옵니다. 
+
+  위 두가지 모두 해당하지 않는 에러코드를 가진 소켓은 뭔가 문제가 있는 소켓이기 때문에 그냥 나갑니다. 
+
+  
+	char sendBuffer[100] = "Hello World!";
+	while (true)
+	{
+		if (::send(clientSocket, sendBuffer, sizeof(sendBuffer), 0) == SOCKET_ERROR)
+		{
+			// 원래 블록 했어야 했는데 ... 너가 논블로킹으로 하라며?
+			if (::WSAGetLastError() == WSAEWOULDBLOCK)
+				continue;
+
+			// Error
+			break;
+		}
+
+		cout << "Send Data Len = " << sizeof(sendBuffer) << endl;
+		
+		while (true)
+		{
+			char recvBuffer[1000];
+			int32 recvLen = ::recv(clientSocket, recvBuffer, sizeof(recvBuffer), 0);
+
+			if (recvLen == SOCKET_ERROR)
+			{
+				if (::WSAGetLastError() == WSAEWOULDBLOCK)
+					continue;
+
+				// Error
+				break;
+			}
+			else if (recvLen == 0)
+			{
+				// 연결 끊김
+				break;
+			}
+
+			cout << "Recv Data Len = " << recvLen << endl;
+			break;
+		}
+
+		this_thread::sleep_for(1s);
+	}
+
+  이런 코드입니다.  마지막에 this_thread::sleep_for(1s); 로 1초에 한번씩 반복하도록 한것 말고는 아까 서버쪽 코드와 대부분 비슷합니다.
+
+
+이렇게 해서 논블로킹 소켓을 만들어 보고 실행해봐서 정상적으로 실행되면 성공입니다. 
+그런데 힘들게 배운 논블로킹 방식이 기존 블로킹 방식에 비해 더 성능이 안나올겁니다. 그래서 블로킹에서 논블로킹으로 바꿨다고 해서 더 좋아진다거나 하는 건 없다는
+말입니다. 
+
+다만 지금 환경은 서버와 클라가 하나씩인 상태이기 때문인데 클라가 여러개가 붙어서 accept를 기다리는 상황이 아니라고하면 굳이 여러번 체크하는 코드만 늘어난겁니다.
+블로킹방식에서는 차례대로 처리가 끝날때 까지 멈춰있을 작업이 괜히 무한 루프를 돌면서 CPU의 처리능력을 낭비하는 상황이 되어 버린겁니다. 
+
+예전 멀티쓰레드 내용중에 락을 배우면서 스핀락 이라고 계속해서 처리가 끝났는지를 체크하는 락이 있었는데 사실상 네트워킹에서는 이 논블로킹 소켓이 스핀락과 비슷한 
+개념입니다. 
+
+그래서 현재 환경에서는 블로킹 소켓이 더욱 효율적인 방식이라고 할 수 있습니다. 거기에 논블로킹에서는 체크해야하는게 많아지다 보니 코드도 지저분해지기도 합니다. 
+
+오늘 알 수 있었던것은 논블로킹 소켓이란 그렇게 어렵지는 않은 개념이구나. 그리고 그냥 논블로킹만 사용하는 것만으로는 부족하고 
+논블로킹의 부족한 점을 어떻게 보완해야할지가 필요합니다. 
+현재 가장 불필요한것은 소켓 하나를 처리하기위해 너무 많은 while 루프를 돌아야한다는게 문제입니다. 나중에는 클라이언트 수가 많아지고 그만큼 서버에서 소켓의 수도 
+많아질건데 각각의 소켓마다다 3중 while 을 돌면서 처리하는건 너무 힘듭니다. 
+
+그래서 어떤 만들거나 제공되는 라이브러리를 사용해서 while을 돌며 체크하는게 아니라 WSAEWOULDBLOCK 이 아닌 소켓을 찝어서 동작하도록 해줄 수 있다면 
+논블로킹 방식의 이점도 활용하면서 불필요한 체킹도 줄일 수 있지 않을까 싶은데 
+다행히도 그런 방법이 다 존재하고 그걸 '소켓 모델' 이라고 하고 또 이것을 다음 시간부터 배워나가 보겠습니다. 
