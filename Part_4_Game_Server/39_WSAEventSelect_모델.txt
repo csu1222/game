@@ -1,0 +1,295 @@
+
+
+        WSAEventSelect 모델
+
+
+// 복습
+먼저 지난시간 복습부터 하겠스빈다. 소켓 프로그래밍을 하면서 TCP UDP 등 전송 프로토콜들이 있고 이걸 보통 블로킹 소켓 방식이라고 하고 
+iocplsocket 함수를 이용하면 논블로킹 소켓 방식을 사용할 수도 있다고 했습니다. 
+
+논 블로킹 소켓 이라고 해서 무조건 좋은것은 아니고 블로킹을 안한다고 해도 어짜피 서버에서 소켓을 처리해줄 준비가 되기전 까지는 계속 뺑뻉이를 돌면서 
+준비가 될떄까지 루프를 돌고 있는다고 했습니다. 
+
+그래서 select 함수를 사용하는 Select 모델을 사용하면 사용할 소켓들을 모두 용도에 맞춰 소켓 세트에 담아 select 함수를 호출하면 
+준비가 된 소켓을 골라줄 수 있게 된다고 알았습니다. 
+
+단, Select 모델의 단점은 소켓들을 담아주는 소켓 세트의 크기가 64개의 소켓만 담아줄 수 있었습니다. 또 매 시도마다 소켓 세트를 다 밀고 다시 담아주는 
+동작도 했어야 합니다. 
+
+그래서 Select 모델은 비교적 단순하게 구현할 수는 있지만 이 모델이 최고의 성능을 가진 모델이라고는 할 수 없습니다. 
+
+위의 단점들을 조금 보완한 두번째 모델을 오늘 배워볼것입니다. 
+
+
+// WSAEventSelect : WSAEventSelect 함수가 핵심이 되는 소켓 입출력 모델
+
+특징은 소켓과 관련된 네트워크 이벤트를 [이벤트 객체]를 통해 감지 합니다.
+
+/*
+이벤트 객체는 이전에 멀티쓰레드쪽을 배울때 나왔던 키워드입니다. 
+스레드 간에 동기화를 위해 사용되는 일종의 커널쪽 에서 사용하는 불리언 같은것입니다. 
+지금 배우는 소켓에서 사용하는 이벤트 객체도 유사한 개념이라고 볼 수 있습니다. 
+*/
+
+전체적인 사용방법은 Select모델과 비슷한데 Select 모델은 동기 방식으로 동작한다면 WSAEventSelect 모델은 비동기 방식으로 동작하는 차이가 있습니다. 
+
+시작하기 전에 몇가지 알아봐야 합니다. 
+
+우선 이벤트 객체 관련 함수들 입니다. 
+
+생성 : WSACreateEvent 함수, 수동 리셋 Manual-Reset + Non-Signaled 상태 시작
+삭제 : WSACloseEvent 함수
+신호 감지 : WSAWaitForMultipleEvents
+구체적인 네트워크 이벤트 알아내기 : WSAEnumNetworkEvents
+
+이렇게 네가지 함수를 이용해서 이벤트 객체를 다루게 됩니다. 
+
+다음은 소켓 <-> 이벤트 객체 연동을 해줘야 합니다. 
+Select 모델에서 소켓 세트에 관찰할 소켓들을 담아서 select 함수에 인자로 넘겨줬었습니다. 이것과 유사하게 소켓과 이벤트를 매칭 해줘야 합니다. 
+소켓하나에 이벤트 하나를 붙여준다는 특징이 있습니다. 
+
+WSAEventSelect(SOCKET, Event, networkEvents); 
+
+이렇게 소켓과 이벤트를 붙히는데 관찰할 대상인 SOCKET과 통지 받을 Event, 그리고 어떤 이벤트를 관찰하고 싶은지를 networkEvents 로 넣어줍니다. 
+
+여기서 말하는 관찰할 네트워크 이벤트는 여러 가지 있을 수 있습니다. 
+- 관찰할 네트워크 이벤트 
+  FD_ACCEPT     : 접속한 클라가 있는지 체크 accept
+  FD_READ       : 데이터 수신 가능 recv, recvform
+  FD_WRITE      : 데이터 송신 가능 send, sendto
+  FD_CLOSE      : 상대가 접속 종료했는지
+  FD_CONNECT    : 통신을 위한 연결 절차 완료 여부 
+  FD_OOB        : 예외사항
+
+
+주의 사항이 있습니다. 
+1) WSAEventSelect 함수를 호출하면, 해당 소켓은 자동으로 넌브롤킹 모드로 전환 됩니다. 
+2) accept() 함수가 리턴하는 소켓은 listenSocket과 동일한 속성을 갖는다.
+   - 따라서 clientSocket은 FD_READ나 FD_WRITE 등을 다시 등록할 필요가 있습니다. (listenSocket은 FD_ACCEPT를 등록되어 있을것이기 때문)
+3) 드물게 WSAEWOULDBLOCK 오류가 뜰 수 있으니 예외 처리 필요
+4)  중요)
+    - 이벤트 발생 시, 적절한 소켓 함수 호출해야 함
+      아니면 다음 번에는 동일 네트워크 이벤트가 발생하지 않을 수 있다.
+4번째 주의 사항이 무슨 말이냐면 만약 데이터 수신을 기다리는 clientSocket 이면 FD_READ 이벤트를 가지고 기다리고 있다가 이벤트가 발생한다고 했을때 
+반드시 소켓 함수 recv, recvform 을 해주어야 다음번 수신때 다시 FD_READ가 동작할 수 있다는 말입니다. 
+
+이렇게 알아본 WSAEventSelect 모델은 소켓과 이벤트 객체, 관찰할 네트워크 이벤트를 연결해주는 부분만 있지 select 모델처럼 어떤 값을 반환하는 방식이 아닙니다. 
+
+select함수는 동기방식의 끝장으로 select 함수가 호출된 순간부터 등록된 소켓들중 준비가 되는게 나올때 까지 계속 기다렸다고 하면 
+WSAEventSelect 같은 경우는 각 소켓에 이벤트 객체만 붙여주고 실제 통제를 받는 것은 별도의 함수가 해주게 될겁니다. 
+
+그 통제를 하는 함수는 바로 
+
+WSAWaitForMultipleEvents 함수 입니다. 
+인자들 목록은 
+DWORD WSAAPI WSAWaitForMultipleEvents(
+  [in] DWORD          cEvents,
+  [in] const WSAEVENT *lphEvents,
+  [in] BOOL           fWaitAll,
+  [in] DWORD          dwTimeout,
+  [in] BOOL           fAlertable
+);
+이렇게 있는데 cEvents 는 이벤트들을 몇개나 관리할지 갯수를 뜻하고 *lphEvents 는 관리할 이벤트들을 배열로 넘겨줍니다. 
+fWaitAll 은 대기유형을 정하는데 True 라면 이벤트 배열안의 모든 이벤트가 준비가 되야 동작을 시작한다는 것이고 False 라면 이벤트 한개라도 준비되면 실행해버립니다. 
+dwTimeout 은 말그대로 timeout 입니다. 얼마나 기다릴 것인지를 정합니다. 마지막 fAlertable은 지금은 그냥 false 로 켜주면 됩니다. 
+
+그래서 WSAWaitForMultipleEvents 함수에 인자로 동시에 관찰할 이벤트 들을 넣어주면서 fWaitAll 을 false 로 설정해 주었다면 이 함수의 반환값은 맨 첫번째로 준비된 
+이벤트의 인덱스 번호를 반환합니다. 
+
+정리해보겠습니다. 
+소켓과 이벤트가 붙은 다음 그 이벤트들을 관찰하는 함수인 WSAWaitForMultipleEvents 입니다. 넣어줄 인자들은 
+1) count, event
+2) waitAll : 모두 기다림? 하나만 완료되어도 OK?
+3) timeout
+4) 지금은 false 
+return: 완료된 첫번째 인덱스 
+
+리턴값이 완료된 첫번째 인덱스인것은 알았지만 그 완료된 이벤트가 무엇인지는 모를 수 있을겁니다. 
+
+최종적으로 WSAEnumNetworkEvents 함수로 그 이벤트가 무엇인지를 알아낼겁니다. 
+
+1) socket
+2) eventObject : socket과 연동된 이벤트 객체 핸들을 넘겨주면  이벤트 객체를 자동으로 nun-Signaled로 
+3) networkEvent : 네트워크 이벤트 / 오류 정보가 저장
+
+
+// 실습
+이렇게 이론적으로는 알아 봤지만 실제 사용실습을 해보면 더욱 확 와닿을겁니다. 
+코드의 시점은 서버쪽 코드를 수정할것이고 listenSocket을 논블로킹 방식으로 만든다음 bind와 listen 까지 실행해 놓은 후입니다. 
+
+이전 실습에서 클라이언트마다 하나씩 소켓에 관련된 데이터들을 관리하는 Session 이라는 구조체를 매칭하기 위해 
+
+vector<Session> sessions; 
+
+이렇게 벡터를 만들었었습니다.
+그리고 이번시간에 이 세션들에도 하나씩 대응하는 WSAEVENT 라고 하는 걸 추가할겁니다. 
+
+	vector<WSAEVENT> wsaEvents;
+	vector<Session> sessions;
+
+그런데 sessions 에만 대응하도록 하면 listenSocket 에 대응 하는 이벤트가 없습니다. 그래서 하나 직접 만들어 wsaEvents에 push_back 합니다. 
+
+	WSAEVENT listenEvent = ::WSACreateEvent();
+	wsaEvents.push_back(listenEvent);
+	sessions.push_back(Session{ listenSocket });
+
+sessions 에도 listenSocket 을 추가 해줍니다. 엄밀히 말하면 listenSocket 은 클라이언트 쪽 소켓이 아니기 때문에 sessions 에는 안들어 갔었는데 
+지금은 wsaEvents 와 sessions 를 일대일 대응을 해주기 위해서 넣어주고 있습니다. 
+
+	if (::WSAEventSelect(listenSocket, listenEvent, FD_ACCEPT | FD_CLOSE) == SOCKET_ERROR)
+		return 0;
+
+listener 쪽 소켓과 이벤트 객체가 준비되었으니 이제 연동을 시켜주고 있습니다. 오늘 모델이름과 같은 함수인 WSAEventSelect 함수입니다. 인자는 순서대로
+소켓, 이벤트 객체, 관찰할 옵션을 넣어주고 있습니다. 여기서는 or 를 사용해서 FD_ACCEPT 와 FD_CLOSE 를 관찰하도록 했습니다. 
+의미는 listenSocket 에 accept나 close 와 관련된 이벤트가 발생하면 우리가 listenEvent 를 가지고 통보를 받을 수 있다는 말이됩니다. 
+
+이제 다음은 무한 루프를 돌면서 accept도 하고 accept한 반환값인 clientSocket과 데이터를 주고 받는 부분을 만들어 볼겁니다. 
+
+우선 반복문을 만들겁니다. 
+
+while(true)
+{
+		int32 index = ::WSAWaitForMultipleEvents(wsaEvents.size(), &wsaEvents[0], false, WSA_INFINITE, false);
+		if (index == WSA_WAIT_FAILED)
+			continue;
+		// 공식문서를 보면 WSAWaitForMultipleEvents 의 반환값은 이벤트가 동작한 인덱스에
+		// WSA_WAIT_EVENT_0 라는 수도 더한 값을 반환한다고 합니다. 
+		// 그래서  WSA_WAIT_EVENT_0 를 빼준값이 진짜 반환된 이벤트의 인덱스입니다. 
+		index -= WSA_WAIT_EVENT_0;
+
+		// 기본적으로 WSAEventSelect 를 사용하면 이벤트 들이 수동리셋(Manual Reset) 이 기본 상태라고 했습니다. 
+		// 지금 한번 이벤트를 켰으니 직접 리셋해줘야 합니다. 
+		::WSAResetEvent(wsaEvents[index]);
+		// 보통을 그런데 이 다음에 오는 함수인 WSAEnumNetworkEvents 에서 자동으로 인자로 주는 이벤트 객체를 
+		// 리셋 시켜 주기 때문에 여기서 직접 수동 리셋을 해주지 않아도 됩니다. 
+		
+		// 이 시점에서는 아직 어떤 networkEvent 때문에 켜졌는지 알 수 없습니다. 
+		// 그래서 그걸 알아보는 함수가 WSAEnumNetworkEvents 함수였습니다. 
+		WSANETWORKEVENTS networkEvents;
+		if (::WSAEnumNetworkEvents(sessions[index].socket, wsaEvents[index], &networkEvents) == SOCKET_ERROR)
+			continue;
+
+		// 위 함수의 결과물은 세번째 인자인 networkEvents 에 담깁니다. 이 구조체도 조금 복잡하게 되어 있는데
+		// long lNetworkEvents , int iErrorCode[FD_MAX_EVENTS] 라는 변수들을 가지고 있습니다. 
+		// 이걸 이용해서 에러가 발생했는지, 어떤 네트워크 이벤트가 발생했는지를 체크할 수 있습니다. 
+		// 예제로 확인하는게 이해가 쉽습니다. 
+		
+		// Listener 소켓 체크
+		if ((networkEvents.lNetworkEvents & FD_ACCEPT) != 0)
+		{
+			// Error - Check
+			if (networkEvents.iErrorCode[FD_ACCEPT_BIT] != 0)
+				continue;
+
+			// 여기까지 네트워크 이벤트가 FD_ACCEPT 이고 에러가 나지 않았다면 listenSocket 이 정상적으로 
+			// 준비되었다는 말입니다. 이제 accept 로 클라이언트와 연결합니다. 
+			// 이번 모델에서는 또 wsaEvents 와 sessions에 각각  클라이언트 소켓과 이벤트 객체를 연동해주어야 합니다. 
+			SOCKADDR_IN clientAddr;
+			int32 addrLen = sizeof(clientAddr);
+			SOCKET clientSocket = ::accept(listenSocket, (SOCKADDR*)&clientAddr, &addrLen);
+			if (clientSocket != INVALID_SOCKET)
+			{
+				cout << "Client Connected" << endl;
+				// 처음 listener 소켓을 추가했던 코드를 똑같이 합니다. 
+				// 다만 관찰할 네트워크이벤트를 read, write, close 로 합니다. 
+				WSAEVENT clientEvent = ::WSACreateEvent();
+				wsaEvents.push_back(clientEvent);
+				sessions.push_back(Session{ clientSocket });
+
+				if (::WSAEventSelect(clientSocket, clientEvent, FD_READ | FD_WRITE | FD_CLOSE) == SOCKET_ERROR)
+					return 0;
+
+				// 이제 다음 루프때에는 listenSocket 뒤에 clientSocket 까지 다 관찰하면서 가장 먼저 준비된 소켓의 
+				// 이벤트 객체의 시그널을 켜주면 해당 인덱스를 가지고 작업을 시작하게 됩니다. 
+			}
+		}
+		// 위의 FD_ACCEPT 에 걸리는 소켓이 listenSocket 밖에 없다보니 이렇게 특정할 수 있었습니다. 
+
+		// Client Session 소켓 체크 
+		// clientEvent 는 read와 write 두가지 모두 체크해야합니다. 
+		if (networkEvents.lNetworkEvents & FD_READ || networkEvents.lNetworkEvents & FD_WRITE)
+		{
+			// Error - Check
+			// read, write 각 에러를 체크합니다. 
+			if ((networkEvents.lNetworkEvents & FD_READ) && (networkEvents.iErrorCode[FD_READ_BIT] != 0))
+				continue;
+			if ((networkEvents.lNetworkEvents & FD_WRITE) && (networkEvents.iErrorCode[FD_WRITE_BIT] != 0))
+				continue;
+
+			Session& s = sessions[index];
+
+			// Read
+			// 이전 select 모델에서 사용했던 방법인 Bytes 수를 가지고 recv할 소켓인지 send 할 소켓인지를 거릅니다.
+			if (s.recvBytes == 0)
+			{
+				int32 recvLen = ::recv(s.socket, s.recvBuffer, BUFSIZE, 0);
+				if (recvLen == SOCKET_ERROR && ::WSAGetLastError() != WSAEWOULDBLOCK)
+				{
+					cout << WSAGetLastError() << endl;
+					// TODO : Remove Session
+					continue;
+				}
+
+				// 실습때 자꾸 recvLen 이 -1 이 뜨길레 찾아보니 소켓 오류코드가 WSAEWOULDBLOCK 이었습니다.
+				// WSAEventSelect 모델에서는 가끔 이렇게 WSAEWOULDBLOCK 오류가 나기 때문에 예외처리를 해주었습니다. 
+				if (WSAGetLastError() == WSAEWOULDBLOCK)
+					continue;
+
+				s.recvBytes = recvLen;
+				cout << "Recv Data = " << recvLen << endl;
+			}
+
+			// Write
+			if (s.recvBytes > s.sendBytes)
+			{
+				// 혹시라도 send에서 데이터를 한번에 다 보내지 못했을 경우를위한 코드
+				int32 sendLen = ::send(s.socket, &s.recvBuffer[s.sendBytes], s.recvBytes - s.sendBytes, 0);
+				if (sendLen == SOCKET_ERROR && WSAGetLastError() != WSAEWOULDBLOCK)
+				{
+					// TODO : Remove Session
+					continue;
+				}
+				if (WSAGetLastError() == WSAEWOULDBLOCK)
+					continue;
+
+				// recv 한 만큼 send 했으면 데이터를 다 보낸 것이니 0으로 초기화(미러 서버이기때문)
+				s.sendBytes += sendLen;
+				if (s.recvBytes == s.sendBytes)
+				{
+					s.recvBytes = 0;
+					s.sendBytes = 0;
+				}
+
+				cout << "Send Data = " << sendLen << endl;
+			}
+		}
+
+		// FD_CLOSE 처리 
+		// 만약 서버-클라 간 연결이 끊겼을 경우의 처리 
+		if (networkEvents.lNetworkEvents & FD_CLOSE)
+		{
+			// TODO : Remove Session
+		}
+}
+
+
+코드는 이렇게 마무리 됩니다. 일단 코드로 보면 이전 시간인 Select 모델과 크게 다르지는 않다는걸 알 수 있습니다. 
+사용하는 함수와 사용법이 약간 다른 정도입니다. 
+
+다른 점은 Select 모델과는 다르게 매 루프마다 소켓 세트를 리셋하고 다시 담는 동작이 없어도 된다는겁니다. 
+다만 WSAEventSelect 함수는 기본적으로 Manula-Reset 이기 때문에 한번 함수를 호츨하면 직접 WSAResetEvent 를 해줘야 하긴 했지만 
+위의 코드에서는 WSAEnumNetworkEvents 에서 자동으로 해주고 있었습니다. 
+
+sessions 와 wsaEvents 라는 동적 배열을 통해 여러개의 소켓, 이벤트 객체 쌍을 한번에 관찰할 수 있었는데 
+WSAWaitForMultipleEvents 함수를 통해서 관찰을 했었습니다. 
+그래도 주의할점이 있는데 이전 fd_set와 같이 최대 갯수의 한계가 있습니다. 공식문서를 보면 나오는데
+최대 갯수는 WSA_MAXIMUM_WAIT_EVENTS 라는 수를 넘으면 안된다고 하고 실제 이게 몇개인지를 보면 64라는 수입니다. 
+
+그래서 Select와 마찬가지로 한번에 너무 많은수의 클라이언트를 관찰할 수 없다는 문제가 있습니다. 
+
+결국 서버-클라 서버를 만들때 클라쪽에서 서버로 연결할때 이 WSAEventSelect 모델로 만드는것은 괜찮습니다. 하지만 서버쪽에서는 굳이 iocp를 놔두고
+Select 모델이나 WSAEventSelect 모델로 만들 필요는 없다는 것입니다. 
+
+사실은 각 세션마다 이벤트 객체를 만들고 연동을 하는 과정도 번거롭게 느낄만한 코드입니다. 
+
+그래서 부분적으로 훌륭한, 클라쪽에서는 쓸만한 방식의 소켓 입출력 모델을 알아봤습니다. 
