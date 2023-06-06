@@ -14,6 +14,7 @@ void HandleError(const char* cause)
 	cout << cause << " ErrorCode : " << errCode << endl;
 }
 
+
 int main()
 {
 	this_thread::sleep_for(1s);
@@ -55,43 +56,38 @@ int main()
 	cout << "Connected To Server!" << endl;
 
 	char sendBuffer[100] = "Hello World!";
+	// 이벤트 객체도 만듭니다. 
+	WSAEVENT wsaEvent = ::WSACreateEvent();
+	WSAOVERLAPPED overlapped = {};
+	overlapped.hEvent = wsaEvent;
 	while (true)
 	{
-		if (::send(clientSocket, sendBuffer, sizeof(sendBuffer), 0) == SOCKET_ERROR)
+		// 이번엔 클라이언트에서도 대칭적으로 WSASend를 사용해보겠습니다. 
+		WSABUF wsaBuf;
+		wsaBuf.buf = sendBuffer;
+		wsaBuf.len = 100;
+
+		DWORD sendLen = 0;
+		DWORD flags = 0;
+
+		if (::WSASend(clientSocket, &wsaBuf, 1, &sendLen, flags, &overlapped, nullptr)
+			== SOCKET_ERROR)
 		{
-			// 원래 블록 했어야 했는데 ... 너가 논블로킹으로 하라며?
-			if (::WSAGetLastError() == WSAEWOULDBLOCK)
-				continue;
-
-			// Error
-			break;
-		}
-
-		cout << "Send Data Len = " << sizeof(sendBuffer) << endl;
-		
-		while (true)
-		{
-			char recvBuffer[1000];
-			int32 recvLen = ::recv(clientSocket, recvBuffer, sizeof(recvBuffer), 0);
-
-			if (recvLen == SOCKET_ERROR)
+			if (::WSAGetLastError() == WSA_IO_PENDING)
 			{
-				if (::WSAGetLastError() == WSAEWOULDBLOCK)
-					continue;
-
-				// Error
+				// Pending
+				cout << "Pending" << endl;
+				::WSAWaitForMultipleEvents(1, &wsaEvent, TRUE, WSA_INFINITE, FALSE);
+				::WSAGetOverlappedResult(clientSocket, &overlapped, &sendLen, FALSE, &flags);
+			}
+			else
+			{
+				// TODO : 문제 있는 상황
 				break;
 			}
-			else if (recvLen == 0)
-			{
-				// 연결 끊김
-				break;
-			}
-
-			cout << "Recv Data Len = " << recvLen << endl;
-			break;
 		}
 
+		cout << "Send Data Len = " << sendLen << endl;
 		this_thread::sleep_for(1s);
 	}
 
