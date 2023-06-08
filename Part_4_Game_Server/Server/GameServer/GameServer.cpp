@@ -24,11 +24,24 @@ const int32 BUFSIZE = 1000;
 // 이기에 sendBytes 를 지웠습니다. 
 struct Session
 {
+	WSAOVERLAPPED overlapped = {};
 	SOCKET socket = INVALID_SOCKET;
 	char recvBuffer[BUFSIZE] = {};
 	int32 recvBytes = 0;
-	WSAOVERLAPPED overlapped = {};
 };
+
+// 각 인자들의 역할 
+// 1) 오휴 발생시 0이 아닌 값
+// 2) 전송 바이트 수
+// 3) 비동기 입출력 함수 호출시 넘겨준 WSAOVERLAPPED 구조체의 주소값
+// 4) 사용하지 않을 것이니 0으로 넣어준다
+void CALLBACK RecvCallback(DWORD error, DWORD recvLen, LPWSAOVERLAPPED overlapped, DWORD flags)
+{
+	cout << "Data Recv Len Callback = " << recvLen << endl;
+	// TODO : 만약 에코서버를 만든다면 여기서 WSASend() 를 호출하면 됨
+
+	Session* session = (Session*)overlapped;
+}
 
 int main()
 {
@@ -58,57 +71,6 @@ int main()
 
 	cout << "Accept" << endl;
 
-	
-	// Overlapped IO (비동기 + 논블로킹)
-	// - Overlapped 함수를 건다 (WSARecv, WSASend)
-	// - Overlapped 함수가 성공했는지 확인 후 
-	// -> 성공했으면 결과 얻어서 처리
-	// -> 실패했으면 사유를 확인 사유가 Pending(보류)이라면 나중에 완료되면 알려달라고 두가지 방법중 하나를 선택
-
-	// Overlapped 함수들 
-	// WSASend
-	// WSARecv
-	// AcceptEx		- AcceptEx와 ConnectEx는 나중에 네트워크 라이브러리제작때 자세히 알아볼것
-	// ConnectEx
-
-	// WSASend, WSARecv 두 함수가 받는 인자들은 거의 비슷합니다. 어떤 인자를 받는지 알아보겠습니다.
-	// 1) 비동기 입출력 소켓
-	// 2) 입출력 버퍼를 WSABUF 라는 구조체로 받아줌배열의 시작 주소
-	// 3) WSABUF의 크기,개수
-	// 4) 보내고/ 받은 바이트 수
-	// 5) 상세 옵션인데 일단 0으로 넣으면 됩니다.
-	// 6) WSAOVERLAPPED의 구조체의 주소값 
-	// 7) 입출력이 완료되면 OS가 호출할 콜백함수 (오늘 실습에서는 사용하지 않을것)
-
-		// WSABUF 에는 buf와 len데이터가 있지만 인자로 따로 배열 시작 주소와 개수를 넣어주는 이유는
-		// 밑과 같이 여러버퍼를 한번에 넣어 줄 수 있기때문 
-		//char sendBuffer[100];
-		//WSABUF wsaBuf[2];
-		//wsaBuf[0].buf = sendBuffer;
-		//wsaBuf[0].len = 100;
-
-		//char sendBuffer2[100];
-		//wsaBuf[1].buf = sendBuffer2;
-		//wsaBuf[1].len = 100;
-
-		// 위의 방법을 통해 나중에 알아볼 우아한 기법으로 
-		// Scatter-Gether 기법 이라고 합니다. 
-		// 나중에 데이터 패킷을 보낼때 패킷들이 서로 흩어져 있을건데 그 패킷들을 위처럼 한 버퍼에 
-		// 모으고 연결해서 보내고 있습니다. 일단 이내용은 나중에 다시 다룰 내용입니다. 
-
-		// WSAOVERLAPPED 가 어떻게 되어있는지를 따라 들어가보면 OVERLAPPED라는 구조체이고 
-		// 내부적으로는 여러 값들이 복잡하게 있는데 대부분은 운영체제에서 알아서 사용하는 값들이고 
-		// 우리가 신경써야하는 데이터는 
-		// HANDLE hEvent 라는 핸들을 보면 됩니다. 이 변수에 우리가 이벤트 핸들을 넣어주는 것입니다. 
-		// 이 OVERLAPPED.hEvent 라는 곳에 생성한 이벤트를 통해 비동기적으로 동작 완료된 것을 통보받을수 있습니다. 
-
-	//이런 인자들을 받고 있고
-
-	//또 처음 OVERLAPPED 함수를 사용할때 잘못 사용할 경우도 있습니다.
-	//WSASend, WSARecv는 비동기 함수이기 때문에 호출할 시점과 완료가 된 시점이 같지 않을 수 있다고 했습니다.그래서
-	//두번째 인자 WSABUF와 WSAOVERLAPPED에 대한 정보를 넘겨준 다음 확실히 동작이 완료될때 까지 건드리지 않고 가만히 놔둬야합니다.
-	//괜히 동기 함수처럼 코드 줄이 지나갔다고 동작이 완료되었겠꺼니 하고 건드렸다가는 나중에 커널이 미뤄둔 OVERLAPPED함수를 실행할때 우리가 의도한 데이터가 아니라
-	//엉뚱한 데이터가 송신 / 수신 될 수 있다는 말입니다.
 
 	//OverLapped 모델(이벤트 기반)
 	//1) 비동기 입출력 지원하는 소켓을 생성 + 통지를 받기 위한 이벤트 객체를 생성
@@ -157,7 +119,8 @@ int main()
 			// 이렇게 호출한 WSARecv는 바로 값을 반환 할 수도 있고 아니면 나중에 반환할 수도 있습니다. 
 			// 아마 수신 버퍼에 이미 데이터가 있다면 수신 성공을 하면서 빠져나올것이고 ,
 			// 수신 버퍼에 데이터가 없어도 빠져나오기는 할겁니다. 
-			if (::WSARecv(clientSocket, &wsaBuf, 1, &recvLen, &flags, &session.overlapped, nullptr)
+
+			if (::WSARecv(clientSocket, &wsaBuf, 1, &recvLen, &flags, &session.overlapped, RecvCallback)
 				== SOCKET_ERROR)
 			{
 				// 연결 실패일 수도 있고 수신버퍼에 데이터가 없을 수도 있습니다.
@@ -166,8 +129,14 @@ int main()
 				{
 					// Pending
 					cout << "Pending" << endl;
-					::WSAWaitForMultipleEvents(1, &wsaEvent, TRUE, WSA_INFINITE, false);
-					::WSAGetOverlappedResult(session.socket, &session.overlapped, &recvLen, FALSE, &flags);
+
+					// Alertable Wait
+
+					// INFINITE 시간동안 기다리는 Alertable Wait 상태로 만들어 준다는 의미 
+					::SleepEx(INFINITE, TRUE);
+
+					// 아래 함수도 마지막 인자를 TRUE로 주면 이 스레드를 Alertable Wait 상태로 변경해줄 수 있습니다.
+					// ::WSAWaitForMultipleEvents(1, &wsaEvent, TRUE, WSA_INFINITE, TRUE);
 				}
 				else
 				{
@@ -175,9 +144,11 @@ int main()
 					break;
 				}
 			}
-
-			// 수신 성공
-			cout << "Data Recv Len = " << recvLen << endl;
+			else
+			{
+				// 수신 성공
+				cout << "Data Recv Len = " << recvLen << endl;
+			}
 		}
 
 		::closesocket(session.socket);

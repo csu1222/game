@@ -1,0 +1,243 @@
+
+
+
+        Overlapped 콜백 기반
+
+
+이번 시간은 지난시간에 이어서 Overlapped 모델을 다시 알아볼건데 이전 시간은 이벤트 기반의 Overlapped 모델을 알아보고 실습 했다면 
+콜백 함수 기반의 Overlapped 모델에 대해 알아보는 시간을 가져보겠습니다. 
+
+지난 시간에 알아본 Overlapped 모델 (이벤트 기반)의 흐름은 이랬습니다. 
+
+//1) 비동기 입출력 지원하는 소켓을 생성 + 통지를 받기 위한 이벤트 객체를 생성
+//2) 비동기 입출력 함수 호출(1에서 만든 이벤트 객체를 같이 넘겨줌, 인자중 WSAOVERLAPPED 구조체 안에 hEvent 변수에 넘겨줌)
+//3) 비동기 작업이 바로 완료 되지 않으념, WSA_IO_PENDING 오류 코드가 뜰것
+//- 운영체제는 이벤트 객체를 signaled 상태로 만들어 완료상태를 알려줄것
+//4) WSAWaitForMultipleEvents 함수를 호출해서 이벤트 객체의 signaled 상태를 판별
+//5) WSAGetOverlappedResult 함수를 호출해서 비동기 입출력 결과 확인 및 데이터 처리
+
+그런데 오늘의 주제인 콜백기반은 위와 흐름이 달라 집니다. 
+비동기 입출력 함수를 호출할때 소켓과 함깨 콜백함수를 같이 건내줘서 알아서 함수가 완료되면 콜백함수를 실행해 알려달라고 하는 방법도 있고
+(나중에 배울 iocp 방식입니다.)
+
+이번시간에 배울 방식은 Completion Routine 콜백 기반 Overlapped 모델입니다. 
+진행흐름이 조금 달라집니다. 
+- 비동기 입출력 지원하는 소켓 생성
+    (따로 콜백함수를 만들어 커널쪽에서 처리가 끝났음을 알려주는 함수 '완료 루틴'을 만듭니다.)
+- 비동기 입출력 함수 호출 (완료 루틴의 시작 주소를 넘겨준다 즉, 함수 포인터를 넘겨준다.)
+- 비동기 입출력 함수가 바로 처리되면 베스트
+- 만약 작업이 바로 완료되지 않으면, WSA_IO_PENDING 오류코드가 뜬다면 처리가 지연되고 있는것
+
+// 그런데 여기서 문제가 있는데 비동기 IO가 완료 됐음을 완료 루틴으로 호출을 하긴 하는데 그 시점이 어디인지가 문제입니다. 
+// 만약 비동기 함수가 처리 완료된 시점이 다른 중요한 처리를 하던 중이라면 어떨까요? 예를 들어 어딘가에서 락을 잡고 작업을 처리하던중에 커널로부터 완료 루틴 호출을 
+// 받았다면 어떻게 해야할까요
+// 결국 우리가 충분히 콜백함수를 처리할 수 있는 상태여야지만 비동기 함수의 처리를 할 수 있습니다. 그래서 중간에 추가되는 과정이 있습니다. 
+
+- 비동기 IO 함수를 호출한 쓰레드를 -> Alertable Wait 상태로 만든다.
+// 완료 루틴의 호출을 받을 준비가 되었다는 표시가 위에서 처음본 Alertable Wiat 상태입니다. 그리고 이 Alertable Wait 상태라고 인식하게 해주는 함수들이 있습니다.
+// ex) WaitForSingleObjectEx, WaitForMultipleObjectsEx, SleepEx, WSAWaitForMultipleEvents
+
+// 비동기 IO 함수를 호출할 쓰레드가 Alertable Wait 상태라는게 확인되면
+- 비동기 IO(Input-Output) 완료되면, 운영체제는 완료 루틴 호출 (이벤트 기반에서는 이벤트 signaled 로 알려줬었음)
+- 완료 루틴 호출이 모두 끝나면, 쓰레드는 Alertable Wait 상태에서 빠져나온다.
+
+이번에도 코드 흐름을 텍스트로만 읽으면 복잡하지만 매번 그랬듯 코드 실습을 해보면서 감을 잡아보겠습니다. 
+
+
+- 코드 실습 -
+
+일단 윈속 시작, 리슨 소켓 생성, 논블로킹 소켓으로 변경, 서버주소 구조체 생성, 바인드, 리슨 까지 그대로고 
+루프를 돌면서 accept 하는 부분까지 이전 시간 그대로 진행하겠습니다. 
+
+그 다음부터 코드를 볼것인데 accept 로 받아온 클라이언트 소켓을 Session 구조체에 넣어주고 이벤트 객체를 만들어서 session.overlapped.hEvent 에 넣어주기도 했습니다. 
+그런데 이번에는 이벤트 객체로 비동기 함수가 완료되었는지 확인할것이 아닙니다. 그래서 이 이벤트 객체는 이번에 사용하지 않을것이고 
+또 WSASend, WSARecv 함수들의 인자중 OVERLAPPED 구조체를 받던 곳이 있었는데 그곳은 이번엔 사용하지 않고 다음번 인자인 콜백함수를 사용할것입니다. 
+
+그 마지막 인자의 타입은 LPWSAOVERLAPPED_COMPLIETION_ROUTINE 이라는 타입입니다. 
+
+typedef
+void
+(CALLBACK * LPWSAOVERLAPPED_COMPLETION_ROUTINE)(
+    IN DWORD dwError,
+    IN DWORD cbTransferred,
+    IN LPWSAOVERLAPPED lpOverlapped,
+    IN DWORD dwFlags
+    );
+
+이런 코드로 구현 되어 있는데 함수포인터이고 반환 타입은 void, 인자로는 DWORD, DWORD, LPWSAOVERLAPPED, DWORD 순으로 받아주는 형태의 함수만 받아준다는걸 알 수 있습니다. 
+그러니까 내 멋대로 아무 함수나 만들어서 넣어줄 수는 없다는 것입니다. 
+
+위 함수의 원형을 좀 더 살펴보겠습니다. 
+
+// 각 인자들의 역할 
+// 1) 오휴 발생시 0이 아닌 값
+// 2) 전송 바이트 수
+// 3) 비동기 입출력 함수 호출시 넘겨준 WSAOVERLAPPED 구조체의 주소값
+// 4) 사용하지 않을 것이니 0으로 넣어준다
+
+void CALLBACK RecvCallback(DWORD error, DWORD recvLen, LPWSAOVERLAPPED overllaped, DWORD flags)
+{
+	cout << "Data Recv Len Callback = " << recvLen << endl;
+	// TODO : 만약 에코서버를 만든다면 여기서 WSASend() 를 호출하면 됨
+}
+
+이런 형태로 함수를 만들면 되는데 이 함수를 포인터로 비동기 입출력 함수로 건내주면 각 인자에 해당 값이 채워져서 돌아올것이고 그때 그 데이터를 어떻게 처리할지를 
+함수 구현부에 작성하면 된다고 합니다. 
+
+    // 마지막 인자로 위에서 만든 RecvCallback의 주소(함수 포인터)를 넣어주었습니다. 
+    if (::WSARecv(clientSocket, &wsaBuf, 1, &recvLen, &flags, &session.overlapped, RecvCallback)
+        == SOCKET_ERROR)
+    {
+        // 연결 실패일 수도 있고 수신버퍼에 데이터가 없을 수도 있습니다.
+        
+        if (::WSAGetLastError() == WSA_IO_PENDING)
+        {
+            // Pending
+            cout << "Pending" << endl;
+
+            // Alertable Wait
+
+            // INFINITE 시간동안 기다리는 Alertable Wait 상태로 만들어 준다는 의미 
+            ::SleepEx(INFINITE, TRUE);
+
+            // 아래 함수도 마지막 인자를 TRUE로 주면 이 스레드를 Alertable Wait 상태로 변경해줄 수 있습니다.
+            // ::WSAWaitForMultipleEvents(1, &wsaEvent, TRUE, WSA_INFINITE, TRUE);
+        }
+        else
+        {
+            // TODO : 문제 있는 상황
+            break;
+        }
+    }
+    else // WSARecv가 바로 성공한 경우
+    {
+        // 수신 성공
+        cout << "Data Recv Len = " << recvLen << endl;
+    }
+    
+Alertable Wait apc 라는 개념을 찾아보겠습니다.
+구글에 검색하면 이미지들이 나오는데 일단 스레드마다 독립적으로 APC 큐 라는게 있습니다. 
+운영체제, 커널영역에서 비동기 함수들을 APC큐 에 하나씩 쌓아 놓고, APC 큐에서 함수들을 처리할 상황이 되면 하나씩 처리를 해놓게 됩니다.  
+유저레벨에서 Alertable Wait 상태로 변경이 되면 APC 큐에서 처리 완료된 완료 루틴들을 원래 스레드로 호출을 해주고 스레드에서는 이후 코드들로 진행이 됩니다. 
+
+위 코드의 진행을 다시 훑어보면 WSARecv를 호출하고 바로 처리되서 수신성공하면 베스트겠지만 만얀 바로 처리가 안된다면 WSAGetLastError() 의 값이 WSA_IO_PENDING 인지를 체크합니다.
+그 후 만약 Pending 상태라면 Alertable Wait 상태로 만들어주는 함수(여기서는 SleepEx)를 호출합니다. 
+이때 WSARecv를 호출하면서 그 처리를 운영체제가 현제 스레드의 APC 큐로 넘겨준 다음 APC큐에서는 처리 가능할때 처리를 해줍니다. SleepEx 가 먼저 호출이 되던지 아니면 APC큐에서 먼저 처리가 되던지
+Alertable Wait 상태이고 WSARecv의 처리가 완료가 되었다면 스레드는 다음 코드로 순차적으로 진행이 됩니다. 
+
+이쯤에서 한번 코드를 실행해 봤습니다. 만약 Pending 상황이라서 SleepEx을 호출해 RecvCallback 함수로 들어왔다면 "Data Recv Len Callback" 이라는 메세지가 뜨도록 했고 
+그냥 비동기 함수가 바로 처리 되었다면 "Data Recv Len" 이라는 메세지가 뜨도록 했습니다. 
+결과는 대부분 Pending 상황으로 들어갔습니다. 
+
+이 부분을 중단점을 잡고 디버깅을 해보면 알수 있는것은 비동기 함수를 실행하면서 인자로 준 콜백함수 RecvCallback 이 ACP큐에 들어가고 
+이후 Pending 상태에 들어가 SleepEx 함수를 호출하면 ACP큐에 들어있던 함수들을 싹 비워주면서 콜백 함수를 호출합니다. 그때 "Data Recv Len Callback" 이라는 메세지가 뜨게 되는겁니다. 
+그리고 나서 다음 코드를 실행해보면 SleepEx 다음 코드부터 한줄 한줄 이어서 실행이 됩니다. 
+
+여기서 정확히 알고 가야하는것은 만약 현재 쓰레드에서 비동기 입출력 함수를 한 다섯번 호출해서 ACP큐에도 다섯개의 콜백함수가 들어있다고 했을때 
+Alertable Wait상태로 변경해주는 함수도 다섯번 호출해야 ACP큐가 다 비워지는것이 아니고 한번만 호출해도 ACP큐의 콜백함수가 전부 비워집니다. 
+
+
+여기까지 알아본 콜백 함수 기반의 Overlapped 모델의 동작흐름이 Event 기반의 방식과 어떤 차이가 있는지를 잘 느껴지지 않을 수 있습니다. 
+차근 차근 알아보면 다른점을 볼 수 있습니다.
+먼저 이벤트 기반에서는 소켓 하나당 이벤트 객체 하나를 연동시켜 동작했어야 했고, 또 처리할수 있는 소켓의 갯수가 64개로 정해져 있기도 했습니다. 
+
+반면 오늘 실습중인 콜백 기반 Overlapped 모델의 SleepEx을 보면 몇개가 되었건 ACP큐에 담긴 모든 콜백함수들을 호출해줄것이니까 여러 소켓이 한번에 접속해도 
+감당 가능하다는 말입니다. 
+
+사실은 굳이 Session.overlapped.hEvent 에 이벤트를 주지 않아도 콜백함수만 넘겨준다고 해도 한번에 묶어서 처리할수 있다는 장점이 있습니다. 
+
+다음으로 또 한가지 언급하고 싶은것은 현재 스레드가 Alertable Wait 상태가 되었을때(SleepEx) ACP큐에 있던 콜백함수를 호출해주게 될것인데 
+이 콜백함수의 인자들을 채워주고 호출이 될것입니다. 
+그런데 인자 목록을 보면 에러메세지, 송신/수신된 데이터의 크기, 플레그 이런것들은 다 DWORD 타입으로 특정한 정보를 알려주고 
+사실 운영체제에서 통신의 결과물을 알려줄 수 있는 인자는 OVERLAPPED 인자 밖에 없습니다. 
+
+그리고 이 콜백함수의 overlapped 인자는 WSARecv의 인자중 sesseion.overlapped 와 일치합니다. 
+OVERLAPPED 라는 구조체가 어떻게 이루어져 있는지 다시 한번 살펴보면 internal, internalHigh 등의 정보가 있었고 이것들은 운영체제에서 사용되는 정보이기때문에 
+실질적으로 유저레벨에서 사용할 정보는 
+HANDLE hEvent; 밖에 없었습니다. 
+심지어 이벤트를 안쓰고 콜백함수를 사용할것이라고 하면 그 마저도 쓸모없는 정보입니다. 
+
+그렇다면 이제 콜백함수의 네가지 인자가 전부 쓸모가 없는데 만약 클라이언트 소켓이 많이 접속해 있는 상태여가지고 지금 호출한 콜백 함수가 어떤 클라이언트 소켓의 
+콜백함수인지 알고 싶다면 난감해 질수 있습니다. 
+
+여기서 함정이 있는데 콜백 함수가 LPWSAOVERLAPPED 라는 포인터를 받아주는게 맞긴하지만 진짜로 OVERLAPPED 포인터만 넘겨줄 필요는 없다는 말입니다.
+인자타입대로 넘겨주는게 필수가 아니라는 말이 무슨말이냐면
+이전 시간에 Session 을 정의할때 어떻게 정의 했냐면
+
+struct Session
+{
+	SOCKET socket = INVALID_SOCKET;
+	char recvBuffer[BUFSIZE] = {};
+	int32 recvBytes = 0;
+	WSAOVERLAPPED overlapped = {};
+};
+
+이런 구조로 되어있는데 만약에 멤버변수의 위치를 바꿔서 첫 멤버 변수로 overlapped가 온다고 해보겠습니다. 
+
+struct Session
+{
+	WSAOVERLAPPED overlapped = {};
+	SOCKET socket = INVALID_SOCKET;
+	char recvBuffer[BUFSIZE] = {};
+	int32 recvBytes = 0;
+};
+
+이러면 사실상 Session 의 시작주소와 첫번째 멤버인 overlapped의 주소가 같아집니다. 그렇다 보니 WSARecv에 넘겨줬던 session.overlapped 의 주소를 
+콜백함수에서 다시 Session으로 캐스팅해줘도 괜찮다는 말입니다. 
+
+void CALLBACK RecvCallback(DWORD error, DWORD recvLen, LPWSAOVERLAPPED overlapped, DWORD flags)
+{
+	cout << "Data Recv Len Callback = " << recvLen << endl;
+	// TODO : 만약 에코서버를 만든다면 여기서 WSASend() 를 호출하면 됨
+
+	Session* session = (Session*)overlapped;
+}
+
+이런식으로 overlapped 를 Session* 로 캐스팅하면 다시 session에 담겨있던 데이터들을 다시 활용할 수 있다는 것입니다.
+캐스팅 이후에 중단점을 걸고 디버깅해보면 session 안에 기존 사용하던 데이터들이 다 있는걸 확인할 수 있습니다. 
+
+이렇게 되면 Session에 overlapped 의 위치가 어디냐는 것도 중요해집니다. 이 기법은 나중에 iocp 에서도 활용이 될겁니다. 
+
+이렇게 이번 시간에는 콜백함수를 기반으로하는 Overlapped 모델에 대해 알아봤습니다. 
+
+다양한 모델에 대해 알아 봤으니 iocp 로 넘어가기전에 요약을 해보겠습니다.
+
+    - iocp 넘어가기전 다양항 모델 요약
+    Select 모델
+    - 장점) 윈도우/리눅스 공통. 
+    - 단점) 성능이 최하 (매번 등록 비용), fd_set 의 최대 갯수 64개 제한
+    WSAEventSelect 모델
+    - 장점) 비교적 뛰어난 성능
+    - 단점) 최대 64개 제한 
+    Overlapped (이벤트 기반)
+    - 장점) 성능
+    - 단점) 64개 제한
+    Overlapped (콜백 기반)
+    - 장점) 성능
+    - 단점) 모든 비동기 소켓 함수에서 사용가능하진 않음 (ex. accept), 빈번한 Alertable Wait으로 인한 성능 저하 
+
+    추가로 이번에 따로 알아보지 않은 모델도 있습니다. 
+    WSAAsyncSelect 모델 = 소켓 이벤트를 윈도우 메세지 형태로 처리.(일반 윈도우 메세지랑 같이 처리하니 성능 이 별로라서 따로 알아보지 않았습니다.)
+
+    Select 모델의 장점중에 윈도우/리눅스 공통으로 사용할 수 있다는 점이 있었습니다. 사실 클라이언트에서 서버쪽으로 연결하는 소켓 모델을 그렇게 중요하지 않습니다.1대1로만 통신하면되기 때문인데 
+    만약 나머지 윈도우즈 전용 모델들을 사용했다고 해보겠습니다. 윈도우즈에서야 잘 동작하다가 갑자기 모바일 빌드를 해서 안드로이드에 띄우고 싶어졌다고 하면 
+    문제가 됩니다. 안드로이드는 리눅스 커널이다 보니 윈도우즈 계열의 모델을 사용할 수 없습니다. 
+    이런경우에는 Select 모델을 사용하면 윈도우즈와 리눅스 두가지 환경에서도 돌아가는 효과를 얻을 수 있습니다. 
+
+    콜백 기반 Overlapped 모델의 단점중 빈번한 Alertable Wait 로 인한 성능저하라고 했습니다. 이것은 다음에 배울 iocp에 비해 성능이 떨어진다는 것입니다. 
+    iocp에서는 매번 SleepEx 같은 함수로 Alertable Wait 상태로 들어가 처리할 필요도 없고 
+    또 ACP큐를 설명할때 각 스레드 마다 ACP큐가 존재 한다고도 했습니다. 그렇다는 것은 결국 WSARecv나 WSASend를 통해 ACP큐에 들어간 콜백함수는 자신의 스레드 안에서 Alertable Wait로 
+    들어가 처리해야하고 다른 스레드에서는 처리해줄 수가 없다는 말입니다.    
+    그렇다 보니 일감 분배 측면에서도 아쉬운 점이 있을 수 있다는 말입니다. 
+
+이쯤에서 가장 기초적인 네트워크 내용들을 살펴본것 같고 
+추가로 하나더 용어를 배워보고 넘어가자면 
+
+    Reactor Pattern  (~뒤늦게, 논블로킹 소켓, 소케 상태 확인 후 -> 뒤늦게 recv, send 호출)
+    Proactor Pattern (~미리, Overlapped WSA~)
+
+이런 용어들인데 먼저 Reactor Pattern 은 논블로킹 소켓처럼 소켓의 상태를 확인하고 뒤늦게 recv나 send같은 함수를 호출한다는 말입니다. 
+Proactor Pattern 은 Overlapped 모델 같이 일단 WSASend, WSARecv같은 함수를 미리 호출하고 나서 그뒤에 소켓이 준비가 되었는지를 이벤트나, 콜백함수로 체크하는 
+것을 말합니다. 
+
+굳이 이런 용어를 몰라도 되긴하지만 혹시 면접같은데서 물어 볼 수도 있기때문에 배워봤습니다. 
