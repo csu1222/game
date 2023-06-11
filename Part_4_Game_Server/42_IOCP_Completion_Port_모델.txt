@@ -1,0 +1,276 @@
+
+
+
+        IOCP Completion Port 모델
+
+
+대망의 IOCP 입니다. 
+
+지금까지 소켓 모델을 실습 하던 것 처럼 GameServer와 DummyClient 에서 Completion포트를 만드는 연습을 해보고 이 다음 시간부터 
+라이브러리화 해서 네트워크를 따로 관리하는 작업을 시작하겠습니다. 
+
+지난시간들에서 했던 Overlapped 모델을 잘 이해 했다고 하면 오늘 내용도 잘 따라올 수 있을것입니다. 
+
+그런의미에서 콜백 기반 Overlapped 모델을 요약해보겠습니다. 
+
+- 비동기 입출력 함수가 완료되면, 스레드마다 있는 APC큐에 일감이 쌓임
+- Alertable Wait 상태로 들어가서 APC 큐 비우기 (콜백함수)
+단점) APC 큐가 스레드 마다 있다 (멀티스레드 환경에서 잘 맞지 않음)
+      Alertable Wait 자체도 조금 부담이 간다
+
+이벤트 기반의 단점) 소켓과 이벤트 객체를 1 : 1 대응해야하고 소켓들을 감시하는 함수도 최대 64개의 소켓까지 감시할수 있다 
+
+
+
+IOCP (Completion Port) 모델
+- APC 큐 대신 Completion Port 라는것이 대신할것 (스레드 마다 있는 건 아니고 공통된 1개를 만들것, 중앙에서 관리하는 APC 큐 같은 느낌)
+- Alertable Wait 상태로 들어가는것 대신 GetQueuedCompletionStatus() 라는 함수로 CP(Completion Port)의 결과 처리를 합니다.
+// 공용된 APC큐 같은 Completion Port 를 사용하는것으로 멀티스레드에 친화적입니다. 
+
+IOCP (Completion Port) 모델이 멀티 스레드와 궁합이 좋은 만큼 오늘 실습도 멀티스레드 환경에서 해볼겁니다. 
+그리고 이번 시간에 새로 등장하는 함수 두가지가 있습니다. Completion Port 를 만들고 어떤 소켓을 Completion Port 에 관찰해달라고 등록하는 함수와 
+CP에 담긴 소켓들을 처리해달라고 할 함수 입니다. 
+
+CreateIoCompletionPort()
+GetQueuedCompletionStatus()
+
+이렇게 두가지 함수입니다. 실습을 하면서 알아보겠습니다. 
+
+추가될 코드는 지금까지 코드중 listenSocket을 listen 함수 까지 호출한 다음부터 시작하겠습니다. 
+
+// CP 생성
+CP를 생성할때 최초 한번, 그 후 클라이언트 소켓을 CP에 등록하기 위해서 두가지 용도로 활용이 됩니다. 
+
+HANDLE iocpHandle = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
+
+최초에 CP를 생성할때는 위와 같이 인자들을 다 0으로 넣어주면 됩니다. 반환으로 핸들이 반환됩니다. 
+
+다음은 accept 함수를 보았습니다. 생각해보면 이제 iocp 모델에서는 멀티스레드를 적용할 수 있기때문에 딱히 논블로킹 방식을 고수 하지 않아도 됩니다. 
+논블로킹을 고수하던 이유는 Async-NonBlocking 방식이 그나마 하나의 스레드에서 소켓을 처리하는 속도가 높았기 때문입니다. 
+
+그래서 위에서 ioctlsocket 함수 부분을 삭제하고 accept 하는 부분도 while을 돌면서 WSAEWOULDBLOCK 을 체크하지 않고 그냥 블로킹하면서 호출해주었습니다. 
+지금은 아직 Async 에 맞는 accept함수를 배우지 않았기때문에 메인 스레드를 accept 하는 용도로 사용합니다. 
+
+SOCKET clientSocket;
+SOCKADDR_IN clientAddr;
+int32 addrLen = sizeof(clientAddr);
+
+clientSocket = ::accept(listenSocket, (SOCKADDR*)&clientAddr, &addrLen);
+if (clientSocket == INVALID_SOCKET)
+      return 0;
+
+그리고 나서 accept 로 받아온 clientSocket 을 Session 에 넣어주었었습니다. 
+iocp 모델부터는 멀티 스레드 환경에서도 동작할 수 있기때문에 그냥 main 함수의 스택메모리에 객체를 저장하기 보다는 heap 메모리에 저장하는 동적할당을 사용하는게 좋을것입니다.
+
+Session* session = new Session();
+session->socket = clientSocket;
+
+또 이 세션 객체를 하나씩 관리하기보다는 묶어서 관리하는게 좋을것인데 일단은 vector로 묶어서 관리하도록 해보겠습니다. 
+	
+// 여러 세션들을 관리해줄 SessionManager 를 vector로 일단 만들어 봅니다.
+vector<Session*> sessionManager;
+
+while(true)
+{
+      ...
+
+      
+      sessionManager.push_back(session);
+
+      ...
+}
+
+여기까지오면 이제 클라이언트 소켓이 접속이 완료되었습니다. 
+
+소켓이 어떤 비동기 IO 함수를 호출하기 전에 CP에 등록을 해주겠습니다. 아까 CP를 생성할때와 인자가 다릅니다.
+
+// 클라 소켓을 CP에 등록
+::CreateIoCompletionPort((HANDLE)clientSocket, iocpHandle, /*Key*/(ULONG_PTR)session, 0);
+// 인자목록 
+// 1) CP에 등록할 소켓을 HANDLE로 캐스팅
+// 2) 위에서 최초에 만든 CP의 핸들
+// 3) 나중에 GetQueuedCompletionStatus 를 할때 구분할수 있는 고유값 (여기서는 session의 주소를 key로 사용)
+// 4) 한번에 사용할 최대 스레드 갯수 (0을 주면 알아서 현재 컴퓨터의 코어갯수만큼을 잡아줌)
+
+
+이렇게 CP에 소켓을 등록한 다음 진행순서는 일단 비동기 IO 함수를 호출해준 다음 각각 스레드들을 만들어 그 안에서 GetQueuedCompletionStatus 함수로 처리를 진행할겁니다. 
+
+여기서는 WSARecv를 호출할것입니다. 
+WSARecv 의 인자는 클라이언트 소켓, 받을 버퍼와 버퍼의 크기를 가진 WSABUF 구조체, 실제 받은 데이터 양이 얼마나 되는지 받을 DWORD recvLen, 여러 옵션을 다룰 DWORD flags,
+핸들과 운영체제에서 사용할 데이터를 가진 OVERLAPPED 구조체, 콜백함수 이렇게 있습니다. 
+
+이중에 OVERLAPPED 구조체는 이전에 Session 구조체의 가장 첫 위치에서 사용했었는데 이 부분을 조금 바꿔볼겁니다. 왜냐하면 이전 콜백기반 Overlapped 모델에서는 
+각 콜백함수를 호출할때 따로 지금 호출한 콜백이 어느 클라 소켓에서 온것인지를 알수 없어서 OVERLAPPED 인자를 Session 으로 캐스팅해서 데이터를 알기 위해서 였습니다. 
+그런데 iocp 모델에서는 이미 소켓을 CP에 등록할때 session의 데이터를 넘겨주었기 때문에 굳이 OVERLAPPED 구조체를 Session에 끼워 넣을 필요가 없습니다. 
+
+struct Session
+{     
+      // overlapped 를 삭제
+	SOCKET socket = INVALID_SOCKET;
+	char recvBuffer[BUFSIZE] = {};
+	int32 recvBytes = 0;
+};
+
+// 나중에는 다양한 용도의 IO 함수를 호출하게 될겁니다.
+// OverlappedEx 에 지금 어떤 용도인지를 표시하기 위함
+enum IO_TYPE
+{
+	READ,
+	WRITE, 
+	ACCEPT,
+	CONNECT,
+};
+
+// 이번 시간에는 Overlapped를 Session이 아닌 따로 구조체에 넣어줄것입니다. 
+struct OverlappedEx
+{
+	WSAOVERLAPPED overlapped = {};
+	// 어떤 동작을 할건지 type으로 들고 있게끔 합니다.
+	int32 type = 0;		// read, write, accept, connect ... 
+};
+
+다른 인자들도 만들어  WSARecv 에 담아 주었습니다. 
+
+WSABUF wsaBuf;
+wsaBuf.buf = session->recvBuffer;
+wsaBuf.len = BUFSIZE;
+
+DWORD recvLen = 0;
+DWORD flags = 0;
+
+OverlappedEx* overlappedEx = new OverlappedEx();
+overlappedEx->type = IO_TYPE::READ;
+
+::WSARecv(clientSocket, &wsaBuf, 1, &recvLen, &flags, &overlappedEx->overlapped, NULL);
+
+이번에는 콜백함수가 없어도 되기 때문에 NULL로 넘겨주었습니다. 
+
+이제 WSARecv는 바로 완료가 될수도 있고 아니면 Pending 상태가 될 수도 있었습니다. 
+그러면 CP에 등록한 소켓에 의한 WSARecv가 완료되었다고 iocpHandle 에 의해 통지가 올것입니다. 물론 자동으로 오는것은아니고 직접 관찰을하면서 처리 완료여부를 확인할겁니다. 
+
+메인 스레드는 accept, WSARecv 호출까지만 하고 역할을 마칩니다. 이후 호출한 WSARecv가 처리가 되는지 안되는지는 이후 다른 스레드에 맡기고 메인스레드는 
+다시 while 루프를 돌면서 다음으로 접속한 클라이언트가 있는지 accept를 하러 갈것입니다. 
+
+그러면 WSARecv 처리할 스레드는 어디인지 알아보겠습니다. 
+
+void WorkerThreadMain(HANDLE iocpHandle)
+{
+	while (true)
+	{
+		// GetQueuedCompletionStatus 의 인자들을 만들어주었습니다.
+		DWORD bytesTranfered = 0;
+		Session* session = nullptr;
+		OverlappedEx* overlappedEx = nullptr;
+
+		// iocpHandle 에 해당하는 작업이 처리되고 메인스레드에서 넘겨줬던 데이터들이 인자로 복원이 됩니다.
+		BOOL ret = ::GetQueuedCompletionStatus(iocpHandle, &bytesTranfered,
+			(ULONG_PTR*)&session, (LPOVERLAPPED*)&overlappedEx, INFINITE);
+
+		// 실패했는지 체크
+		if (ret == FALSE || bytesTranfered == 0)
+		{
+			// TODO : 연결 끊김
+			continue;
+		}
+
+		// 복원된 overlappedEx 의 type이 정말 READ인지 체크 나중에는 여기서 type에 따라 
+		// 처리를 각각 해주면 됨
+		ASSERT_CRASH(overlappedEx->type == IO_TYPE::READ);
+
+		// 데이터를 원하는대로 처리
+		cout << "Recv Data IOCP = " << bytesTranfered << endl;
+
+		// 주의: 여기서 해당 소켓으로 더 데이터를 수신하려면 WSARecv 코드를 똑같이 실행해줘야 함
+		// 두번째 WSARecv 부터는 이 스레드에서 자체적으로 호출해줘야 함
+
+
+		WSABUF wsaBuf;
+		wsaBuf.buf = session->recvBuffer;
+		wsaBuf.len = BUFSIZE;
+
+		DWORD recvLen = 0;
+		DWORD flags = 0;
+
+		::WSARecv(session->socket, &wsaBuf, 1, &recvLen, &flags, &overlappedEx->overlapped, NULL);
+	}
+}
+
+이런 함수를 만들었습니다. 멀티스레드가 실행할 함수인데 형식은 정해진게 없으니 직접 필요한 대로 만들면되고 지금은 기본적인 동작을 테스트 하기 위함입니다. 
+
+반환은 void 인자는 HANDLE iocpHandle 을 받습니다. iocpHandle은 최초로 생성한 CP의 핸들입니다. 이 CP에는 복수의 소켓이 실행할 비동기 IO 함수의 일감이 들어올겁니다. 
+
+GetQueuedCompletionStatus() 함수로 어느 소켓의 일감인지도 특정하고 WSARecv를 호출할때 넘겨줬던 데이터들도 다 복원을 할것입니다. 
+인자들도 여럿 들어가는데 알아보면
+1) CP의 핸들 : iocpHandle
+2) lpNumberOfBytesTransferd 실제로 수신/송신한 데이터 량이 들어올 DWORD 포인터 : bytesTranfered
+3) PULONG_PTR 소켓을 CP에 등록할때 사용했던 고유 KEY 우리는 session의 주소를 KEY로 사용했었음 그래서 꺼내온 session 주소를 가지고 어떤 일감인지를 확인 가능 : session
+4) LPOVERLAPPED 일감의 OverlappedEx 를 OVERLAPPED* 로 캐스팅해서 받아옵니다. : overlappedEx
+5) DWORD 타입으로 이 함수의 대기시간을 얼마로 설정할지 : INFINITE로 설정해서 일감이 처리될떄 까지 무한정 기다립니다. 
+
+GetQueuedCompletionStatus 함수의 반환값은 bool 타입으로 함수의 호출이 성공했는지 아닌지를 나타냅니다. 
+그 반환값인 ret 로 성공실패 체크를 한후 통과했다면 
+
+실제로 GetQueuedCompletionStatus 의 인자들이 본래 데이터들을 복원해 왔는지 overlappedEx->type 이 IO_TYPE::READ 인지를 ASSERT_CRASH 로 체크 했습니다. 
+지금은 하드 코딩으로 READ인지만을 체크했지만 나중에 실제 서버에서는 이 IO_TYPE 에 따라 맞는 처리를 해주면 될것입니다. 
+또 현재도 그냥 수신한 데이터 크기 bytesTranfered 를 출력하는 정도만 하였습니다. 
+
+여기서 끝나는게 아니라 클라이언트에서 보낼 패킷을 계속 받기 위해 다시 WSARecv를 해줄겁니다. 메인 스레드에서 호출했던 WSARecv는 최초의 한번만 사용되고 
+이후로 이 스레드에서는 자체적으로 while 루프를 돌면서 WSARecv를 호출합니다. 
+첫 호출때 새로 만들어 주던 session 과 overlapped는 그냥 인자 그대로 넣어주었습니다. 
+만약에 가만히 패킷을 받을게 아니라 다른 IO_TYPE 으로 바꾸고 싶다면 새로 overlappedEx->type을 만들어 넣어줄 수도 있을겁니다. 
+이경우에는 재사용하지않을 객체는 메모리 해제를 해주는걸 잊으면 안되겠습니다. 
+
+결국 아까 Session 과 OverlappedEx 를 분리해준 이유는 나중에 가면 네트워크 IO 함수들을 사용할때 어떤 용도로 사용할건지 구분하기 위해 나눈겁니다. 
+지금이야 단순하게 WSARecv 만 호출하고 있지만 경우에 따라 WSARecv 를 여러번 호출한다던가 미러 서버 처럼 WSARecv, WSASend를 호출한다던가 
+더 뒤에는 비동기 accept 같은 함수를 호출할수 있을겁니다. 그때 마다 어떤 목적을 호출했는지를 알기 위해서 OverlappedEx 를 때어 놓은겁니다. 
+반면 Session 같은경우는 클라와 연결할때 한번만 연결하면 될것입니다. 
+
+이쯤에서 한번 프로젝트들을 빌드하고 테스트를 해보았습니다. 지금 실습한 코드자체가 복잡한것은아니고 지금까지 했던 클라에서 보내고 서버에서 받는 작업을 IOCP로 구현했다 뿐입니다. 
+꼭 가져가야할것은 오늘 코드의 흐름을 잘이해하고 넘어가야 한다는 것입니다. 
+
+
+	요약해보겠습니다.
+중앙 관리자 같은 CP(Completion Port) 라는것을 ::CreateIoCompletionPort() 로 생성을 해준다음 메인 스레드에서 accept로 클라이언트 소켓을 만들자 마자 
+CP에 관리대상이라고 등록을 시켜주고 최초에 한번은 메인 스레드에서 WSARecv로 비동기 수신을 걸어줬습니다. 
+그러면 바로 처리가 되던지 나중에 되던지 어쨋건 GetQueuedCompletionStatus 함수로 CP의 일감을 관찰해줘야합니다. 이 부분은 새로 스레드를 만들어 거기서 
+호출하였습니다.
+그 새로운 스레드에서는 일감이 처리될때 까지 기다리다가 일감이 처리되면 그에 대한 데이터들도 함께 가져옵니다. Key 값과 Overlapped 구조체를 가지고 
+클라 소켓의 정보를 복원해줍니다. 두번째 수신/송신때 부터 다시 이 스레드에서 비동기 IO 함수도 호출해줍니다. 
+
+
+	주의 사항 
+요약을 해보면 그렇게 막 복잡하지 않은 내용이었습니다. 그리고 보통 네트워크 이론 관련 책들에서는 여기까지만 다루고 나머지는 직접 응용해보라고 합니다. 
+그렇지만 여기서 조금씩 발전을하면서 게임서버를 만들려고 하다보면 어떤 문제에 막히게 된다고 합니다. 
+혹시 멀티스레드 환경에서 CP라는 공통된 메모리를 건드리는것이 문제 인가 생각도 되었지만 GetQueuedCompletionStatus 함수 자체가 내부적으로 멀티스레드에서 
+안전하게 동작하도록 되어있다고 합니다. 
+
+진짜로 문제가 되는 상황이 무엇이냐면 소켓(세션)을 CP에 등록할때 Key 값으로 세션의 주소를 넘겨 줬었습니다. 또 overlapped 의 주소도 비동기 IO 함수를 호출할때 넘겨줬었습니다.
+그런데 다 연결되어 있는 상황에서 만약 세션이 날라가면 어떻게 될까요?
+
+그러니까 세션을 CP에 연결하고 WSARecv도 호출해 일감을 넣어준 다음에 
+
+	Session* s = sessionManager.back();
+	sessionManager.pop_back();
+	delete s;
+
+이런식으로 sessionManager에서 관리하던 session을 메모리 해제해버린겁니다. 우리 실습 코드에서야 세션이 하나뿐이니까 뻔한데 
+여러 세션이 있는데 맨 마지막 세션을 삭제했다는 가정을 해보는것입니다. 유저가 게임접속 종료를했다는 상황인겁니다. 
+접속 종료한 유저에 해당하는 세션은 메모리 해제를 해서 이제 유효하지 않게 되었지만 CreateIoCompletionPort 에 넘겨준 key 값은 사라진 session의 주소를 그냥 들고 있고 
+WSARecv 에 넘겨준 overlapped 도 마찬가지로 그 주소를 들고있는겁니다. 
+
+그래서 잘 동작하던 게임이 누군가 접속종료를 하게 되면 크래시가 나게 되고 그런겁니다.
+이런 부분은 다음 네트워크 라이브러리를 만들면서 처리해줘야 합니다. 
+어떤세션을 CreateIoCompletionPort로 CP 에 연동한 뒤 어떤 비동기 IO 함수를 호출한 순간 부터 그 세션은 날리지 못하도록 막아줘야합니다.
+간단한 방법은 shared_ptr 처럼 Reference Conting 을 해주면 됩니다. 이 세션이 자신 뿐만아니라 CP에서도 참조를 하나라도 하고 있다면 해제되지않도록 막는것입니다.
+
+막상 위처럼 세션을 날려버리는 코드를 실행했을때 크래시가 안나는 경우도 있습니다. 더욱 심각한 상황입니다. 아예 크래시가 나버려야 빨리 수정을 하던지 할텐데 
+뒤에서 알지도 못하게 메모리오염을 계속 일으키고 있는건 골치 아픕니다. 
+중단점을 잡고 디버깅해보면 세션이 밀린다음 그 세션이 있던 주소인 key 값을 살펴보면 멤버 변수들이 아주 뜬금없는 숫자들로 채워져 있습니다. 
+쓰레기 값들이 채워져 있는건데 만약 운 나쁘게 그 해제된 메모리에 다른 변수가 할당되면 메모리 오염이 일어나게됩니다. 
+
+그래서 주의해야할 점은 세션이나 overlapped나 한번 CP에 연동하고 비동기 IO 함수를 호출했다면 그 데이터들은 함부로 삭제하면 안된다는 것입니다. 
+
+추가로 이전에 만들었던 할당자 오버로딩 함수가 있었습니다. 기본 new, delete 대신 A_new, A_delete 를 사용해보았습니다. 
+요즘 new, delete 가 호출될때 실제로 메모리를 바로 해제하는게 아니고 메모리 풀을 사용하기 때문에 메모리 오염이 일어날것 같은상황에 바로 크래시가 나지 않았던겁니다. 
+이걸 디버깅하기 위해서 Stomp Allocator 를 만들었었습니다. 정말 엄밀히 메모리를 해제하면 진짜로 해제하는 할당자였습니다. 
+그래서 이 스톰프 얼로케이터로 생성 소멸을 한 다음 실행하면 해제된 세션에 접근하면 크래시가 나는걸 볼 수 있습니다. 
