@@ -1,0 +1,343 @@
+
+
+        Socket Utils
+
+
+이번시간부터 본격적인 나만의 네트워크 라이브러리를 쌓아 올려 보겠습니다. 
+
+가장먼저 지금 까지 실습하던 코드중 GamaServer의 main 함수 내용은 다 날려주겠습니다. DummyClient는 그냥 그대로 사용할것입니다. 
+
+오늘부터 만들 네트워크 라이브러리란 것은 우리 프로젝트에서 IOCP 모델을 좀 더 사용하기 편하게 기능을 분리해놓을 것입니다. 
+그래서 네트워크 라이브러리를 만드는 과정에서는 햇갈릴수 있습니다. 전체적인 형태가 보이지 않고 각각 분리될 기능들을 만들어 나갈것이기 때문입니다. 
+
+
+오늘은 소켓과 관련된 라이브러리를 정리해볼것입니다.
+
+실습하던 코드를보면 WinSock 관련 헤더들을 서버 cpp 파일에 직접 추가해주고 있었는데 이것을 옮기겠습니다. 
+온갖 헤더들을 관리하던 ServerCore 프로젝트의 CorePch.h 로 옮겼습니다. 이 CorePch.h 의 헤더들은 DummyClient, ServerCore, GamaServer 공통 헤더 모음집이었습니다. 
+
+오늘 작업할 클래스파일들을 만들어 주겠습니다. ServerCore프로젝트 Network 필터 아래로 SocketUtils, NetAddress 라는 이름의 클래스 파일들을 추가 했습니다. 
+
+SocketUtils 에서 하는 역할은 소켓프로그래밍을 처음 할때 윈속 초기화 같은 부분도 있을 것이고, 아직 실습하진 않았지만 비동기 connect, accept, disconnect 같은 함수들은
+그냥 사용할 순 없고 처음 프로그램이 실행될때 런타임에 주소를 얻어와야 하는데 그 부분도 여기서 처리하게 될겁니다. 
+
+NetAddress는 SOCKADDR_IN 구조체에 데이터를 편하게 담아주는 용도인데 여러 클라이언트가 접속하게 되면 각 클라이언트 마다 일일히 SOCKET_IN 구조체를 만들어주는것은 
+귀찮기도 하고 위험하기도 합니다. 그걸 대신해줍니다. 
+
+먼저 NetAddress 클래스부터 보겠습니다. 
+
+/*
+------------------
+	Net Address
+------------------
+*/
+// 역할
+// 주소를 관리하던 SOCKADDR_IN 구조체
+// 여러 클라이언트가 접속했을때 클라이언트의 주소를 일일히 구조체로 만들어주기 보다
+// 이 클래스를 통해 편하게 설정을 하기 위함
+class NetAddress
+{
+public:
+	// 여러종류의 생성자
+	NetAddress() = default;
+	NetAddress(SOCKADDR_IN sockAddr);
+	NetAddress(wstring ip, uint16 port);
+
+	// Get 함수들 
+	SOCKADDR_IN&	GetSockAddr() { return _sockAddr; }
+	wstring			GetIpAddress();
+	uint16			GetPort() { return ::ntohs(_sockAddr.sin_port); }
+
+public:
+	static IN_ADDR	Ip2Address(const WCHAR* ip);
+
+private:
+	SOCKADDR_IN		_sockAddr = {};
+};
+
+하나뿐인 멤버 변수 SOCKADDR_IN 구조체를 SOCKADDR_IN 자체를 인자로 받는 생성자나 아니면 ip 주소, port 번호를 받아서 여기서 구조체를 만들어 주는 버전의 생성자
+몇가지 버전의 생성자를 준비했습니다. 
+
+// SOCKADDR_IN을 인자로 받은경우는 그냥 바로 넣어줍니다. 
+NetAddress::NetAddress(SOCKADDR_IN sockAddr) : _sockAddr(sockAddr)
+{
+}
+
+// ip와 port 만 받은경우는 직접 _sockAddr을 채워줍니다. 
+NetAddress::NetAddress(wstring ip, uint16 port)
+{
+	::memset(&_sockAddr, 0, sizeof(_sockAddr));
+	_sockAddr.sin_family = AF_INET;
+	_sockAddr.sin_addr = Ip2Address(ip.c_str());
+	_sockAddr.sin_port = ::htons(port);
+}
+여기서 Ip2Address 함수는 이렇습니다. 
+
+IN_ADDR NetAddress::Ip2Address(const WCHAR* ip)
+{
+	IN_ADDR address;
+	::InetPtonW(AF_INET, ip, &address);
+	return address;
+}
+이 함수는 wstring 으로 받은 ip주소를 C 스타일의 string 으로 변환해서 받은뒤 InetPtonW 함수로 문자열을 2진수로 바꿔서 IN_ADDR address 에 담아 반환합니다. 
+
+다음으로는 여러 Get 함수들이 있는데 GetSockAddr과 GetPort는 간단하고 GetIpAddress 함수를 보겠습니다.
+
+wstring NetAddress::GetIpAddress()
+{
+	WCHAR buffer[100];
+	/*
+	네번째 인자로 버퍼의 사이즈를 넣어주는데 버퍼가 WCHAR 타입(2byte) 배열입니다. 
+	즉 200 바이트라는 사이즈인데 의도했던 사이즈는 100 입니다. 
+	제대로 넣어주기 위해서는 sizeof(buffer) / sizeof(WCHAR) 를 넣어줘야 하는데 
+	일일히 타이핑하기에는 위험하다 보니 매크로를 만들었습니다. 
+	*/
+	::InetNtopW(AF_INET, &_sockAddr, buffer, len32(buffer));
+	return wstring(buffer);
+}
+이 함수에서 말한 매크로는 ServerCore 프로젝트의 Types.h에 추가했습니다. 
+
+// Types.h 에 추가된 메크로 
+// 자주 사용하게 될 정수 크기 변환 매크로
+#define size16(val)     static_cast<int16>(sizeof(val))
+#define size32(val)     static_cast<int32>(sizeof(val))
+#define len16(arr)	static_cast<int16>(sizeof(arr) / sizeof(arr[0]))
+#define len32(arr)	static_cast<int32>(sizeof(arr) / sizeof(arr[0]))
+
+이렇게 NetAddress 클래스를 만들었습니다. 
+
+이어서 SocketUtils 클래스를 보겠습니다. 
+
+#include "NetAddress.h"
+
+/*
+--------------------
+	Socket Utils
+--------------------
+*/
+
+class SocketUtils
+{
+public:
+	// 각각 비동기 함수의 포인터로 동작할 것임
+	// 처음에는 Null 값이지만 런타임에 주소를 긁어와야함
+	static LPFN_CONNECTEX		ConnectEx;
+	static LPFN_DISCONNECTEX	DisconnectEx;
+	static LPFN_ACCEPTEX		AcceptEx;
+public:
+	// WinSock 초기화와 정리를 해줄 함수들 실행은 CoreGlobal 쪽에서 해줄것입니다.
+	static void Init();
+	static void Clear();
+
+	// 런타임에 위의 포인터 변수들 값을 채워줄 함수
+	static bool BindWindowsFunction(SOCKET socket, GUID guid, LPVOID* fn);
+	// 소켓을 생성하는 함수 WSASocket 사용
+	static SOCKET CreateSocket();
+
+	// 소켓 옵션을 설정하는 함수들 
+	static bool SetLinger(SOCKET socket, uint16 onoff, uint16 linger);
+	static bool SetReuseAddress(SOCKET socket, bool flag);
+	static bool SetRecvBufferSize(SOCKET socket, int32 size);
+	static bool SetSendBufferSize(SOCKET socket, int32 size);
+	static bool SetTcpNoDelay(SOCKET socket, bool flag);
+	static bool SetUpdateAcceptSocket(SOCKET socket, SOCKET listenSocket);
+
+	// Bind, Listen,Close 같은 함수를 래핑해서 사용합니다. 
+	static bool Bind(SOCKET socket, NetAddress netAddr);
+	static bool BindAnyAddress(SOCKET socket, uint16 port);
+	static bool Listen(SOCKET socket, int32 backlog = SOMAXCONN);
+	static void Close(SOCKET& socket);
+};
+
+// 저번에 소켓의 옵션을 이리 저리 조절하던 함수를 템플릿을 사용하도록 포장합니다. 
+template<typename T>
+static inline bool SetSocketOpt(SOCKET socket, int32 level, int32 optName, T optVal)
+{
+	return SOCKET_ERROR != ::setsockopt(socket, level, optName, reinterpret_cast<char*>(&optVal), sizeof(T));
+}
+
+정의부입니다. 
+
+/*
+--------------------
+	Socket Utils
+--------------------
+*/
+
+// 처음에는 모두 nullptr 로 초기화 
+// 이후 런타임에 각자의 주소를 넣어주는게 목표 
+LPFN_CONNECTEX		SocketUtils::ConnectEx = nullptr;
+LPFN_DISCONNECTEX	SocketUtils::DisconnectEx = nullptr;
+LPFN_ACCEPTEX		SocketUtils::AcceptEx = nullptr;
+
+void SocketUtils::Init()
+{
+	// WinSock을 초기화 하는 과정 
+
+	WSADATA wsaData;
+	// 혹시 제대로 시작하지 못할경우 바로 크래시를 내줍니다. 
+	ASSERT_CRASH(::WSAStartup(MAKEWORD(2, 2), OUT &wsaData) == 0);
+
+	/*
+	다음으로 런타임에 주소를 얻어오는 API를 호출해줘야 합니다. 
+	사용할 함수의 공식문서를 보면 내용이 나올것입니다. 
+	방법은 잠시 더미 소켓을 만들고 그 소켓을 대상으로 몇몇 함수를 호출해주게 됩니다.
+	*/
+	SOCKET dummySocket = CreateSocket();
+
+	// 인자 목록
+	// 1) 더미 소켓
+	// 2) 주소를 찾고 싶은 함수
+	// 3) 주소를 받을 포인터
+	ASSERT_CRASH(BindWindowsFunction(dummySocket, WSAID_CONNECTEX, reinterpret_cast<LPVOID*>(&ConnectEx)));
+	ASSERT_CRASH(BindWindowsFunction(dummySocket, WSAID_DISCONNECTEX, reinterpret_cast<LPVOID*>(&DisconnectEx)));
+	ASSERT_CRASH(BindWindowsFunction(dummySocket, WSAID_ACCEPTEX, reinterpret_cast<LPVOID*>(&AcceptEx)));
+	// 다 사용한 더미 소켓을 닫아줍니다. 
+	Close(dummySocket);
+}
+
+void SocketUtils::Clear()
+{
+	// 윈속들을 정리합니다. 원칙상 윈속 호출 수만큼 호출해야하긴 하지만 굳이 그렇게 하지 않아도 된다고 합니다.
+	::WSACleanup();
+}
+
+bool SocketUtils::BindWindowsFunction(SOCKET socket, GUID guid, LPVOID* fn)
+{
+	// 런타임에 멤버 변수들 값을 채워줄 함수 
+
+	DWORD bytes = 0;
+	// 넘겨주는 인자들이 긴데 하나하나 집고 넘어가진 않을겁니다. 나중에 필요할때 문서를 찾아보는걸로 하겠습니다.
+	// 대신 이 함수의 하는 일을 보면 connectEx, disconnectEx, acceptEx 함수를 런타임에 불러오기 위한 함수입니다.
+	// SOCKET_ERROR 가 났는지를 bool 로 반환하고 있습니다.
+	return SOCKET_ERROR != ::WSAIoctl(socket, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, sizeof(guid), fn, sizeof(*fn), OUT & bytes, NULL, NULL);
+}
+
+SOCKET SocketUtils::CreateSocket()
+{
+	/*
+	지금까지 배운 소켓 만드는 함수는 ::socket() 이었는데 
+	::WSASocket() 함수로도 소켓을 만들수 있고 이 함수로 만들면 더욱 세분화된 옵션을 정할 수 있습니다. 
+	인자목록
+	1) AF				: 주소 패밀리 사양 쉽게 말해 IPv4, IPv6 등을 골라주는 옵션
+	2) type				: 새 소켓의 형식 사양 TCP, UDP 를 골라주는 옵션
+	3) protocol			:	사용할 프로토콜 이전에는 0을 줘서 알아서 TCP를 골라주도록 했는데 
+						이번엔 직접 옵션을 TCP로 지정했습니다.
+	4) lpProtocolInfo	: 만들 소켓의 특성을 세부적으로 정하는 WSAPROTOCOL_INFO 구조체에 
+						대한 포인터를 받습니다. NULL로 줘서 따로 옵션을 건드리지 않았습니다. 
+	5) g				: 새 소켓 및 새 소켓 그룹을 만들지 아닐지, 만든다면 ID 발급 기준을 어떻게 할지를 정함
+	6) dwFlags			: 추가적인 소켓의 특성으로 지정하는데 사용되는 플래그 이전에는 이것도 0으로 
+						따로 정해주지 않았었습니다. 지금 인자로 넣어준 WSA_FLAG_OVERLAPPED 는 
+						비동기 IO 함수를 지원하는 소켓의 옵션입니다.
+
+	반환으로 소켓을 반환합니다.
+	*/
+	return ::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED);
+}
+
+// 이 밑으로 Set 함수들은 전부 inline 함수인 SetSocketOpt 를 사용하고 있습니다. 옵션이름을 전부 외우지 않아도 래핑함수 이름으로 유추하고 딱 필요한 인자만 넣어주게 했습니다.
+bool SocketUtils::SetLinger(SOCKET socket, uint16 onoff, uint16 linger)
+{
+	LINGER option;
+	option.l_onoff = onoff;
+	option.l_linger = linger;
+
+	return SetSocketOpt(socket, SOL_SOCKET, SO_LINGER, option);
+}
+
+bool SocketUtils::SetReuseAddress(SOCKET socket, bool flag)
+{
+	return SetSocketOpt(socket, SOL_SOCKET, SO_REUSEADDR, flag);
+}
+
+bool SocketUtils::SetRecvBufferSize(SOCKET socket, int32 size)
+{
+	return SetSocketOpt(socket, SOL_SOCKET, SO_RCVBUF, size);
+}
+
+bool SocketUtils::SetSendBufferSize(SOCKET socket, int32 size)
+{
+	return SetSocketOpt(socket, SOL_SOCKET, SO_SNDBUF, size);
+}
+
+bool SocketUtils::SetTcpNoDelay(SOCKET socket, bool flag)
+{
+	return SetSocketOpt(socket, SOL_SOCKET, TCP_NODELAY, flag);
+}
+
+// listenSocket 의 소켓 옵션을 ClientSocket에 그대로 적용한다는 의미 
+bool SocketUtils::SetUpdateAcceptSocket(SOCKET socket, SOCKET listenSocket)
+{
+	return SetSocketOpt(socket, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, listenSocket);
+}
+
+// 소켓 함수들을 래핑해서 사용하고 있습니다. NetAddress를 사용하면서 번거로워진걸 때웁니다. 
+bool SocketUtils::Bind(SOCKET socket, NetAddress netAddr)
+{
+	return SOCKET_ERROR != ::bind(socket, reinterpret_cast<SOCKADDR*>(&netAddr.GetSockAddr()), sizeof(SOCKADDR_IN)) ;
+}
+
+// bind 에 필요한 SOCKADDR_IN 구조체의 내용을 자신이 받을수 있는 아무 주소로 받아서 bind 까지 해줍니다. 
+bool SocketUtils::BindAnyAddress(SOCKET socket, uint16 port)
+{
+	SOCKADDR_IN myAddress;
+	myAddress.sin_family = AF_INET;
+	myAddress.sin_addr.s_addr = ::htonl(INADDR_ANY);
+	myAddress.sin_port = ::htons(port);
+
+	return SOCKET_ERROR != ::bind(socket, reinterpret_cast<SOCKADDR*>(&myAddress), sizeof(myAddress));
+}
+
+// listen 을 해주면서 그 결과가 성공인지 아닌지를 bool타입으로 반환합니다. 
+bool SocketUtils::Listen(SOCKET socket, int32 backlog)
+{
+	return SOCKET_ERROR != ::listen(socket, backlog);
+}
+
+// 인자를 참조로 받아오고 중복해서 closesocket 하지 않도록 체크, 
+// 닫은 socket의 값을 INVALID_SOCKET으로 변경해주고 있습니다. 
+void SocketUtils::Close(SOCKET& socket)
+{
+	if (socket != INVALID_SOCKET)
+		::closesocket(socket);
+	socket = INVALID_SOCKET;
+}
+
+
+여기까지 SocketUtils 입니다. 
+이제 이 코드들을 테스트 해보겠습니다. GamaServer 의 코드입니다.
+
+
+#include "SocketUtils.h"
+
+// 이번 시간에 만든 SocketUtils 를 통해 소켓을 만들어 봅니다. 
+int main()
+{
+	SOCKET socket = SocketUtils::CreateSocket();
+
+	SocketUtils::BindAnyAddress(socket, 7777);
+
+	SocketUtils::Listen(socket);
+
+	// 이번 시간에 만든 AcceptEX를 사용하지 않고 일반 accept를 사용합니다.
+	// AcceptEx 는 나중에 iocp 만들때 구현할것입니다. 
+	SOCKET clientSocket = ::accept(socket, nullptr, nullptr);
+
+	cout << "Client Connected!" << endl;
+}
+
+실제 사용 예제 코드를 보니까 간편해 졌습니다. 
+
+이번 시간에 이렇게 윈속과 소켓을 관리하기 쉽도록 라이브러리를 만들어 봤습니다. 왜 SocketUtils 부터 만들었냐면 
+다음시간부터 또 굉장히 많은 클래스들이 등장하게 될겁니다. IOCP의 핵심이 되는 클래스를 만든다음 그걸 등록하기 위한 listener를 만드는등 
+여러 작업을 동시다발적으로 해야 하는데 그 와중에 소켓 같은 자주 등장하는 것 까지 같이 다루면 괜히 햇갈리기 때문에 가장 독립적이고 간단한 내용부터 만들어 봤습니다. 
+
++ 추가 
+아까 ConnectEx, DisconnectEx, AcceptEx 같은 비동기 IO 함수들의 주소를 SocketUtils::Init 이 호출될때 긁어 오도록 만들고 
+Init, Clear 는 CoreGlobal에서 생성 소멸을 관리해주도록 했었습니다. 
+그런데 테스트 코드에서는 이전에 만들었던 글로벌 객체들을 하나도 사용하지 않았어서 컴파일러가 CoreGlobal 부분을 알아서 생략하고 실행하더랍니다.
+그래서 일부러라도 GThreadManager->Join(); 을 호출해서 컴파일러가 무시하지 않고 SocketUtils::Init(), SocketUtils::Clear() 를 호출하도록 하고 
+실제로 함수의 주소를 긁어 왔는지 확인해봤습니다. 
+중단점을 적절히 잡고 ConnectEx, DisconnectEx, AcceptEx 의 값을 확인해보니 정상적으로 주소가 연동이 되있는걸 볼수 있었습니다. 
+주소가 연동되었기 때문에 이제부터는 
+ConnectEx(); 이런식으로 함수호출하듯이 사용할 수 있다고 합니다. 

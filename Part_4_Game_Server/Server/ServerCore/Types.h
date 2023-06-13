@@ -19,4 +19,10 @@ using CondVar = std::condition_variable;
 using UnipueLock = std::unique_lock<std::mutex>;
 using LockGuard = std::lock_guard<std::mutex>;
 
+// 자주 사용하게 될 정수 크기 변환 매크로
+#define size16(val) static_cast<int16>(sizeof(val))
+#define size32(val) static_cast<int32>(sizeof(val))
+#define len16(arr)	static_cast<int16>(sizeof(arr) / sizeof(arr[0]))
+#define len32(arr)	static_cast<int32>(sizeof(arr) / sizeof(arr[0]))
+
 #define _STOMP 
