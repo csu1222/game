@@ -1,0 +1,634 @@
+
+
+    IOCP Core
+
+
+이어서 이번시간에는 이전에 소켓을 편하게 관리하는 클래스인 SocketUtils 와 이 안에서 SOCKADDR_IN 을 편하게 가져오기위한 NetAddress 클래스를 
+만들었습니다. 
+
+또 SocketUtils에서 비동기 IO 함수중 ConnectEx, DisconnectEx, AcceptEx 함수의 주소를 런타임에 가져오는 작업도 했었습니다. 
+하지만 마무리 실습에서는 만든 AcceptEx 를 사용하지 않고 그냥 동기방식의 accept를 사용했었습니다. 
+
+아직 준비가 덜 되었기 때문인데 그 준비를 위해서 오늘 내용인 'IOCP 구조'를 이용해서 호출해줄것입니다. 
+
+이번에도 새로 클래스를 추가해줄건데 그 이름은 'IocpCore' 입니다. IOCP의 핵심이다 그리고 IOCP의 Completion Port를 담당한다는 두가지 의미가 있습니다. 
+그리고 IocpCore 를 만들면서 내부적으로 또 필요한 클래스가 더 있습니다. 비슷한 이름의 'IocpEvent' 입니다. 
+
+
+/*
+---------------------
+	IocpCore 선언부
+---------------------
+*/
+
+/*
+* 이전 Iocp를 배울때 사실상 중요한 함수는 두개였습니다. 
+* ::CreateIoCompletionPort()
+* ::GetQueuedCompletionStatus() 
+* 였습니다. 이 두 함수를 IoccpCore에서 또 래핑해 사용할것입니다. 
+*/
+class IocpCore
+{
+public:
+	// 생성자에서 최초 CP(Completion Port)를 만드는 CreateIoCompletionPort 를 호출할 것입니다.
+	IocpCore();
+	~IocpCore();
+
+	HANDLE GetHandle() { return _iocpHandle; }
+
+	// 소켓의 IO 일감을 Completion Port에 등록하는 함수 CreateIoCompletionPort
+	bool Register(class IocpObject* iocpObject);
+	// 워커 스레드에서 일감이 없나 탐색하는 함수 GetQueuedCompletionStatus
+	bool Dispatch(uint32 timeoutMs = INFINITE);
+public:
+	// IocpCore가 가지고 있을 데이터가 자신의 핸들 뿐입니다. 
+	HANDLE _iocpHandle;
+};
+
+
+/*
+--------------------
+	IocpCore 정의부
+--------------------
+*/
+IocpCore::IocpCore()
+{
+	// 최초로 Completion Port를 여기서 생성할겁니다. CreateIoCompletionPort 사용
+	// 생성할때는 인자를 다 0으로 넣어줬습니다. 
+	_iocpHandle = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0);
+	
+	// 혹시 모르니 이상이 있으면 크래시
+	ASSERT_CRASH(_iocpHandle != INVALID_HANDLE_VALUE);
+}
+
+IocpCore::~IocpCore()
+{
+	// IOCP 핸들을 닫아줍니다. 
+	::CloseHandle(_iocpHandle);
+}
+
+bool IocpCore::Register(IocpObject* iocpObject)
+{
+	/*
+	일감을 등록할때도 CreateIoCompletionPort를 사용했고 인자목록은 이렇습니다. 
+	1) 일감을 주는 소켓
+	2) iocp 핸들
+	3) 일감마다의 고유 Key값
+	4) CP의 일감을 동시 처리할 최대 스레드 수입니다. 따로 지정해주거나 아니면 0을 주면 알아서 가능한 최대를 정해줍니다.
+
+	여태 배운건 소켓의 일감을 처리하는데만 사용했었는데 사실 다양한곳에 이 함수를 사용할 수 있습니다. 
+	그냥 표준 STL Queue도 넣어 줄 수 있고 꼭 네트워크가 아니더라도 다양한 일감을 처리해 줄 수 있기 때문에 
+	여기서도 꼭 소켓, 세션만 사용하는게 여기에 등록할 수 있는 것을
+	IocpObject 객체 혹은 이걸 상속받은 객체를 관리해주겠습니다. 
+	*/
+	 
+	return ::CreateIoCompletionPort(iocpObject->GetHandle(), _iocpHandle, reinterpret_cast<ULONG_PTR>(iocpObject), 0);
+
+}
+
+// 예전에 Iocp의 문제점으로 CP에 등록된 IocpObject가 외부에서 삭제 되는걸 막기 위해
+// 참조 카운트를 도입해야 하지만 오늘은 대략적인 구조만 잡을것이기 때문에 생략합니다.
+bool IocpCore::Dispatch(uint32 timeoutMs)
+{
+	// GetQueuedCompletionStatus에 필요한 인자들
+    // 여기서 등장하는 IocpEvent 클래스는 OVERLAPPED 구조체를 offset 0번으로 가지고 있는 클래스 입니다.
+	DWORD		numOfBytes = 0;
+	IocpObject* iocpObject = nullptr;
+	IocpEvent*	iocpEvent = nullptr;
+
+	if (::GetQueuedCompletionStatus(_iocpHandle, OUT & numOfBytes, OUT reinterpret_cast<PULONG_PTR>(&iocpObject), OUT reinterpret_cast<LPOVERLAPPED*>(&iocpEvent), timeoutMs))
+	{
+		// 여기로 들어오면 GetQueuedCompletionStatus 함수의 반환값이 true, 성공했다는것입니다. 
+		// 그러면 numOfBytes, iocpObject, iocpEvent 변수들의 값이 채워질것이고 CP에 들어있던 일감은 완료되었습니다.
+		
+		// 이후 원하는 대로 데이터를 이리저리 사용하는 함수입니다.
+		iocpObject->Dispatch(iocpEvent, numOfBytes);
+	}
+	else
+	{
+		// 여기로 들어오면 함수 반환 값이 false라는 뜻이고 그 에러 코드를 체크합니다. 
+		// 꼭 함수호출 실패라는것은 아니고 timeoutMs 가 INFINITE 가 아닐경우 도 여기로 들어옵니다.
+		int32 errorCode = ::WSAGetLastError();
+		switch (errorCode)
+		{
+		case WAIT_TIMEOUT:
+			return false;
+		default:
+			// TODO : 로그 찍기
+			iocpObject->Dispatch(iocpEvent, numOfBytes);
+			break;
+		}
+	}
+
+}
+
+
+/*
+IocpCore를 사용하는 흐름을 보면 어떤 스레드에서 클라이언트와의 acceptEx를 
+마치고 클라 소켓을 받아오면 그 소켓을 IocpObject 클래스를 상속받은 
+또 다른 클래스 예를 들어 세션이라고 합시다. 
+세션을 만든 다음 IocpCore 객체에 넘겨주면서 Register 함수로 등록을 하고 
+이렇게 여기저기서 등록된 일감들을 Worker스레드를 만들어 Dispatch 함수로 
+다 준비됐나 관찰을 합니다. 
+그러면 잘 준비가 되어서 timeout 시간 내로 호출되는 스레드는
+IocpObject->Dispatch 로 각기 필요한 작업을 합니다.
+
+이 내용중 IocpCore 객체를 어디서 관리해줄지를 생각해봐야하는데 
+일단 오늘 강의에서는 임시로 extern 객체로 관리해줍니다.
+*/
+
+
+// TEMP
+extern IocpCore GIocpCore;
+
+다음은 위에서 나왔던 IocpEvent 클래스입니다. 
+
+// 이전 처음 Iocp 를 배울때도 이렇게 Type을 멤버로 들고 있게 해서 각 용도에 맞는 동작을 시켰었습니다.
+enum class EventType : uint8
+{
+	Connect,
+	Accept,
+	//PreRecv, // 0Byte Recv라는 고급 기술에서 사용되는 타입
+	Recv,
+	Send,
+};
+
+/*
+----------------
+	IocpEvent 선언부 
+----------------
+*/
+
+/*
+Overlapped 구조체를 대신할 것이기 때문에 가장 앞에 Overlapped 구조체가 있거나
+상속을 받아줘야합니다. 여기서는 상속하는 방식으로 하겠습니다.
+-주의할점-
+상위 클래스가 될것이라고 virtual 키워드를 쓰면 offset 0번에 OVERLAPPED 가 아닌 다른 정보가 
+들어가게되니 사용하면 안된다 virtual을 사용하면 offset 0번에 가상함수테이블이 오게됩니다.
+*/
+class IocpEvent : public OVERLAPPED
+{
+public:
+	IocpEvent(EventType type);
+
+	void		Init();
+	EventType	GetType() { return _type; }
+protected:
+	EventType	_type;
+};
+
+
+/*
+----------------
+	IocpEvent 정의부 
+----------------
+*/
+IocpEvent::IocpEvent(EventType type) : _type(type)
+{
+	Init();
+}
+
+void IocpEvent::Init()
+{
+	// OVERLAPPED 구조체 안이 값들을 모두 0으로 밀어줍니다. 
+	// 운영체제에서 사용할 값이기 때문이 이후로는 신경쓰지 않을겁니다. 
+	OVERLAPPED::hEvent = 0;
+	OVERLAPPED::Internal = 0;
+	OVERLAPPED::InternalHigh = 0;
+	OVERLAPPED::Offset = 0;
+	OVERLAPPED::OffsetHigh = 0;
+}
+
+IocpEvent 의 생성자에서 Init을 왜 굳이 따로 함수로 빼서 했냐면 나중에 또 명시적으로 Init을 하게되는 경우도 있기 때문입니다. 
+이렇게 만든 IocpEvent는 이대로 사용하지는 않고 EventType 마다 상속을 시켜서 사용합니다. 
+지금은 별것은 아니고 Connect, Accept, Recv, Send 각각의 EventType을 자신의 타입으로 지정하는 정도 동작만합니다. 
+
+예외적으로 acceptEvent는 좀 다릅니다. accept 함수와 acceptEx 함수의 차이인데 
+기존 accept 함수는 리슨소켓, OUT 받을 클라의 주소 구조체와 그 데이터 크기를 인자로 받았고 반환으로 클라이언트의 소켓을 반환했었습니다. 
+하지만 acceptEx는 리슨 소켓 뿐만아니라 acceptSocket 도 인자로 받고 있는데 이 acceptSocket이 클라이언트 소켓입니다. 
+그렇기 때문에 AcceptEx 를 호출할 AcceptEvent 클래스에서는 ClientSocket도 멤버 변수로 가지고 있어야 합니다. 
+이부분은 TODO로 남기고 이후에 구현해주겠습니다. 
+
+***
+이렇게 IocpCore, IocpEvent 까지 코드작성이 완료되었습니다.
+그래도 이것만으로는 테스트를 할 수없고 Accept를 하기 위해서는 주체가 필요한데 그걸 만들어주는 작업을 해보겠습니다. 
+Network 필터아래로 Listener라는 헤더,cpp 파일들을 추가했습니다. 
+ 
+이 클래스가 사실상 문지기 역할을 맡게 됩니다. 식당의 예시에서 말했던 고객의 전화를 가장 처음 받고 각 부서로 연결해주는 그 문지기입니다. 
+
+//두가지 헤더를 추가했습니다. 
+#include "IocpCore.h"
+#include "NetAddress.h"
+
+//이번 실습에서는 임시로 Accept만 테스트 할것입니다.
+class AcceptEvent;
+
+/*
+--------------------
+	Listener 선언부
+--------------------
+*/
+// listenSocket 같은 역할을 하게 될겁니다. 
+// 이 클래스도 CP에 등록되어 작업을 할것이기에 IocpObject를 상속받았습니다.
+class Listener : public IocpObject
+{
+public:
+	Listener() = default;
+	~Listener();
+
+public:
+	/* 외부에서 사용 */
+	// Listener에게 문지기 역할을 해라 라는 함수
+	bool StartAccept(NetAddress netAddress);
+	void CloseSocket();
+
+
+public:
+	// IocpObject를 상속했기 때문에 반드시 정의해줘야하는 함수들 
+	/* 인터페이스 구현 */
+	virtual HANDLE GetHandle() override;
+	virtual void Dispatch(class IocpEvent* iocpEvent, int32 numOfBytes = 0) override;
+
+private:
+	/* 수신 관련 */
+	void RegisterAccept(AcceptEvent* acceptEvent);
+	void ProcessAccept(AcceptEvent* acceptEvent);
+
+	
+protected:
+	// 멤버 변수들 
+	SOCKET _socket = INVALID_SOCKET;
+	// 직접 만든 STLAllocator를 사용하는 컨테이너입니다.
+	Vector<AcceptEvent*> _acceptEvents;
+	// TODO : 나중에 세션 카운트 같은 데이터도 들고 있을 수 있습니다. 
+
+};
+
+/*
+--------------------
+	Listener 정의부
+--------------------
+*/
+#include "Listener.h"
+#include "SocketUtils.h"
+#include "IocpEvent.h"
+#include "Session.h"
+
+Listener::~Listener()
+{
+	// 소멸 시점에 Listener가 들고있던 소켓을 닫아줍니다. 
+	SocketUtils::Close(_socket);
+
+	// 반복문을돌면서 들고있던 AcceptEvent 들도 정리합니다.
+	for (AcceptEvent* acceptEvent : _acceptEvents)
+	{
+		// TODO 
+
+		A_delete(acceptEvent);
+	}
+}
+
+// Listener를 만든 다음 그 소켓으로 Accept를 호출합니다.
+bool Listener::StartAccept(NetAddress netAddress)
+{
+	// 일단 Listener의 소켓을 만듭니다. 
+	_socket = SocketUtils::CreateSocket();
+	if (_socket == INVALID_SOCKET)
+		return false;
+
+	// 다음으로 Listener를 CP에 등록합니다. 
+	if (GIocpCore.Register(this) == false)
+		return false;
+
+	// 소켓 옵션중 주소 재사용 가능하게 해서 주소가 곂쳐도 동작가능하게 해줍니다. 
+	if (SocketUtils::SetReuseAddress(_socket, true) == false)
+		return false;
+
+	// Linger라는 옵션은 만약 데이터 전송도중 접속이 끊겼을때 보내고 있던 데이터를 잠시라도 
+	// 보존하겠는가? 보존한다면 어느정도 시간동안 보존할것인지에 대한 옵션입니다. 
+	// 여기서는 둘다 0, 0 으로 넣어 접속이 끊기면 그냥 데이터를 다 날리는걸로 하였습니다. 
+	if (SocketUtils::SetLinger(_socket, 0, 0) == false)
+		return false;
+
+	// 어느정도 소켓옵션을 다 정했으면 Bind로 listenSocket과 서버 자신의 주소를 묶습니다. 
+	if (SocketUtils::Bind(_socket, netAddress) == false)
+		return false;
+
+	if(SocketUtils::Listen(_socket) == false)
+		return false;
+
+
+	//여기까지 소켓옵션, Bind, Listen 까지 했으면 AcceptEx를 호출예약할 차례입니다.
+	//RegisterAccept 를 사용해서 AcceptEx 를 예약합니다. 이후 누군가가 접속하면 완료 통지가 뜨게 될겁니다. 
+	//완료 통지는 CP를 관찰하던 Worker 스레드에서 포착할겁니다.
+	//그리고 한번에 접속요청이 몰릴때 Accept 예약이 하나뿐이면 몇몇개는 놓칠수도 있기때문에 for문으로 
+	//복수의 예약을 걸어놓으면 좋습니다. 일단 지금은 하나만 예약합니다.
+	const int32 acceptCount = 1;
+	for (int32 i = 0; i < acceptCount; i++)
+	{
+		AcceptEvent* acceptEvent = A_new<AcceptEvent>();
+		// 이 반복문 안에서 만든 acceptEvent를 _acceptEvents 라는 벡터에서도 참조하게 해서 
+		// 나중에 삭제하기 쉽도록 합니다. 소멸자 호출때 알아서 삭제해줍니다.
+		_acceptEvents.push_back(acceptEvent);
+		RegisterAccept(acceptEvent);
+	}
+
+	return false;
+}
+
+// 이 함수는 별건아니고 그냥 이 lisnteSocket을 닫아줍니다.
+void Listener::CloseSocket()
+{
+	SocketUtils::Close(_socket);
+}
+
+// _socket을 HANDLE로 캐스팅해 반환
+HANDLE Listener::GetHandle()
+{
+	return reinterpret_cast<HANDLE>(_socket);
+}
+
+// IocpCore::Dispatch 에서 GetQueuedCompletionStatus 를 통과한후 IocpEvent->Dispatch를 호출한게 이곳으로 옵니다.
+void Listener::Dispatch(IocpEvent* iocpEvent, int32 numOfBytes)
+{
+	// 현재까지 테스트중인 Event 타입이 Accept 뿐이니까 에러체크해줍니다.
+	ASSERT_CRASH(iocpEvent->GetType() == EventType::Accept);
+
+	// iocpEvent를 AcceptEvent로 복원해주겠습니다. 
+	AcceptEvent* acceptEvent = static_cast<AcceptEvent*>(iocpEvent);
+	
+	// 이제 이 AcceptEvent를 실행하기위해 ProcessAccept 를 호출합니다
+	ProcessAccept(acceptEvent);
+}
+
+// AcceptEx를 예약해주는 함수 즉, 실질적으로 AcceptEx를 호출해줍니다.
+// 여기서 예약해둔 AcceptEx는 누군가 접속해주게되면 Dispatch로 넘어갈겁니다.
+void Listener::RegisterAccept(AcceptEvent* acceptEvent)
+{
+	/*
+	AcceptEx가 받는 인자가 많은데 클라이언트에 대한 인자가 많습니다.
+	각 인자를 지금 이 함수 내에서 만들기보다는 Session이라는 클라이언트에 대한 데이터들을 모아둔 
+	객체에서 가져와 사용하는게 좋습니다. 
+	나중에는 미리 준비된 세션을 풀링해와서 사용해도 되지만, 지금은 접속 테스트까지만 해볼것이니
+	간소하게 여기서 생성했습니다.
+	이번시간에 추가로 AcceptEvent 클래스에서 세션을 기억할수 있도록 만들었습니다. 
+	왜냐면 Dispatch나 ProsessAccept 에서 AcceptEvent를 받아 실행이 될텐데 
+	어떤 세션과 연동되어있는지를 확인할수 있도록 합니다.
+	*/
+	Session* session = A_new<Session>();
+	acceptEvent->Init();
+	acceptEvent->SetSession(session);
+
+	/*
+	AcceptEx의 인자목록
+	1) listener Socket
+	2) AcceptEx 호출후 clientSocket이 될 소켓
+	3) lpOutputBuffer 처음 연결되면서 서버의 로컬주소 및 클라이언트의 원격주소를 수신할 버퍼
+	4) dwReceiveDataLength 위의 서버 로컬주소, 클라의 원격주소를 제외한 연결과 동시에 수신할 데이터의 크기
+		0을 넣으면 연결과 동시에 수신하지 않고 바로 AcceptEx를 완료합니다.
+	5) dwLocalAddressLength 로컬주소를 위해 예약된 바이트 수입니다. 현재 사용중인 전송프로토콜
+		SOCKADDR_IN 보다 16바이트 이상이어야 합니다. 
+	6) dwRemoteAddressLength 원격주소를 위해 예약된 바이트 수입니다. 와야 할 값은 위와 같습니다.
+	7) lpdwBytesReceived 연결하면서 받은 데이터의 바이트 수를 수신할 인자입니다. DWORD* 타입입니다.
+	8) lpOverlapped 요청을 처리할때 사용되는 LPOVERLAPPED 구조체입니다. 우리는 IocpEvent를 캐스팅해 넣어주면됩니다. 
+	*/
+	DWORD bytesReceived = 0;
+	if (false == SocketUtils::AcceptEx(_socket, session->GetSocket(), session->_recvBuffer, 0, sizeof(SOCKADDR_IN) + 16, sizeof(SOCKADDR_IN) + 16, OUT & bytesReceived, static_cast<LPOVERLAPPED>(acceptEvent)))
+	{
+		// 실패했으면 에러코드를 봅니다.
+		const int32 errorCode = ::WSAGetLastError();
+		if (errorCode != WSA_IO_PENDING)
+		{
+			// Pending 상태가 아니라면 문제가 있는 상황입니다.
+			// 이경우에는 RegisterAccept 호출하던게 끊긴 상황이니 직접 다시 걸어줘야 합니다.
+			RegisterAccept(acceptEvent);
+		}
+	}
+}
+
+
+void Listener::ProcessAccept(AcceptEvent* acceptEvent)
+{
+	// AcceptEvent에 보관해뒀던 세션을 꺼냅니다. 
+	Session* session = acceptEvent->GetSession();
+
+	// SetUpdateAcceptSocket 이라는 함수는 인자 소켓과 listen 소켓의 옵션을 똑같이 맞춰줍니다.
+	if (false == SocketUtils::SetUpdateAcceptSocket(session->GetSocket(), _socket))
+	{
+		// 실패했으면 리턴하기전에 꼭 RegisterAccept를 호출해줘서 다음 예약을 해줍니다. 
+		RegisterAccept(acceptEvent);
+		return;
+	}
+
+	// 데이터를 추출해보겠습니다. getpeername 함수를 통해 sockAddress에 주소를 가져오고있습니다. 
+	SOCKADDR_IN sockAddress;
+	int32 sizeOfSockAddr = sizeof(sockAddress);
+	if (SOCKET_ERROR == ::getpeername(session->GetSocket(), OUT reinterpret_cast<SOCKADDR*>(&sockAddress), &sizeOfSockAddr))
+	{
+		RegisterAccept(acceptEvent);
+		return;
+	}
+
+	// 가져온 주소를 NetAddress 객체로 만들어 세팅합니다. 
+	session->SetNetAddress(NetAddress(sockAddress));
+
+	// 여기까지 왔으면 성공적으로 연결되었다고 볼 수 있습니다.
+	cout << "Client Connected!" << endl;
+
+	// TODO
+
+	RegisterAccept(acceptEvent);
+
+	// 위 내용들을 보면 한번 클라이언트가 접속하고 생성한 세션과 IocpEvent는 계속 재사용하고 있습니다. 
+}
+
+
+다음으로 살펴볼것은 위에서 RegisterAccept 내용중 Session 이라는 클래스에 데이터를 저장해두고 사용하고 있었는데 그걸 살펴보겠습니다. 
+
+#include "IocpCore.h"
+#include "IocpEvent.h"
+#include "NetAddress.h"
+
+/*
+--------------------
+	Session 선언부
+--------------------
+*/
+
+/*
+접속하는 클라마다 소켓, 주소 등등 연관된 데이터들을 모두 
+이 Session으로 관리하게 됩니다. 
+그리고 이 Session 도 IocpCore에 등록해 사용합니다. 
+*/
+
+// 이번 실습에서는 접속 테스트만 할것이기때문에 간단하게 만듭니다.
+class Session : public IocpObject
+{
+public:
+	Session();
+	virtual ~Session();
+
+public:
+	/* 정보 관련 함수 */
+	void		SetNetAddress(NetAddress address) { _netAddress = address; }
+	NetAddress	GetAddress() { return _netAddress; }
+	SOCKET		GetSocket() { return _socket; }
+
+public:
+	/* 인터페이스 구현 */
+	virtual HANDLE	GetHandle() override;
+	virtual void	Dispatch(class IocpEvent* iocpEvent, int32 numOfBytes = 0) override;
+
+public:
+	// TEMP : 임시로 Recv버퍼를 만듭니다. 나중에는 수정될것입니다.
+	char _recvBuffer[1000];
+
+private:
+	SOCKET			_socket = INVALID_SOCKET;
+	NetAddress		_netAddress = {};
+	// 현재 세션의 접속여부를 들고 있습니다. 
+	Atomic<bool>	_connected = false;
+};
+
+/*
+--------------------
+	Session 정의부 
+--------------------
+*/
+Session::Session()
+{
+	_socket = SocketUtils::CreateSocket();
+}
+
+Session::~Session()
+{
+	SocketUtils::Close(_socket);
+}
+
+HANDLE Session::GetHandle()
+{
+	return reinterpret_cast<HANDLE>(_socket);
+}
+
+void Session::Dispatch(IocpEvent* iocpEvent, int32 numOfBytes)
+{
+	// TODO : 나중에 들어오는 IocpEvent에 따라 Recv나 Send를 처리해주게 될겁니다.
+	// 지금은 접속 테스트만 할것이기때문에 비워둡니다.
+}
+
+Session의 정의부는 그냥 틀만 만들어두고 나중에 내용을 채워주겠습니다. 
+
+다음으로 알아볼것은 IocpEvent.h 입니다. 왜 알아봐야 하냐면 Listener::RegisterAccept 에서 세션을 AcceptEvent에 저장해두는 부분이 있었습니다.
+IocpCore의 멤버 함수 중 Register나 Dispatch 에서 인자에 따로 Session을 받아주지 않고 IocpEvent만 주고 받는데 이래서는 받은 IocpEvent가 어느 세션에 대한 
+이벤트인지를 모릅니다. 그렇기때문에 이벤트에서 세션을 참조하고 있다면 이벤트만 주고받아도 어느 세션에 대한 이벤트인지를 알수 있을겁니다. 
+오늘 수정한 코드에서는 일단 AcceptEvent만 사용할것입니다. 
+
+/*
+----------------
+	AcceptEvent
+----------------
+*/
+// Accept는 예외적으로 EventType 외에 추가적인 변수가 있습니다. 
+// 그냥 accept 함수를 호출하면 반환으로 clientSocket이 반환 되었는데 앞으로 사용하려는 
+// AcceptEx의 인자를 보면 listenSocket 과 clientSocket으로 사용할 소켓도 같이 받아주고 있습니다.
+// 다른 IO 함수들과 달리 AcceptEvent 에서는 추가적으로 필요한 인자를 들고 있어야 합니다. 
+//
+class AcceptEvent : public IocpEvent
+{
+public:
+	AcceptEvent() : IocpEvent(EventType::Accept) { }
+
+	void		SetSession(Session* session) { _session = session; }
+	Session*	GetSession() { return _session; }
+private:
+	// Session을 연동받아서 나중에 이 이벤트가 어떤 세션에 대한 이벤트인지를 기억합니다.
+	Session*	_session = nullptr;
+};
+
+
+이제 한번 프로젝트들을 빌드하고 테스트 해보려고 하니 SeverCore 프로젝트, Memory 필터 아래로 Allocator.h 에서 에러가 납니다. 
+StlAllocator 클래스에서 allocate, deallocate 함수들 내부에 A_alloc, A_release 를 사용하고 있었는데 이 할당자, 해제자는 더이상 사용하지 않고 있기 때문입니다. 
+그러면 왜 이제와서 에러가 뜨는가 하면 여태껏 테스트중에 StlAllocator를 사용하는 테스트를 하지 않았기 때문입니다. 컴파일러쪽에서 굳이 사용하고 있지 않는 
+StlAllocator 는 그냥 코드를 무시해주고 있었기 때문에 별다른 에러메세지가 뜨지 않았지만 
+이번 테스트에서는 Listener 클래스에서 _acceptEvents 를 Vector로 사용했기 때문에 컴파일러가 문제로 삼은겁니다. 
+
+PoolAllocator::Alloc, PoolAllocator::Release 를 만들면서 alloc, release는 Stomp define이 있는지 없는지를 기준으로 골라주도록 수정했었습니다. 
+StlAllocator도 PoolAllocator의 Alloc, Release 를 사용하도록 수정했습니다. 
+
+template<typename T>
+class StlAllocator
+{
+public:
+	using value_type = T;
+
+	StlAllocator() { }
+
+	template<typename Other>
+	StlAllocator(const StlAllocator<Other>&) { }
+
+	T* allocate(size_t count)
+	{
+		const int32 size = static_cast<int32>(count * sizeof(T));
+		return static_cast<T*>(PoolAllocator::Alloc(size));
+	}
+
+	void deallocate(T* ptr, size_t count)
+	{
+		PoolAllocator::Release(ptr);
+	}
+};
+
+
+
+이제 진짜로 테스트를 해볼 시간입니다. 
+#include "Listener.h"
+
+// IocpCore를 통해 비동기 IO함수인 AcceptEx를 테스트 해보겠습니다. 
+int main()
+{
+	// 나중에는 지금처럼 직접 만들지는 않겠지만 테스트를 위해 Listener를 만들어 주겠습니다.
+	Listener listener;
+	
+	// StartAccept 함수내부에서 알아서 리슨소켓생성, CP에 등록, 각종옵션세팅,bind, listen, RegisterAccept
+	// 까지 해줄겁니다.
+	listener.StartAccept(NetAddress(L"127.0.0.1", 7777));
+
+	// StartAccept 내부에서 RegisterAccept를 호출한후 누군가 접속을 요청했다고 하면 
+	// IocpCore::Dispatch 를 통해 누가 접속했는지를 인지할 수 있게 됩니다. 
+	// 그러면 Dispatch는 어디서 관찰하고 있을것이냐면 다른 스레드를 만들어서 관찰시킬겁니다.
+
+	// 멀티스레드를 만들겁니다. 보통 멀티스레드의 갯수는 CPU 코어 갯수 ~ 코어 갯수 1.5 배 정도가 적당하다고 합니다.
+	// 괜히 많아봤자 컨택스트 스위칭 비용만 늘어납니다. 
+	for (int32 i = 0; i < 5; i++)
+	{
+		// 스레드를 만듭니다. 하는일은 무한루프를 돌면서 계속 전역 IocpCore 객체를 Dispatch하는겁니다.
+		GThreadManager->Launch([=]()
+			{
+				while (true)
+				{
+					GIocpCore.Dispatch();
+				}
+			});
+	}
+
+	GThreadManager->Join();
+}
+
+접속하는 클라이언트는 DummyClient 하나가 있을것이고 1초에 한번씩 "Hello World!" 문자열을 보내올겁니다. 
+위의 테스트 코드에서는 GIocpCore.Dispatch를 무한정 실행하고있는 스레드 5개를 만들었지만 접속한 클라가 하나 뿐이니 스레드중 하나에서만 Dispatch 안에서 
+GetQueuedCompletionStatus를 통과하게 될겁니다.
+
+ GetQueuedCompletionStatus 함수의 값이 반환될 인자로 만든 iocpObject, iocpEvent 도 값이 들어와 있습니다. 
+ 그 데이터를 사용해 iocpObject->Dispatch를 호출하는데 이때 iocpObject는 Listener를 뜻합니다. 
+
+즉 Listener->Dispatch를 호출하게 되고 인자로 받은 IocpEvent->GetType()으로 IocpEvent를 AcceptEvent로 복원해주게 되고 
+Listener->ProcessAccept로 진행됩니다. 
+
+ProcessAccept 함수 안에서는 예약된 AcceptEx는 클라쪽의 Connect 로 인해 연결이 진행되고 클라쪽에서 받아온 데이터들도 서버에서 접근할 수 있게됩니다. 
+그 데이터는 인자인 acceptEvent 가 참조하고 있는 Session에 담겨 있을겁니다. 연동되어 있는 세션안에 소켓의 옵션을 listenSocket과 똑같이 설정하고 
+세션안에 recvBuffer 라고 임시로 만들어놓은 버퍼에서 클라쪽 주소 정보를 가져와 정식으로 세션의 NetAddress 에서 관리하도록 합니다. 
+여기 까지 되었으면 진짜로 서버 클라간 연결이 되었다고 할 수 있습니다. ProcessAccept 진행중에는 중간에서 반환 되기전에 다음번 RegisterAccept를 잊지말고 
+걸어놔야 Worker스레드가 멈추지 않고 동작합니다. 
+
+오늘 내용은 만들기는 이리저리 복잡했지만 결국 테스트는 접속테스트였습니다. 
+꼭 이번 강의의 흐름을 잡고가야 이후로 이해하기가 용이할것이라고 합니다. 
