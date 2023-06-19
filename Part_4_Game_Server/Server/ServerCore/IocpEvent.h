@@ -30,9 +30,12 @@ public:
 	IocpEvent(EventType type);
 
 	void		Init();
-	EventType	GetType() { return _type; }
-protected:
-	EventType	_type;
+
+	// private에서 public으로 열어줬는데 멤버 변수에 자주접근할 예정이다 보니 열었습니다.
+public:
+	EventType	eventType;
+	// 이벤트의 주인 객체를 shared_ptr로 들고 있습니다. 
+	IocpObjectRef owner;
 };
 
 
@@ -63,11 +66,12 @@ class AcceptEvent : public IocpEvent
 public:
 	AcceptEvent() : IocpEvent(EventType::Accept) { }
 
-	void		SetSession(Session* session) { _session = session; }
-	Session*	GetSession() { return _session; }
-private:
+	
+	// 멤버 변수를 그냥 public으로 열어서 직접 건드리겠습니다. 
+public:
 	// Session을 연동받아서 나중에 이 이벤트가 어떤 세션에 대한 이벤트인지를 기억합니다.
-	Session*	_session = nullptr;
+	// shared_ptr로 들고 있게 해서 참조 카운팅을 해줍니다.
+	SessionRef	session = nullptr;
 };
 
 /*

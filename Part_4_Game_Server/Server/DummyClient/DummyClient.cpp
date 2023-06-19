@@ -73,7 +73,8 @@ int main()
 		if (::WSASend(clientSocket, &wsaBuf, 1, &sendLen, flags, &overlapped, nullptr)
 			== SOCKET_ERROR)
 		{
-			if (::WSAGetLastError() == WSA_IO_PENDING)
+			int32 errorCode = ::WSAGetLastError();
+			if (errorCode == WSA_IO_PENDING)
 			{
 				// Pending
 				cout << "Pending" << endl;

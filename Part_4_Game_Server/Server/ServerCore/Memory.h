@@ -51,8 +51,9 @@ void A_delete(Type* obj)
 	PoolAllocator::Release(obj);
 }
 
-template<typename Type>
-shared_ptr<Type> MakeShared()
+template<typename Type, typename... Args>
+shared_ptr<Type> MakeShared(Args&&... args)
 {
-	return shared_ptr<Type>{ A_new<Type>(), A_delete<Type> };
+	return shared_ptr<Type>{ A_new<Type>(std::forward<Args>(args)...), A_delete<Type> };
 }
+

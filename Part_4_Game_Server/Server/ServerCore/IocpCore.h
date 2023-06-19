@@ -12,7 +12,12 @@ Completion Port 에 등록할 수 있는 데이터들을 IocpObject 라고 관리해주겠습니다.
 이전에 배웠던 내용으로 예시를 들면 IocpObject 가 세션이 되는것이고 
 멤버 함수중 Dispatch의 인자중 IocpEvent 라는 것이 Overlapped 구조체가 되는겁니다.
 */
-class IocpObject
+/*
+Listener나 아니면 Session에서 비동기 IO 함수를 호출하면서 자신을 
+IocpEvent->owner 에 물려줄때 this를 shared_ptr로 참조할수 있게 하는 
+enable_shared_from_this<Type> 을 상속받았습니다. 
+*/
+class IocpObject : public enable_shared_from_this<IocpObject>
 {
 public:
 	virtual HANDLE GetHandle() abstract;
@@ -45,7 +50,7 @@ public:
 	HANDLE GetHandle() { return _iocpHandle; }
 
 	// 소켓의 IO 일감을 Completion Port에 등록하는 함수 
-	bool Register(class IocpObject* iocpObject);
+	bool Register(IocpObjectRef iocpObject);
 	// 워커 스레드에서 일감이 없나 탐색하는 함수
 	bool Dispatch(uint32 timeoutMs = INFINITE);
 public:
@@ -53,19 +58,6 @@ public:
 	HANDLE _iocpHandle;
 };
 
-/*
-IocpCore를 사용하는 흐름을 보면 어떤 스레드에서 클라이언트와의 acceptEx를 
-마치고 클라 소켓을 받아오면 그 소켓을 IocpObject 클래스를 상속받은 
-또 다른 클래스 예를 들어 세션이라고 합시다. 
-세션을 만든 다음 IocpCore 객체에 넘겨주면서 Register 함수로 등록을 하고 
-이렇게 여기저기서 등록된 일감들을 Worker스레드를 만들어 Dispatch 함수로 
-다 준비됐나 관찰을 합니다. 
-그러면 잘 준비가 되어서 timeout 시간 내로 호출되는 스레드는
-IocpObject->Dispatch 로 각기 필요한 작업을 합니다.
 
-이 내용중 IocpCore 객체를 어디서 관리해줄지를 생각해봐야하는데 
-일단 오늘 강의에서는 임시로 extern 객체로 관리해줍니다.
-*/
-
-// TEMP
-extern IocpCore GIocpCore;
+// TEMP : ServerService를 만들면서 임시 전역객체 GIocpCore를 삭제해줍니다.
+// extern IocpCore GIocpCore;

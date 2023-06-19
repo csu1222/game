@@ -3,6 +3,8 @@
 #include "NetAddress.h"
 
 class AcceptEvent;
+// ServerService 를 사용하기 시작
+class ServerService;
 
 /*
 --------------------
@@ -19,8 +21,8 @@ public:
 
 public:
 	/* 외부에서 사용 */
-	// Listener에게 문지기 역할을 해라 라는 함수
-	bool StartAccept(NetAddress netAddress);
+	// NetAddress 대신 ServerServiceRef 를 인자로 받습니다. 
+	bool StartAccept(ServerServiceRef service);
 	void CloseSocket();
 
 
@@ -41,6 +43,11 @@ protected:
 	SOCKET _socket = INVALID_SOCKET;
 	Vector<AcceptEvent*> _acceptEvents;
 	// TODO : 나중에 세션 카운트 같은 데이터도 들고 있을 수 있습니다. 
+
+	// StartAccept 에서 받은 ServerService를 변수로 들고 있을겁니다.
+	// 하지만 ServerService 에서도 Listener를 들고 있고 여기서도 ServerService를 들고 있게되면 
+	// shared_ptr 로는 서로 순환 문제를 격을 수 있습니다. 이걸 유념해서 구현하겠습니다. 
+	ServerServiceRef _service;
 
 };
 

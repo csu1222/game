@@ -30,9 +30,10 @@ public:
 		
 	}
 
-	static shared_ptr<Type> MakeShared()
+	template<typename... Arg>
+	static shared_ptr<Type> MakeShared(Arg&&... arg)
 	{
-		shared_ptr<Type> ptr = { Pop(), Push };
+		shared_ptr<Type> ptr = { Pop(std::forward<Arg>(arg)...), Push };
 
 		return ptr;
 	}

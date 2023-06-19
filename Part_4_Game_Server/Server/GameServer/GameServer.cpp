@@ -7,34 +7,52 @@
 #include <future>
 #include "ThreadManager.h"
 
-#include "SocketUtils.h"
+// 이제 Service를 통해 사용할것이기 때문에 날려줍니다. 
+//#include "SocketUtils.h"
+//
+//#include "Listener.h"
 
-#include "Listener.h"
+#include "Service.h"
+#include "Session.h"
 
-// IocpCore를 통해 비동기 IO함수인 AcceptEx를 테스트 해보겠습니다. 
-int main()
+
+/*
+ServerServiceRef 를 동적생성할때 3번째 인자로 MakeShared<Session> 이렇게 ()없이 넘겨줍니다. 
+이것은 MakeShared의 반환값을 넘겨주는게 아니라 이렇게 생성하는 함수자체를 인자로 넘겨주고 
+이걸 함수 포인터라고 하고 우리 Service 클래스에서는 SessionFactory라고 불렀습니다. 
+
+이런식으로 함수포인터를넘겨주는 이득은 나중에 Session을 상속받은 또다른 클래스를 넘겨줄 수 있다는 것입니다. 
+예를들어 
+class GameSession : public Session
 {
-	// 나중에는 지금처럼 직접 만들지는 않겠지만 테스트를 위해 Listener를 만들어 주겠습니다.
-	Listener listener;
-	
-	// StartAccept 함수내부에서 알아서 리슨소켓생성, CP에 등록, 각종옵션세팅,bind, listen, RegisterAccept
-	// 까지 해줄겁니다.
-	listener.StartAccept(NetAddress(L"127.0.0.1", 7777));
+}
+이때 MakeShared<GameSession> 을 넘겨줄 수도 있습니다. 
+*/
 
-	// StartAccept 내부에서 RegisterAccept를 호출한후 누군가 접속을 요청했다고 하면 
-	// IocpCore::Dispatch 를 통해 누가 접속했는지를 인지할 수 있게 됩니다. 
-	// 그러면 Dispatch는 어디서 관찰하고 있을것이냐면 다른 스레드를 만들어서 관찰시킬겁니다.
+int main()
+{	
+	// 이제 부터 Listener를 직접 만들어 주지 않고 ServerService를 만들어 줄겁니다. 
+	// ListenerRef listener = MakeShared<Listener>();
+	// Service 객체들은 여러 인자들을 받아주었었는데 우리가 만들었던 MakeShared 에서는 인자를 받지 않는 기본 생성자 버전만 있었습니다. 
+	// 그래서 추가했습니다.
+	// 인자들은 순서대로 NetAddress, IocpCore 객체, SessionFactory, MaxSessionCount 입니다.
+	ServerServiceRef service = MakeShared<ServerService>(
+		NetAddress(L"127.0.0.1", 7777),
+		 MakeShared<IocpCore>(),
+		MakeShared<Session>,
+		100);
 
-	// 멀티스레드를 만들겁니다. 보통 멀티스레드의 갯수는 CPU 코어 갯수 ~ 코어 갯수 1.5 배 정도가 적당하다고 합니다.
-	// 괜히 많아봤자 컨택스트 스위칭 비용만 늘어납니다. 
+	// service를 만들었으면 Start를합니다. 여기서 해주는것은 Listener 객체를 만들고 
+	// 그 Listener 의 멤버 함수인 StartAccept를 자기자신을 넘겨주면서 AccpetEx를 호출합니다. 
+	ASSERT_CRASH(service->Start());
+
 	for (int32 i = 0; i < 5; i++)
 	{
-		// 스레드를 만듭니다. 하는일은 무한루프를 돌면서 계속 전역 IocpCore 객체를 Dispatch하는겁니다.
 		GThreadManager->Launch([=]()
 			{
 				while (true)
 				{
-					GIocpCore.Dispatch();
+					service->GetIocpCore()->Dispatch();
 				}
 			});
 	}
