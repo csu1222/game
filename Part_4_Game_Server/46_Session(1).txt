@@ -1,0 +1,355 @@
+
+
+        Session (1)
+
+
+지난시간까지 Service 라는 클래스를 만들어서 여기에 우리가 작업했던 Session, Listener, IocpCore, NetAddress 등을 묶어서 관리할 수 있게끔 
+만들었습니다.
+
+이번 강의의 주제는 본격적으로 Session과 관련된 내용을 작업해보겠습니다. 
+
+Session이 실질적으로 하는 작업은 클라이언트와 서버가 connect, accept 로 연결이 된후 
+Recv를 걸어서 패킷을 받을 준비를 하고 이후로는 데이터를 다시 보내던지 가공을 하던지 할것입니다. 
+
+또 이번 강의에서 새로 추가될 함수들이 상당히 많습니다. 
+
+***
+-- Session 클래스를 보겠습니다. 
+
+보통 클래스를 작업하다보면 보안레벨을 public 으로 열어주는 경우도 있고 private로 클래스 내부에서만 접근하게 하는경우
+혹은 상속관계에 있는 클래스들까지는 접근하게 하는 protected가 있습니다. 
+
+외부에서 아무렇게나 접근 가능하도록 전부 public으로만 만드는 경우는 별로 없을겁니다.
+이후 실질적으로 Session을 사용할때는 Session 클래스를 그대로 사용하는게 아니라 Session클래스를 상속받은 GameSession 같은 형태로 사용할것입니다. 
+이런 상속관계속에서 네트워크같은 데이터들은 접근하지 못하도록 막아 둘 필요도 있을것입니다. 
+
+그렇다고 아예 private로 막아버리면 지금까지 작업했던 코드의진행이 막히니 접근이 필요한 클래스들은 friend class 키워드로 열어주기도 할겁니다. 
+
+그리고 Listener::ProcessAccept() 함수로 실질적 Accept가 진행되면서 Listener의 Session에서도 Recv를 해줄것입니다. 이 부분을 Session 클래스에 구현해 주겠습니다. 
+Listener에서도 RegisterAccept, ProcessAccept 처럼 짝을 맞췄던것과 마찬가지로 
+Session도 비슷하게 작업을 해줄겁니다. 
+
+
+/*
+--------------------
+	Session 선언부
+--------------------
+*/
+
+class Service;
+
+/*
+클라이언트와 서버가 connect, accept 를 통과해 연결된 다음부터는 
+Session이 중요한 역할을 하게 되는데 
+Recv를 하면서 패킷을 받기시작하는것부터 
+서버에서 클라이언트로 다시 데이터를 전송하는 Send 등의 기능을 
+이번 시간에 구현해볼것입니다. 
+*/
+
+class Session : public IocpObject
+{
+	// 앞으로 모든 함수들을 public으로 열지는 않을것인데 
+	// 그래도 외부에서 데이터를 주고받아야하는 클래스들을 열어줬습니다. 
+	friend class Listener;
+	friend class IocpCore;
+	friend class Service;
+public:
+	Session();
+	virtual ~Session();
+
+public:
+	/* 연결 관련 함수 */
+	void				Disconnect(const WCHAR* cause);
+	
+	shared_ptr<Service> GetService() { return _service.lock(); }
+	void				SetService(shared_ptr<Service> service) { _service = service; }
+
+public:
+	/* 정보 관련 함수 */
+	void				SetNetAddress(NetAddress address) { _netAddress = address; }
+	NetAddress			GetAddress() { return _netAddress; }
+	SOCKET				GetSocket() { return _socket; }
+	
+	// 이전에 누락했던 연결여부를 확인하는 함수
+	// 이 함수의 반환값을 통해 계속해서 패킷을 Recv할지를 판단
+	bool				IsConnected() { return _connected; }
+	// shared_ptr로 자기자신을 반환하는 헬퍼 함수 
+	SessionRef			GetSessionRef() { return static_pointer_cast<Session>(shared_from_this()); }
+	
+private:
+	/* 인터페이스 구현 */
+	// 컨텐츠 단에서 인터페이스 구현쪽 함수에 접근할 필요는 없으니 private로 막았습니다. 
+	virtual HANDLE		GetHandle() override;
+	virtual void		Dispatch(class IocpEvent* iocpEvent, int32 numOfBytes = 0) override;
+
+private:
+	/* 전송 관련 함수 */
+	// Listener 에서와 같은 형태로 다른 비동기 IO 함수들을 작업하겠습니다. 
+	// 현재 프로젝트에서는 RegisterConnect 는 별의미 없이 곧바로 Connect를 호출하지만 
+	// 이후 컨텐츠 단에서 사용할지도 모르기때문에 만들었습니다. 
+	void				RegisterConnect();
+	void				RegisterRecv();
+	void				RegisterSend();
+
+	void				ProcessConnect();
+	void				ProcessRecv(int32 numOfBytes);
+	void				ProcessSend(int32 numOfBytes);
+
+	void				HandleError(int32 errorCode);
+
+protected:
+	/* 컨텐츠 코드에서 오버로딩해 사용할 함수 */
+	
+	// 접속, 끊김, 받고, 보내고에 대한 행동들을 함수로 호출할 준비를 해두고 나중에 필요할때 오버로딩해서 사용합니다.
+	virtual void		OnConnected() {}
+	virtual int32		OnRecv(BYTE* buffer, int32 len) { return len; }
+	virtual void		OnSend(int32 len) { }
+	virtual void		OnDisconnected() { }
+
+public:
+	char				_recvBuffer[1000] = {};
+
+private:
+	// session 내부에서도 자신을 물고있는 Service를 알아야 접속하거나 끊을수 있습니다. 
+	// 순환 문제 때문에 weak_ptr로 만듭니다. 
+	weak_ptr<Service>	_service;
+	SOCKET				_socket = INVALID_SOCKET;
+	NetAddress			_netAddress = {};
+	Atomic<bool>		_connected = false;
+
+private:
+	// 멀티스레드 환경에서 사용할것이기 때문에 Lock도 사용합니다. 
+	USE_LOCK;
+
+	/* 수신 관련 TODO */
+
+	/* 송신 관련 TODO */
+
+private:
+	/* IocpEvent 재사용 관련 */
+	RecvEvent			_recvEvent;
+};
+
+가장먼저 잊지 않고 해줘야 할것이 있는데 이제부터는 Service도 Session을 들고 있고 Session도 Service를 들고 있을것이라 했습니다. 
+
+SessionRef Service::CreateSession()
+{
+	SessionRef session = _sessionFactory();
+
+	// Session 에서도 Service를 들고 있도록 하였습니다.
+	session->SetService(shared_from_this());
+
+	if (_iocpCore->Register(session) == false)
+		return nullptr;
+	return session;
+}
+이렇게 Service::CreateSession에서 session을 만들자마자 자신을 들고 있도록 해주었습니다.
+
+
+
+/*
+--------------------
+	Session 정의부 
+--------------------
+*/
+Session::Session()
+{
+	_socket = SocketUtils::CreateSocket();
+}
+
+Session::~Session()
+{
+	SocketUtils::Close(_socket);
+}
+
+void Session::Disconnect(const WCHAR* cause)
+{
+}
+
+HANDLE Session::GetHandle()
+{
+	return reinterpret_cast<HANDLE>(_socket);
+}
+
+void Session::Dispatch(IocpEvent* iocpEvent, int32 numOfBytes)
+{
+	// 여기까지 들어왔다는건 IocpCore::Dispatch가 다 완료되고 등록했던 비동기 IO 함수가 완료되었다는 이야기
+
+	// IocpEvent의 타입에 따라 하는일이 갈립니다. 이번 시간에는 일단 Recv만 구현합니다.
+	switch (iocpEvent->eventType)
+	{
+	case EventType::Connect:
+		ProcessConnect();
+		break;
+	case EventType::Recv:
+		ProcessRecv(numOfBytes);
+		break;
+	case EventType::Send:
+		ProcessSend(numOfBytes);
+		break;
+	}
+}
+
+void Session::RegisterConnect()
+{
+}
+
+void Session::RegisterRecv()
+{
+	// 접속여부 부터 체크
+	if (IsConnected() == false)
+		return;
+
+	WSABUF wsaBuf;
+	// _recvBuffer는 아직 임시로 사용하는 중이고 나중에 수정할 예정
+	wsaBuf.buf = reinterpret_cast<char*>(_recvBuffer);	
+	wsaBuf.len = len32(_recvBuffer);
+
+	DWORD numOfBytes = 0;
+	DWORD flags = 0;
+
+	// owner를 설정하는것으로 사실상 owner의 Ref Count를 1늘린셈
+	_recvEvent.Init();
+	_recvEvent.owner = shared_from_this();
+
+
+	/*
+	WSARecv의 인자중 OVERLAPPED 구조체에 해당하는 IocpEvent 객체, Session에서는 RecvEvent를 
+	현재 함수에서 매번 새로 만들어 주는 방법도 있고 아니면
+	IocpEvent들은 각 세션마다 할당되어 동작할것이기 때문에 멤버변수로 들고 있고 그걸 넘겨주는 방법도 있습니다.
+	지금은 내부에 멤버 변수로 Event를 들고 있는 방식으로 해보겠습니다. 
+	*/
+	if (SOCKET_ERROR == ::WSARecv(_socket, &wsaBuf, 1, OUT & numOfBytes, OUT & flags, &_recvEvent, nullptr))
+	{
+		// WSARecv 가 진짜 실패했는지를 체크
+		int32 errorCode = WSAGetLastError();
+		if (errorCode != WSA_IO_PENDING)
+		{
+			// 펜딩 상태가 아니면 정말 무언가 문제가 생긴것
+			// HandleError 함수로 어떤 에러인지를 출력하고 현제 세션의 참조카운트를 줄입니다.
+			HandleError(errorCode); 
+			_recvEvent.owner = nullptr;
+		}
+		// 에러코드가 펜딩상태이면 그냥 아직 들어온 데이터가 없다는 뜻
+		// 데이터가 들어올때 까지 관찰(Dispatch) 
+	}
+}
+
+void Session::RegisterSend()
+{
+}
+
+void Session::ProcessConnect()
+{
+	_connected.store(true);
+
+	// 세션 등록 : 이코드에 와서야 서비스에 세션을 실제로 연결해주는겁니다. 
+	GetService()->AddSession(GetSessionRef());
+
+	// 컨텐츠 코드에서 오버로딩할 예정
+	OnConnected();
+
+	// 수신 등록 : 연결 후 여기서 부터 Recv를 Iocp에 등록을 해줍니다. 
+	RegisterRecv();
+}
+
+void Session::ProcessRecv(int32 numOfBytes)
+{
+	// 더이상 WSARecv 가 예약이 걸린 상태가 아니니 이 세션의 참조카운트를 줄여줍니다. 
+	_recvEvent.owner = nullptr;
+
+	if (numOfBytes == 0)
+	{
+		// Dispatch를 통과한 상태에서 받은 데이터가 0이라면 연결이 끊겼다는 이야기
+		Disconnect(L"Recv 0");
+		return;
+	}
+
+	// TODO 
+	cout << "Recv Data Len = " << numOfBytes << endl;
+
+	// 다음번 수신을 위해 다시 Register를 겁니다.
+	RegisterRecv();
+}
+
+void Session::ProcessSend(int32 numOfBytes)
+{
+}
+
+void Session::HandleError(int32 errorCode)
+{
+	switch (errorCode)
+	{
+	case WSAECONNRESET:
+	case WSAECONNABORTED:
+		Disconnect(L"HandleError");
+		break;
+	default:
+		// TODO : Log
+		cout << "Handle Error : " << errorCode << endl;
+		break;
+	}
+}
+
+Session의 정의부 전체를 다 완성한것은 아닙니다 일단 Recv까지만 동작하는데 필요한 부분만 작업했습니다. 
+
+
+_recvEvent의 owner를 관리할때 이미 객체 안에서 항상들고 있을것이니 따로 참조카운트를 관리하지 않아도 되지 않는가 생각이 들 수 있는데 
+사실 맞는 말이긴합니다. 그래고 엄밀하게 참조 카운트를 관리하고 있는것은 코드에서 가시적으로 생명주기를 확인할수 있도록 입니다. 
+또 _recvEvent.owner = shared_from_this() 를 Session의 생성자에서 부터 설정해줘도 될텐데 왜 꼭 RegisterRecv 같은 곳에서 해주는가 하면
+IO 함수가 실패했던지 아니면 성공했을때 owner를 날려주면서 참조 카운터를 줄여줘야하는데 아니면 아예 WSARecv 같은 함수를 걸지 않았을때 
+날려줄 수 있는데 따로 동떨어져서 생성자에서 관리하다보면 가시적으로 확인하기 어렵습니다. 
+그래서 최대한 알기 쉽게 WSARecv 를 걸어줄때 owner를 설정하고 WSARecv 가 실패하거나 성공하면 줄여주고 하는 식으로 만들었습니다. 
+참고로 만약 owner를 날리는걸 잊어서 참조 카운트를 날리는걸 잊으면 어떻게 되냐면 owner에 해당하는 Session은 shared_ptr로 되어있고 
+이말은 참조카운트가 0이 되지않으면 영영 메모리 해제가 되지 않는다는 말 즉 메모리 누수가 일어난다는 것입니다. 
+
+이제 테스트를 할 차례입니다. 
+처음 생각했던 과정을 따라 동작한다고 하면 Listener의 동작중 Listener::ProcessAccept 를 진행하면서 
+Listener의 session의 ProcessConnect를 호출하게 될것이고 그 안에서 Session::RegisterRecv 를 또 호출합니다. 
+RegisterRecv 에서는 WSARecv를 호출하는 준비와 Session의 멤버 변수로 들고 있는 _recvEvent의 owner로 자신을 연결하면서 WSARecv 중간에 Session이 삭제되지 않도록 
+참조 카운트를 늘립니다. 
+WSARecv 로 Iocp에 예약을 해주게되면 외부에서 새로운 스레드에 IocpCore->Dispatch 를 계속 호출하도록 하고 있을겁니다. 
+어느 스레드에서 예약된 WSARecv 일감을 진행하게 될것이고 IocpCore::Dispatch안에서 등록된 일감 IocpEvent의 owner를 복원하고 그 owner의 Dispatch를 때려주게 될겁니다.
+그러면 owner였던 Listener의 Session->Dispatch로 들어오게 되고 여기서는 IocpEvent의 타입에 따라 ProcessConnect, ProcessRecv, ProcessSend 를 골라줍니다.
+ProcessRecv에서는 받은 패킷의 데이터를 출력하면서 끝나기전에 다시 RegisterRecv를 걸어주어 다음 Recv를 예약해주게됩니다. 
+
+여기까지 테스트가 잘 진행이 될것입니다. 
+그런데 여기서 한가지 더 테스트해볼 조건은 이제 프로그램 실행중에 강제로 클라이언트를 종료 시켜주겠습니다. 그러면 서버쪽 Iocp에서 Recv하던 RecvEvent->owner 에서는 
+Recv 0 가 뜨게 될겁니다. 
+그래서 연결이 진짜로 끊기는지를 테스트 해보겠습니다. 프로그램 실행후 클라이언트 콘솔만 종료해보니 Recv 0 출력도 안되고 Session의 소멸자에 중단점을 잡아도 안잡힙니다.
+
+뭔가 문제가 있다는건데 사실 사유는 위에서 연결종료를할때마다 Disconnect를 호출해 줬지만 정작 Disconnect의 코드는 작업하지 않았어서 였습니다.
+
+
+void Session::Disconnect(const WCHAR* cause)
+{
+	// exchage의 인자로 _connected의 값이 바뀌고 반환은 이전 가지고 있던 값을 반환합니다.
+	// 그래서 아래 조건문이 참이라는것은 이미 _connected의 값이 false 였다는 말입니다. 
+	if (_connected.exchange(false) == false)
+		return;
+
+	// TEMP
+	wcout << "Disconnet : " << cause << endl;
+
+	OnDisconnected();	// 컨텐츠 코드에서 오버로딩
+
+	SocketUtils::Close(_socket);	// 소켓도 닫습니다.
+	GetService()->ReleaseSession(GetSessionRef());	// Release Ref
+
+	// 이제 Session의 참조 카운트가 최종적으로 0이 되면서 소멸합니다.
+}
+
+다시 테스트를 하면 의도했던대로 Session의 소멸자에 걸었던 중단점에서 멈추는걸 확인했습니다. 
+
+
+다음 테스트는 아까 궁금했던 것중에 만약 WSARecv가 실패하거나 성공해서 ProcessRecv 로 들어가 _recvEvent.owner 를 밀어주지 않아 Session의 참조카운트가 0이 되지 않았을때를 
+상정하겠습니다.
+테스트를 해보면 이번에는 Disconnect : Recv 0 은 출력되지만 소멸자는 호출되지 않았습니다.
+그 이유는 Session의 참조카운트가 0이 되지 않았기 때문이고 또 그 이유는 Session의 멤버 변수였던 _recvEvent가 물고 있던 owner가 아직 존재하기 때문입니다. 
+즉 메모리 누수가 일어납니다.
+
+이런 참조 카운트를 관리하는 부분을 잊게되면 프로그램동작중 크래시는 나지 않지만 메모리 누수는 꾸준히 일어나게 됩니다. 
+
+이렇게 해서 Session 내용중 일부인 Recv에 대한 내용만 작업해봤습니다. 
+
+앞으로는 나머지 Connect, Send 를 작업 하기도 하고 또 예전에 임시적으로 recvBuffer를 어설프게 만들어 놨던 것도 수정해줘야겠습니다.

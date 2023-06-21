@@ -445,7 +445,7 @@ SessionRef Service::CreateSession()
 	SessionRef session = _sessionFactory();
 	if (_iocpCore->Register(session) == false)
 		return nullptr;
-	return SessionRef();
+	return session;
 }
 
 void Service::AddSession(SessionRef session)

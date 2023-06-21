@@ -142,15 +142,11 @@ void Listener::ProcessAccept(AcceptEvent* acceptEvent)
 		return;
 	}
 
-	// 가져온 주소를 NetAddress 객체로 만들어 세팅합니다. 
+
 	session->SetNetAddress(NetAddress(sockAddress));
-
-	// 여기까지 왔으면 성공적으로 연결되었다고 볼 수 있습니다.
-	cout << "Client Connected!" << endl;
-
-	// TODO
+	session->ProcessConnect();
+	
 
 	RegisterAccept(acceptEvent);
 
-	// 위 내용들을 보면 한번 클라이언트가 접속하고 생성한 세션과 IocpEvent는 계속 재사용하고 있습니다. 
 }
