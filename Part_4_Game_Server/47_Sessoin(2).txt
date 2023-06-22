@@ -1,0 +1,424 @@
+
+
+
+            Session (2)
+
+
+이전시간부터 네트워크 통신에서 중요한 부분을 차지하는 Session 에 대한 작업을 시작했습니다. 제목에서도 알 수 있듯이 
+아직 충분하게 작업이 된것은 아닙니다. 
+
+Recv에 관련된 부분을 작업 했고 그것 마저도 char _recvBuffer[1000]; 이라고 하는 임시 버퍼에 담아서 패킷을 받고 있었습니다. 
+Recv가 동작하는 과정은 테스트 서버 에서 ServerService 를 만들고 ServerService의 Start함수를 호출하면서 ServerService안에 Listener가 생성이 됩니다. 
+동시에 Listener가 StartAccept 함수도 호출하고 또 연달아 RegisterAccept 로 IOCP에 AcceptEx를 예약합니다. 
+이후 테스트 코드에서는 5개의 스레드를 새로 만들면서 IocpCore->Dispatch로 IOCP에 등록된 일감이 완료될떄 마다처리해주도록 관찰시킵니다. 
+이 IocpCore::Dispatch에서 IocpObject::Dispatch까지 이어지는데 Listener에서는 ProcessAccept에서 session::ProcessConnect -> Session::RegisterRecv까지 
+이어집니다 이후에서는 각 비동기 IO를 호출하는 함수안에는 작업이 끝나자마자 다음 작업이 이어지도록 되어 있고 예약된 일감들을 5개의 스레드가 계속 처리해줍니다. 
+
+허술해도 전체적인 틀을 만들면서 연습하고 있습니다.
+
+이번 강의에서도 모양을 잡아보는 작업이 될겁니다. 이번에는 Send 를 할때 어떻게 해야할까를 알아볼겁니다.
+Send는 조금 다른게 Recv 처럼 Register를 걸어두고 기다리는게 아니라 서버쪽에서 보낼데이터가 있을때 바로 호출해주게 될겁니다.
+
+
+/*
+--------------------
+	Session 선언부
+--------------------
+*/
+
+class Service;
+
+/*
+이번 시간은 Send를 구현해 볼 것인데 Send는 Recv와 다른점이 있습니다. 
+Recv는 RegisterRecv를 걸어놓고 패킷이 들어오는걸 기다리는 방식이었다면 
+Send는 보낼 데이터가 준비 됐으면 기다리지 않고 바로 호출해주는 방식입니다. 
+*/
+
+class Session : public IocpObject
+{
+	friend class Listener;
+	friend class IocpCore;
+	friend class Service;
+public:
+	Session();
+	virtual ~Session();
+
+public:
+	/* 외부에서 사용 */
+	
+	// Send의 인자 BYTE는 unsigned_char를 바꿔말한겁니다. 
+	void				Send(BYTE* buffer, int32 len);
+	void				Disconnect(const WCHAR* cause);
+	
+	shared_ptr<Service> GetService() { return _service.lock(); }
+	void				SetService(shared_ptr<Service> service) { _service = service; }
+
+public:
+	/* 정보 관련 함수 */
+	void				SetNetAddress(NetAddress address) { _netAddress = address; }
+	NetAddress			GetAddress() { return _netAddress; }
+	SOCKET				GetSocket() { return _socket; }
+	
+	bool				IsConnected() { return _connected; }
+	SessionRef			GetSessionRef() { return static_pointer_cast<Session>(shared_from_this()); }
+	
+private:
+	/* 인터페이스 구현 */
+	virtual HANDLE		GetHandle() override;
+	virtual void		Dispatch(class IocpEvent* iocpEvent, int32 numOfBytes = 0) override;
+
+private:
+	/* 전송 관련 함수 */
+	void				RegisterConnect();
+	void				RegisterRecv();
+	void				RegisterSend(SendEvent* sendEvent);
+
+	void				ProcessConnect();
+	void				ProcessRecv(int32 numOfBytes);
+	void				ProcessSend(SendEvent* sendEvent, int32 numOfBytes);
+
+	void				HandleError(int32 errorCode);
+
+protected:
+	/* 컨텐츠 코드에서 오버로딩해 사용할 함수 */
+	
+	virtual void		OnConnected() {}
+	virtual int32		OnRecv(BYTE* buffer, int32 len) { return len; }
+	virtual void		OnSend(int32 len) { }
+	virtual void		OnDisconnected() { }
+
+public:
+	// TEMP : char 타입 배열을 BYTE 타입 배열로 수정했습니다.
+	BYTE				_recvBuffer[1000] = {};
+
+	// Send용으로 임시버퍼를 또 만들었습니다. 
+	/*
+	_sendBuffer 를 이렇게 만들면 문제가 Send를 중첩해서 호출할 때도 있을텐데 
+	그러면 보낼 데이터가 손실나지 않도록 해줘야 합니다. 
+	순환 버퍼(Circular Buffer) 방식으로는 Send를 할때 그 데이터를 _sendBuffer에 복사하고 
+	다음번 Send하는 스레드는 이전 데이터 뒤에 이어서 복사하는식으로 쭉이어지다가 
+	_sendBuffer를 다 사용하면 다시 가장앞으로 돌아와 데이터를 이어 복사하는 방식이 있습니다. 
+	이 방식의 문제는 한번에 너무 많은 Send를 호출하게 되면 각 호출마다 데이터를 복사하는 비용이 
+	많이 든다는 것입니다.
+	그래서 이번 시간에는 사용하지 않고 
+	IocpEvent 클래스->SencEvent 안에 직접 버퍼를 들고 있도록 합니다. 
+	*/
+	//char				_sendBuffer[1000] = {};
+	//int32				_sendLen = 0;
+
+private:
+	weak_ptr<Service>	_service;
+	SOCKET				_socket = INVALID_SOCKET;
+	NetAddress			_netAddress = {};
+	Atomic<bool>		_connected = false;
+
+private:
+	USE_LOCK;
+
+	/* 수신 관련 TODO */
+
+	/* 송신 관련 TODO */
+
+private:
+	/* IocpEvent 재사용 관련 */
+	RecvEvent			_recvEvent;
+};
+
+#include "pch.h"
+#include "Session.h"
+#include "SocketUtils.h"
+#include "Service.h"
+#include "IocpEvent.h"
+
+/*
+--------------------
+	Session 정의부 
+--------------------
+*/
+Session::Session()
+{
+	_socket = SocketUtils::CreateSocket();
+}
+
+Session::~Session()
+{
+	SocketUtils::Close(_socket);
+}
+
+void Session::Send(BYTE* buffer, int32 len)
+{
+	/*
+	생각할 문제 
+	1) 버퍼 관리?
+	2) sendEvent 관리? 단일? 여러개? WSASend 중첩?
+	- MMORPG를 가정했을때 Send를 한번에 한번씩 차례대로 호출하는게 아니라 몬스터 사냥, 귓속말 같은 
+	  한번 한번 일어날때 마다 중첩해서 Send를 호출해줘야 합니다. 그럴경우 _recvEvent 처럼 
+	  딱 하나만 만들어서 사용하다보면 중첩된 Send 호출을 감당할 수 없습니다. 
+	  지금은 임시로 Send함수 안에서 실시간 생성하는방식으로 구현해보겠습니다. 
+	*/
+
+	// TEMP
+	SendEvent* sendEvent = A_new<SendEvent>();
+	sendEvent->owner = shared_from_this();		// ADD_REF
+	// 임시로 SendEvent가 버퍼를 들고 있을것이고 거기에 보낼데이터를 저장해줍니다. 
+	sendEvent->buffer.resize(len);
+	::memcpy(sendEvent->buffer.data(), buffer, len);
+
+	/*
+	항상 Register, Process 순으로 진행했었습니다.보낼 버퍼와 연결된 sendEvent 를 인자로 받습니다.
+	Send의 경우 채팅, 아이템 획득, 경험치 획득 같이 주기적으로 호출되는게 아니라 특정상황에 한번에 여러
+	스레드로 호출될 수 있습니다. 
+	그럴때 RegisterSend 안의 WSASend 함수가 스레드 환경에서 안전한지를 알아야 하는데 공식문서를 보면 
+	스레드에서 안전이 보장되어 있지 않다고 합니다. 그러면 우리가 직접 순서를 보장해줘야 합니다. 
+	*/
+	WRITE_LOCK;
+	RegisterSend(sendEvent);
+
+}
+
+void Session::Disconnect(const WCHAR* cause)
+{
+	if (_connected.exchange(false) == false)
+		return;
+
+	// TEMP
+	wcout << "Disconnet : " << cause << endl;
+
+	OnDisconnected();	// 컨텐츠 코드에서 오버로딩
+
+	SocketUtils::Close(_socket);	// 소켓도 닫습니다.
+	GetService()->ReleaseSession(GetSessionRef());	// Release Ref
+
+}
+
+HANDLE Session::GetHandle()
+{
+	return reinterpret_cast<HANDLE>(_socket);
+}
+
+void Session::Dispatch(IocpEvent* iocpEvent, int32 numOfBytes)
+{
+	switch (iocpEvent->eventType)
+	{
+	case EventType::Connect:
+		ProcessConnect();
+		break;
+	case EventType::Recv:
+		ProcessRecv(numOfBytes);
+		break;
+	case EventType::Send:	// 지금은 SendEvent를 인자로 넘겨줘야합니다.
+		ProcessSend(static_cast<SendEvent*>(iocpEvent), numOfBytes);
+		break;
+	}
+}
+
+void Session::RegisterConnect()
+{
+}
+
+void Session::RegisterRecv()
+{
+	// 접속여부 부터 체크
+	if (IsConnected() == false)
+		return;
+
+	WSABUF wsaBuf;
+	// _recvBuffer는 아직 임시로 사용하는 중이고 나중에 수정할 예정
+	wsaBuf.buf = reinterpret_cast<char*>(_recvBuffer);	
+	wsaBuf.len = len32(_recvBuffer);
+
+	DWORD numOfBytes = 0;
+	DWORD flags = 0;
+
+	// owner를 설정하는것으로 사실상 owner의 Ref Count를 1늘린셈
+	_recvEvent.Init();
+	_recvEvent.owner = shared_from_this();
+
+
+	if (SOCKET_ERROR == ::WSARecv(_socket, &wsaBuf, 1, OUT & numOfBytes, OUT & flags, &_recvEvent, nullptr))
+	{
+		// WSARecv 가 진짜 실패했는지를 체크
+		int32 errorCode = WSAGetLastError();
+		if (errorCode != WSA_IO_PENDING)
+		{
+			HandleError(errorCode); 
+			_recvEvent.owner = nullptr;
+		}	}
+}
+
+void Session::RegisterSend(SendEvent* sendEvent)
+{
+	/*
+	Send 함수에서 락을 걸어주었습니다. 이제 순서대로 WSASend가 호출이 될 텐데 아무리 많은 
+	스레드에서 WSASend를 시도하더라도 락을 통해 먼저 시도한 순서대로 예약을 하게 됩니다. 
+	그 다음 IocpCore::Dispatch 안에 GetQueuedCompletionStatus 를 호출해줄텐데 
+	이부분에서는 순서보장을 할 수 없습니다. IocpCore 에서는 따로 락을 사용하지 않기 때문입니다. 
+	그래서 데이터를 보내는 순서가 중요한 경우는 문제가 될 수 있습니다.
+
+	또 한가지 WSASend를 호출한 다음 Pending 상황이 되었다는것은 커널쪽 SendBuffer가 꽉차 있다는 이야기입니다.
+	그 상황에서 무작정 다음 WSASend를 계속 밀어넣는게 좋은지는 생각해 봐야 합니다. 
+	우리가 WSASend를 호출할때 WSABUF의 내용물로 buf와 len을 넘겨주는데 Pending 상황에서는 
+	지금당장 커널쪽으로 이 WSABUF 를 넘겨줄 수 없다고 해도 언젠가는 커널쪽 버퍼로 복사가 이뤄질겁니다.
+	고급 내용이라서 자세히는 알아보지 않을테지만 이럴때 WSABUF 를 대상으로 페이지락 이라는것을 건다고 합니다.
+
+	그리고 WSASend를 호출할때 작은데이터를 각각 여러번 호출하는것보다 데이터를 한번에 모아서 
+	WSASend를 호출하는게 좋습니다. 인자에서도 WSABUF 와 이 WSABUF가 몇개인지를 받습니다.
+	즉, 모아서 보낼수 있도록 되어 있습니다. 
+
+	현재 작업중인 코드는 이러한 부분들이 아쉽습니다. 순서보장이 완전히 되는것도 아니고 
+	자잘한 데이터라도 매번 RegisterSend를 호출하게 되는데
+	그러지 말고 보낼 데이터를 멤버 변수에 저장하다가 일정 크기가 되면 한번에 보낼 수 있도록 해주면 
+	좀 더 성능상으로 유리하다고 할 수 있습니다. 
+	*/
+
+	// 접속여부 부터 체크
+	if (IsConnected() == false)
+		return;
+
+	WSABUF wsaBuf;
+	wsaBuf.buf = (char*)sendEvent->buffer.data();
+	wsaBuf.len = (ULONG)sendEvent->buffer.size();
+
+	DWORD numOfBytes = 0;
+	if (SOCKET_ERROR == ::WSASend(_socket, &wsaBuf, 1, OUT & numOfBytes, 0, sendEvent, nullptr))
+	{
+		// 진짜 실패인지 PENDING 상태인지 체크 
+		int32 errorCode = WSAGetLastError();
+		if (errorCode != WSA_IO_PENDING)
+		{
+			HandleError(errorCode);
+			sendEvent->owner = nullptr;
+			//실시간으로 생성했던 sendEvent는 일이 끝났으니 삭제
+			A_delete(sendEvent);
+		}
+	}
+	// 이후 IocpCore->Dispatch 를 통해 ProcessSend로 넘어갈것입니다.
+	// 그런데 여기서도 마찬가지로 Session가 멤버 변수로서 SendEvent를 들고 있는게 아니기 때문에 
+	// 다시 인자로 넘겨주도록 해줘야 합니다. 
+	
+}
+
+void Session::ProcessConnect()
+{
+	_connected.store(true);
+
+	// 세션 등록 : 이코드에 와서야 서비스에 세션을 실제로 연결해주는겁니다. 
+	GetService()->AddSession(GetSessionRef());
+
+	// 컨텐츠 코드에서 오버로딩할 예정
+	OnConnected();
+		
+	// 수신 등록 : 연결 후 여기서 부터 Recv를 Iocp에 등록을 해줍니다. 
+	RegisterRecv();
+}
+
+void Session::ProcessRecv(int32 numOfBytes)
+{
+	// 더이상 WSARecv 가 예약이 걸린 상태가 아니니 이 세션의 참조카운트를 줄여줍니다. 
+	_recvEvent.owner = nullptr;
+
+	if (numOfBytes == 0)
+	{
+		// Dispatch를 통과한 상태에서 받은 데이터가 0이라면 연결이 끊겼다는 이야기
+		Disconnect(L"Recv 0");
+		return;
+	}
+
+	// TODO : 이전에 누락한 부분인데 로그찍는 코드는 생략하고 OnRecv라는 컨텐츠 쪽에서 오버로딩해 사용할 함수를 호출합니다. 
+	// cout << "Recv Data Len = " << numOfBytes << endl;
+	OnRecv(_recvBuffer, numOfBytes);
+
+	// 다음번 수신을 위해 다시 Register를 겁니다.
+	RegisterRecv();
+}
+
+void Session::ProcessSend(SendEvent* sendEvent, int32 numOfBytes)
+{
+	// ProcessRecv와 마찬가지로 성공했다면 이 세션의 참조카운트를 줄여줍니다.
+	sendEvent->owner = nullptr;
+	A_delete(sendEvent);
+
+	if (numOfBytes == 0)
+	{
+		// Dispatch를 통과한 상태에서 보낸 데이터가 0이라면 연결이 끊겼다는 이야기
+		Disconnect(L"Recv 0");
+		return;
+	}
+
+	// 컨텐츠 코드에서 오버로딩
+	OnSend(numOfBytes);
+
+}
+
+void Session::HandleError(int32 errorCode)
+{
+	switch (errorCode)
+	{
+	case WSAECONNRESET:
+	case WSAECONNABORTED:
+		Disconnect(L"HandleError");
+		break;
+	default:
+		// TODO : Log
+		cout << "Handle Error : " << errorCode << endl;
+		break;
+	}
+}
+
+
+Send를 만들었으면 이제 이건 클라이언트 쪽에서도 사용할 수 있습니다. 
+
+
+/*
+Session 클래스의 멤버 함수중 Process류 함수에서 호출하던 오버로딩용 함수들을 에코서버처럼 동작하게
+만들어 봤습니다. 
+*/
+class GameSession : public Session
+{
+public:
+	virtual int32 OnRecv(BYTE* buffer, int32 len) override
+	{
+		// Echo Server 처럼 동작하게 만들어 줘 보겠습니다.
+		cout << "OnRecv Len = " << len << endl;
+		Send(buffer, len);
+		return len;
+	}
+
+	virtual void OnSend(int32 len) override
+	{
+		cout << "OnSend Len = " << len << endl;
+	}
+};
+
+int main()
+{	
+	// Session 대신 GameSession을 사용했습니다. 
+	ServerServiceRef service = MakeShared<ServerService>(
+		NetAddress(L"127.0.0.1", 7777),
+		 MakeShared<IocpCore>(),
+		MakeShared<GameSession>,
+		100);
+
+	// service를 만들었으면 Start를합니다. 여기서 해주는것은 Listener 객체를 만들고 
+	// 그 Listener 의 멤버 함수인 StartAccept를 자기자신을 넘겨주면서 AccpetEx를 호출합니다. 
+	ASSERT_CRASH(service->Start());
+
+	for (int32 i = 0; i < 5; i++)
+	{
+		GThreadManager->Launch([=]()
+			{
+				while (true)
+				{
+					service->GetIocpCore()->Dispatch();
+				}
+			});
+	}
+
+	GThreadManager->Join();
+}
+
+간단하게 오늘 작업했던 내용을 테스트 하는 코드입니다. 사실 이번 내용들은 중간중간 부족한 부분이 많습니다. 
+일단은 Send를 하는 틀을 만드는 작업이었다고 생각합니다. 
+
+여기서 잊지 않으면 좋은것은 추가한 내용들에 참조카운트가 잘 동작하는지 테스트 하면 좋습니다. 방법은 간단한데 테스트 실행을 하는중에 더미 클라이언트를 
+강제 종료하면 Session의 소멸자에 중단점이 걸리는지를 확인하는것이었습니다.

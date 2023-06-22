@@ -13,17 +13,13 @@
 class Service;
 
 /*
-클라이언트와 서버가 connect, accept 를 통과해 연결된 다음부터는 
-Session이 중요한 역할을 하게 되는데 
-Recv를 하면서 패킷을 받기시작하는것부터 
-서버에서 클라이언트로 다시 데이터를 전송하는 Send 등의 기능을 
-이번 시간에 구현해볼것입니다. 
+이번 시간은 Send를 구현해 볼 것인데 Send는 Recv와 다른점이 있습니다. 
+Recv는 RegisterRecv를 걸어놓고 패킷이 들어오는걸 기다리는 방식이었다면 
+Send는 보낼 데이터가 준비 됐으면 기다리지 않고 바로 호출해주는 방식입니다. 
 */
 
 class Session : public IocpObject
 {
-	// 앞으로 모든 함수들을 public으로 열지는 않을것인데 
-	// 그래도 외부에서 데이터를 주고받아야하는 클래스들을 열어줬습니다. 
 	friend class Listener;
 	friend class IocpCore;
 	friend class Service;
@@ -32,7 +28,10 @@ public:
 	virtual ~Session();
 
 public:
-	/* 연결 관련 함수 */
+	/* 외부에서 사용 */
+	
+	// Send의 인자 BYTE는 unsigned_char를 바꿔말한겁니다. 
+	void				Send(BYTE* buffer, int32 len);
 	void				Disconnect(const WCHAR* cause);
 	
 	shared_ptr<Service> GetService() { return _service.lock(); }
@@ -44,55 +43,60 @@ public:
 	NetAddress			GetAddress() { return _netAddress; }
 	SOCKET				GetSocket() { return _socket; }
 	
-	// 이전에 누락했던 연결여부를 확인하는 함수
-	// 이 함수의 반환값을 통해 계속해서 패킷을 Recv할지를 판단
 	bool				IsConnected() { return _connected; }
-	// shared_ptr로 자기자신을 반환하는 헬퍼 함수 
 	SessionRef			GetSessionRef() { return static_pointer_cast<Session>(shared_from_this()); }
 	
 private:
 	/* 인터페이스 구현 */
-	// 컨텐츠 단에서 인터페이스 구현쪽 함수에 접근할 필요는 없으니 private로 막았습니다. 
 	virtual HANDLE		GetHandle() override;
 	virtual void		Dispatch(class IocpEvent* iocpEvent, int32 numOfBytes = 0) override;
 
 private:
 	/* 전송 관련 함수 */
-	// Listener 에서와 같은 형태로 다른 비동기 IO 함수들을 작업하겠습니다. 
-	// 현재 프로젝트에서는 RegisterConnect 는 별의미 없이 곧바로 Connect를 호출하지만 
-	// 이후 컨텐츠 단에서 사용할지도 모르기때문에 만들었습니다. 
 	void				RegisterConnect();
 	void				RegisterRecv();
-	void				RegisterSend();
+	void				RegisterSend(SendEvent* sendEvent);
 
 	void				ProcessConnect();
 	void				ProcessRecv(int32 numOfBytes);
-	void				ProcessSend(int32 numOfBytes);
+	void				ProcessSend(SendEvent* sendEvent, int32 numOfBytes);
 
 	void				HandleError(int32 errorCode);
 
 protected:
 	/* 컨텐츠 코드에서 오버로딩해 사용할 함수 */
 	
-	// 접속, 끊김, 받고, 보내고에 대한 행동들을 함수로 호출할 준비를 해두고 나중에 필요할때 오버로딩해서 사용합니다.
 	virtual void		OnConnected() {}
 	virtual int32		OnRecv(BYTE* buffer, int32 len) { return len; }
 	virtual void		OnSend(int32 len) { }
 	virtual void		OnDisconnected() { }
 
 public:
-	char				_recvBuffer[1000] = {};
+	// TEMP
+	BYTE				_recvBuffer[1000] = {};
+
+	// Send용으로 임시버퍼를 또 만들었습니다. 
+	/*
+	_sendBuffer 를 이렇게 만들면 문제가 Send를 중첩해서 호출할 때도 있을텐데 
+	그러면 보낼 데이터가 손실나지 않도록 해줘야 합니다. 
+	순환 버퍼(Circular Buffer) 방식으로는 Send를 할때 그 데이터를 _sendBuffer에 복사하고 
+	다음번 Send하는 스레드는 이전 데이터 뒤에 이어서 복사하는식으로 쭉이어지다가 
+	_sendBuffer를 다 사용하면 다시 가장앞으로 돌아와 데이터를 이어 복사하는 방식이 있습니다. 
+	이 방식의 문제는 한번에 너무 많은 Send를 호출하게 되면 각 호출마다 데이터를 복사하는 비용이 
+	많이 든다는 것입니다.
+	그래서 이번 시간에는 사용하지 않고 
+	IocpEvent 클래스->SencEvent 안에 직접 버퍼를 들고 있도록 합니다. 
+	*/
+	//char				_sendBuffer[1000] = {};
+	//int32				_sendLen = 0;
 
 private:
-	// session 내부에서도 자신을 물고있는 Service를 알아야 접속하거나 끊을수 있습니다. 
-	// 순환 문제 때문에 weak_ptr로 만듭니다. 
 	weak_ptr<Service>	_service;
 	SOCKET				_socket = INVALID_SOCKET;
 	NetAddress			_netAddress = {};
 	Atomic<bool>		_connected = false;
 
 private:
-	// 멀티스레드 환경에서 사용할것이기 때문에 Lock도 사용합니다. 
 	USE_LOCK;
 
 	/* 수신 관련 TODO */
