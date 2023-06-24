@@ -5,6 +5,7 @@ class Session;
 enum class EventType : uint8
 {
 	Connect,
+	Disconnect,
 	Accept,
 	//PreRecv, // 0Byte Recv라는 고급 기술에서 사용되는 타입
 	Recv,
@@ -50,6 +51,19 @@ class ConnectEvent : public IocpEvent
 public:
 	ConnectEvent() : IocpEvent(EventType::Connect) { }
 };
+
+/*
+----------------
+	DisconnectEvent
+----------------
+*/
+// 아주 간단하게 EventType을 Connect로 들고 있게 합니다. 
+class DisconnectEvent : public IocpEvent
+{
+public:
+	DisconnectEvent() : IocpEvent(EventType::Disconnect) { }
+};
+
 
 /*
 ----------------

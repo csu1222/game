@@ -69,7 +69,19 @@ ClientService::ClientService(NetAddress targetAddress, IocpCoreRef core, Session
 
 bool ClientService::Start()
 {
-	//TODO
+	// ClientService가 시작할 수 있는지 체크 
+	if (CanStart() == false)
+		return false;
+
+	// Service 생성때 정해놨던 최대 동시접속수인 _mexSessionCount만큼 세션을 생성합니다. 
+	const int32 sessionCount = GetMaxSessionCount();
+	for (int32 i = 0; i < sessionCount; i++)
+	{
+		SessionRef session = CreateSession();
+		if (session->Connect() == false)
+			return false;
+	}
+
 	return true;
 }
 

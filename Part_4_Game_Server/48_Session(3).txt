@@ -1,0 +1,498 @@
+
+
+
+        Session (3)
+
+
+세션에 대한 세번째 시간입니다.
+이번에는 연결하는 부분 Connect와 Disconnect 부분을 수정해보겠습니다. 
+
+
+*** 
+- Connet 
+먼저 Connect 부터 작업 해보겠습니다. 
+
+/*
+--------------------
+	Session 선언부
+--------------------
+*/
+
+class Service;
+
+/*
+* 이번시간은 연결하는 부분 Connect와 DisConnect를 수정해보겠습니다. 
+*/
+
+class Session : public IocpObject
+{
+	friend class Listener;
+	friend class IocpCore;
+	friend class Service;
+public:
+	Session();
+	virtual ~Session();
+
+public:
+	/* 외부에서 사용 */
+	void				Send(BYTE* buffer, int32 len);
+
+	// Connect 함수 추가 
+	bool				Connect();
+	void				Disconnect(const WCHAR* cause);
+	
+	shared_ptr<Service> GetService() { return _service.lock(); }
+	void				SetService(shared_ptr<Service> service) { _service = service; }
+
+public:
+	/* 정보 관련 함수 */
+	void				SetNetAddress(NetAddress address) { _netAddress = address; }
+	NetAddress			GetAddress() { return _netAddress; }
+	SOCKET				GetSocket() { return _socket; }
+	
+	bool				IsConnected() { return _connected; }
+	SessionRef			GetSessionRef() { return static_pointer_cast<Session>(shared_from_this()); }
+	
+private:
+	/* 인터페이스 구현 */
+	virtual HANDLE		GetHandle() override;
+	virtual void		Dispatch(class IocpEvent* iocpEvent, int32 numOfBytes = 0) override;
+
+private:
+	/* 전송 관련 함수 */
+	bool				RegisterConnect();
+	void				RegisterRecv();
+	void				RegisterSend(SendEvent* sendEvent);
+
+	void				ProcessConnect();
+	void				ProcessRecv(int32 numOfBytes);
+	void				ProcessSend(SendEvent* sendEvent, int32 numOfBytes);
+
+	void				HandleError(int32 errorCode);
+
+protected:
+	/* 컨텐츠 코드에서 오버라이딩 사용할 함수 */
+	
+	virtual void		OnConnected() {}
+	virtual int32		OnRecv(BYTE* buffer, int32 len) { return len; }
+	virtual void		OnSend(int32 len) { }
+	virtual void		OnDisconnected() { }
+
+public:
+	// TEMP
+	BYTE				_recvBuffer[1000] = {};
+
+
+private:
+	weak_ptr<Service>	_service;
+	SOCKET				_socket = INVALID_SOCKET;
+	NetAddress			_netAddress = {};
+	Atomic<bool>		_connected = false;
+
+private:
+	USE_LOCK;
+
+	/* 수신 관련 TODO */
+
+	/* 송신 관련 TODO */
+
+private:
+	/* IocpEvent 재사용 관련 */
+
+	// Connect는 IocpEvent를 재사용할 수 있습니다.
+	ConnectEvent		_connectEvent;
+	RecvEvent			_recvEvent;
+};
+
+추가된 부분은 Connect 함수와 재사용을 염두하고 만든 멤버 변수 _connectEvent입니다. 
+
+
+bool Session::Connect()
+{
+	/*
+	Connect 말 그대로 연결을 하는 함수 입니다. 서버 입장에서는 Accept를 기다리고 있다가 
+	접속한 클라를 상대로 통신을 하면 되기 때문에 사실 Connect가 왜 필요한지 감이 안 올 수 있는데
+	이전에 한번 언급했던 적이 있습니다. 서버도 단일서버로 동작할때도 있고 다중서버로 역할을 나눠서 
+	동작하는 경우도 있는데 다중 서버일때 서버끼리 연결을 할때 이 함수가 필요해집니다.
+
+	*/
+	return RegisterConnect();
+}
+
+bool Session::RegisterConnect()
+{
+	// 이미 연결된 상태인지 체크 
+	if (IsConnected())
+		return false;
+
+	// 현재 이 세션이 속한 서비스의 타입이 클라이언트인지를 체크합니다. 
+	// 클라이언트타입이 다른 서버에 접속하고 서버 타입은 상대방이 나에게 연결을 시도하는것입니다. 
+	if (GetService()->GetServiceType() != ServiceType::Client)
+		return false;
+
+	// 소켓의 옵션들을 조정해줍니다. 
+	if (SocketUtils::SetReuseAddress(_socket, true) == false)
+		return false;
+	
+	// Listener쪽 소켓 옵션을 설정할때는 하지 않았는데 클라입장에서는 아무 Address, Port 를 
+	// 사용하도록 했습니다. 
+	if (SocketUtils::BindAnyAddress(_socket, 0/*0을 주면 남는 포트 아무거나 연결*/) == false)
+		return false;
+	
+	// Connect는 동시에 여러번 일어나는 작업이 아니기 때문에 직접 멤버 변수로 들고 있어도 됩니다.
+	_connectEvent.Init();
+	_connectEvent.owner = shared_from_this();	// ADD_REF
+
+	// ConnectEx 에 필요한 인자들
+	DWORD numOfBytes = 0;	// 접속과 동시에 보낸 데이터의 크기를 받을것입니다.
+	SOCKADDR_IN sockAddr = GetService()->GetNetAddress().GetSockAddr(); // 내가 어디로 연결할지
+
+	if (SOCKET_ERROR == SocketUtils::ConnectEx(_socket, reinterpret_cast<SOCKADDR*>(&sockAddr), sizeof(sockAddr), nullptr, 0, &numOfBytes, &_connectEvent))
+	{
+		// Pending상태인지 까지 체크
+		int32 errorCode = ::WSAGetLastError();
+		if (errorCode != WSA_IO_PENDING)
+		{
+			// Pending 상태가 아니라면 진짜로 실패
+			_connectEvent.owner = nullptr;	// RELEASE_REF
+			return false;
+		}
+		// Pending 상태라면 좀 더 대기
+	}
+	return true;
+}
+
+
+void Session::ProcessConnect()
+{
+	/*
+	이 ProcessConnect 함수는 두가지 용도로 사용하게 됩니다. 
+	Listener::ProcessAccept 함수에서 호출되는 이 서버에 클라가 접속할때 도 사용하고 
+	이 서버가 클라이언트 서버로서 다른 서버에 접속하려고 할때도 사용됩니다. 
+	*/
+
+	_connectEvent.owner = nullptr;	// RELEASE_REF
+
+	_connected.store(true);
+
+	// 세션 등록 : 이코드에 와서야 서비스에 세션을 실제로 연결해주는겁니다. 
+	GetService()->AddSession(GetSessionRef());
+
+	// 컨텐츠 코드에서 오버라이딩할 예정
+	OnConnected();
+		
+	// 수신 등록 : 연결 후 여기서 부터 Recv를 Iocp에 등록을 해줍니다. 
+	RegisterRecv();
+}
+
+컨텐츠에 사용되는 세션에서 Connect 함수를 호출하게되면 
+Session에서 Connect() -> RegisterConnect()
+ServerService::Start() 후 워커 스레드를 만들어 Dispatch() -> ProcessConnect() 
+
+이런 흐름으로 진행이 됩니다. 벌써 Accept, Recv, Send 에 이어 네번째 비동기 IO 함수이다 보니 진행 구조가 비슷하다는걸 알 수 있습니다. 
+
+
+***
+- Disconnect
+이제 다음 Disconnect 를 작업할 차례입니다. 
+그런데 이전 IocpEvent를 작업할때는 Disconnect를 고려하지 않아서 EventType 에도 없고 하위 클래스로도 Disconnect가 없었습니다. 그래서 추가하고 시작합니다.
+
+enum class EventType : uint8
+{
+	Connect,
+	Disconnect,
+	Accept,
+	//PreRecv, // 0Byte Recv라는 고급 기술에서 사용되는 타입
+	Recv,
+	Send,
+};
+/*
+----------------
+	DisconnectEvent
+----------------
+*/
+// 아주 간단하게 EventType을 Connect로 들고 있게 합니다. 
+class DisconnectEvent : public IocpEvent
+{
+public:
+	DisconnectEvent() : IocpEvent(EventType::Disconnect) { }
+};
+
+그리고 또 까먹지 말고 Session::Dispatch() 로 가서 Disconnect 케이스도 추가합니다.
+
+
+void Session::Dispatch(IocpEvent* iocpEvent, int32 numOfBytes)
+{
+	switch (iocpEvent->eventType)
+	{
+	case EventType::Connect:
+		ProcessConnect();
+		break;
+	case EventType::Disconnect:
+		ProcessDisconnect();
+	case EventType::Recv:
+		ProcessRecv(numOfBytes);
+		break;
+	case EventType::Send:	// 지금은 SendEvent를 인자로 넘겨줘야합니다.
+		ProcessSend(static_cast<SendEvent*>(iocpEvent), numOfBytes);
+		break;
+	}
+}
+
+그러고 보면 Register, Process 함수도 안만들었습니다. 
+
+private:
+	/* 전송 관련 함수 */
+	bool				RegisterConnect();
+	bool				RegisterDisconnect();   // 추가
+	void				RegisterRecv();
+	void				RegisterSend(SendEvent* sendEvent);
+
+	void				ProcessConnect();
+	void				ProcessDisconnect();    // 추가
+	void				ProcessRecv(int32 numOfBytes);
+	void				ProcessSend(SendEvent* sendEvent, int32 numOfBytes);
+
+	void				HandleError(int32 errorCode);
+
+그리고 다음으로 RegisterDisconnect를 작업하려다 보니 DisconnectEvent 가 필요해졌는데 Connect때와 마찬가지로 새로 생성하고 삭제하는 방식으로 해도 되겠지만
+괜한 성능 낭비가 될 수도 있으니 Session에서 직접 멤버 변수로 들고 재사용할 수 있도록 했습니다.
+
+private:
+	/* IocpEvent 재사용 관련 */
+
+	ConnectEvent		_connectEvent;
+	// DisconnetEvent도 재사용해도 될것 같습니다. 
+	RecvEvent			_recvEvent;
+
+
+이제 함수들의 정의부를 보겠습니다.
+흐름상으로 보면 세션에서 연결을 접속할 때가 되면 Disconnect() 함수를 호출하게 됩니다. 
+
+void Session::Disconnect(const WCHAR* cause)
+{
+	/*
+	소켓을 닫을때 그냥 Session이 들고 있는 소켓을 강제로 닫아주고 있습니다. 
+	꼭 이게 문제라기 보다는 이렇게 소켓을 닫아줘도 연결이 끊기기는 합니다.
+	실제로도 이런방식으로 연결을 끊는 경우도 있기는한데 
+	우리가 SocketUtils 에서 런타임에 받아줬던 함수들중 DisconnectEx 라는것도 있습니다.
+	비동기 IO 함수중 하나인데 이걸 사용하면 호출하면 IOCP에 예약을 해놓고 
+	처리할 준비가 되면 쓰레드에서 처리해주는 방식입니다. 
+	
+	그러면 DisconnectEx를 사용하는 장점이 무엇인가하면 
+	지금은 Session 생성자, 소멸자, 그리고 여기 Disconnect에서 소켓을 만들고 닫아주고 하는데
+	사실 이 작업이 부담이 많이 가는 작업이라고 합니다. 그런만큼 한번 만든 소켓을 재사용한다면 
+	성능상 더욱 이득이 될겁니다. 
+	성능상으로도 좋고 어짜피 Iocp를 이용하고 있는데 굳이 DisconnectEx를 사용하지 않을 이유도 
+	없으니깐 이 방법으로 배워보겠습니다. 
+	*/
+	
+	// _connected의 값을 false 로 넣어주는데 이미 값이 false였으면 반환도 false가 반환됩니다.
+	// 즉, 이 Disconnect 함수를 한번만 호출하도록 한것입니다. 
+	if (_connected.exchange(false) == false)
+		return;
+
+	// TEMP
+	wcout << "Disconnet : " << cause << endl;
+
+	OnDisconnected();	// 컨텐츠 코드에서 오버라이딩
+
+	// SocketUtils::Close(_socket);	// 소켓도 닫습니다.
+	GetService()->ReleaseSession(GetSessionRef());	// Release Ref
+	
+	// SocketUtils::Close 대신 RegisterDisconnect 를 호출합니다. 
+	RegisterDisconnect();
+}
+
+이후 이어지는 RegisterDisconnect 입니다. 
+
+bool Session::RegisterDisconnect()
+{
+	// 반복되는 구조입니다.
+	// _disconnectEvent 초기화, 자신을 등록해 ADD_REF
+	_disconnectEvent.Init();
+	_disconnectEvent.owner = shared_from_this();	// ADD_REF
+
+	/*
+	DisConnectEx 함수의 인자입니다. 
+	1) 소켓
+	2) OVERLAPPED 의 포인터 우리는 IocpEvent 객체를 주면됩니다.
+	3) 함수 호출에 대한 플래그 입니다. 0을 주면 아무런 플래그가 설정되지 않고 
+	   지금 처럼 TF_REUSE_SOCKET 을 주면 DisconnectEx 호출 후 다시 AcceptEx나 ConnectEx에서
+	   이 소켓을 사용할 수 있습니다.
+	4) reserved 를 줘야한다고 하는데 꼭 0을 줘야합니다. 다른 값을 주면 잘못된 인자를 줬다는 에러가 뜹니다.
+	*/
+	if (false == ::SocketUtils::DisconnectEx(_socket, &_disconnectEvent, TF_REUSE_SOCKET, 0))
+	{
+		int32 errorCode = ::WSAGetLastError();
+		if (errorCode != WSA_IO_PENDING)
+		{
+			_disconnectEvent.owner = nullptr;	// RELEASE_REF
+			return false;
+		}
+	}
+
+	return true;
+}
+
+여기까지 세션에서 Disconnect를 호출하면 DisconnectEx()를 IOCP에 예약합니다. 
+
+이후 워커스레드에서 Dispatch를 통해 처리가능한 IocpEvent 들이 있다면 처리하면서 해당 IocpEvent의 owner 인 세션도 Dispatch를 합니다. 
+
+_disconnectEvent 가 Dispatch로 들어오면 ProcessDisconnect() 로 연결됩니다. 
+
+void Session::ProcessDisconnect()
+{
+	// 여기서는 접속 종료후에 할일인데 사실 연결이 끊긴뒤에는 딱히 할 일이없고 
+	// 세션의 참조카운트만 줄이고 마치겠습니다. 
+	_disconnectEvent.owner = nullptr;	// RELEASE_REF
+}
+
+
+*** 
+-ClientService
+
+추가로 이전에 Service 코드들을 작업하면서 부모클래스인 Service 와 ServerService는 작업 했지만 ClientService는 미뤄뒀었습니다. 
+그부분을 지금 작업해보겠습니다. 
+
+/*
+--------------------------
+	ClientService 선언부
+--------------------------
+*/
+
+class ClientService : public Service
+{
+public:
+	ClientService(NetAddress targetAddress, IocpCoreRef core, SessionFactory factory, int32 maxSessionCount = 1);
+	virtual ~ClientService() {}
+
+	virtual bool Start() override;
+};
+이런 형태였고 이중 Start 함수의 정의부를 비워놨었습니다. 
+
+bool ClientService::Start()
+{
+	// ClientService가 시작할 수 있는지 체크 
+	if (CanStart() == false)
+		return false;
+
+	// Service 생성때 정해놨던 최대 동시접속수인 _mexSessionCount만큼 세션을 생성합니다. 
+	const int32 sessionCount = GetMaxSessionCount();
+	for (int32 i = 0; i < sessionCount; i++)
+	{
+		SessionRef session = CreateSession();
+		if (session->Connect() == false)
+			return false;
+	}
+
+	return true;
+}
+
+ServerService 에서는 _listener라는 세션 하나만 들고 있었는데 ClientService에서는 최대 접속수인 _maxSessionCount 만큼 세션을 만드는데 
+CreateSession() 함수를 통해 세션을 만듬과 동시에 session->SetService(shared_from_this()); 로 자신의 서비스가 누군지를 지정하고 
+_iocpCore->Register(session) 을 통해 만들자 마자 IOCP에 등록을 합니다. 
+
+
+*** 
+- 테스트 
+우리가 테스트를 할때 DummyClient의 코드는 따로 클래스로 정리하지않은 코드들로 접속과 Send를 하고 있었는데 
+지금껏 작업했던 Network 라이브러리를 사용해서 테스트 해보겠습니다. 
+
+- DummyClient 
+
+#include "ThreadManager.h"
+#include "Service.h"
+#include "Session.h"
+
+// TEMP : 임시로 보낼 데이터 버퍼를 만들었습니다. 
+char sendBuffer[] = "Hello World!";
+
+
+class ServerSession : public Session
+{
+public:
+	virtual void OnConnected() override
+	{
+		// 연결할때 Send를 한번 합니다. 
+		cout << "Connected To Server" << endl;
+		Send((BYTE*)sendBuffer, sizeof(sendBuffer));
+	}
+	
+	virtual int32 OnRecv(BYTE* buffer, int32 len) override
+	{
+		cout << "OnRecv Len = " << len << endl;
+
+		// 1초에 한번 전송하기위함 
+		this_thread::sleep_for(1s);
+
+		Send((BYTE*)sendBuffer, sizeof(sendBuffer));
+		return len;
+	}
+
+	virtual void OnSend(int32 len) override
+	{
+		cout << "OnSend Len = " << len << endl;
+	}
+
+	virtual void OnDisconnected() override
+	{
+		cout << "Disconnected" << endl;
+	}
+};
+
+
+/*
+ServerSession 코드를 위와 같이 만들고 난 후 흐름이 어떻게 되냐면 
+클라쪽에서 Connect, 서버쪽에서 Accept를 하고 난 후 
+클라쪽 Connect와 동시에 "Hello World!" 를 Send 합니다. 이후 서버쪽에서 
+OnRecv에서 패킷을 받은후 그대로 다시 Send로 보냅니다. 
+클라의 OnRecv도 마찬가지로 Recv,Send 를 하면서 서버 클라간 패킷을 주고받게됩니다.
+*/
+
+int main()
+{
+	// 서버가 먼저 실행될때 까지 1초를 기다립니다. 
+	this_thread::sleep_for(1s);
+
+	ClientServiceRef service = MakeShared<ClientService>(
+		NetAddress(L"127.0.0.1", 7777),
+		MakeShared<IocpCore>(),
+		MakeShared<ServerSession>,
+		1);
+
+	ASSERT_CRASH(service->Start());
+
+
+	for (int32 i = 0; i < 2; i++)
+	{
+		GThreadManager->Launch([=]()
+			{
+				while (true)
+				{
+					service->GetIocpCore()->Dispatch();
+				}
+			});
+	}
+
+	GThreadManager->Join();
+}
+
+여기서 저번에 Types.h 에 자주 사용할 매크로를 추가할때 ClientServiceRef는 추가 하지 않았습니다. 이번기회에 추가해줍니다. 
+- Type.h
+
+// shared_ptr 을 간편히 
+using IocpCoreRef = std::shared_ptr<class IocpCore>;
+using IocpObjectRef = std::shared_ptr<class IocpObject>;
+using SessionRef = std::shared_ptr<class Session>;
+using ListenerRef = std::shared_ptr<class Listener>;
+using ServerServiceRef = std::shared_ptr<class ServerService>;
+using ClientServiceRef = std::shared_ptr<class ClientService>;
+
+
+테스트 준비가 끝났습니다. DummyClient의 main 함수를 보면 GameServer 에서의 코드와 비슷합니다. ClientServiceRef를 사용한다는것과 거기서 사용하는 세션이
+ServerSession 이라는것이 다릅니다. 
+
+- 마무리 
+잘 동작하는걸 확인했고 이제 부터는 Accept, Connect, Disconnect, Recv, Send 등 비동기 IO 함수들은 지금까지 만든 네트워크 라이브러리의 내부는 신경쓸 필요없고 
+각 기능에 해당하는 함수를 호출해 사용하면 되는것입니다. 

@@ -1,97 +1,83 @@
 ﻿#include "pch.h"
-#include <iostream>
 
-// 윈도우즈에서 네트워크 시작하기 위한 라이브러리
-#include <WinSock2.h>
-#include <MSWSock.h>
-#include <WS2tcpip.h>
+#include "ThreadManager.h"
+#include "Service.h"
+#include "Session.h"
 
-#pragma comment(lib, "ws2_32.lib")
+// TEMP : 임시로 보낼 데이터 버퍼를 만들었습니다. 
+char sendBuffer[] = "Hello World!";
 
-void HandleError(const char* cause)
+
+class ServerSession : public Session
 {
-	int32 errCode = ::WSAGetLastError();
-	cout << cause << " ErrorCode : " << errCode << endl;
-}
+public:
+	~ServerSession()
+	{
+		cout << "~ServerSession" << endl;
+	}
+
+	virtual void OnConnected() override
+	{
+		// 연결할때 Send를 한번 합니다. 
+		cout << "Connected To Server" << endl;
+		Send((BYTE*)sendBuffer, sizeof(sendBuffer));
+	}
+	
+	virtual int32 OnRecv(BYTE* buffer, int32 len) override
+	{
+		cout << "OnRecv Len = " << len << endl;
+
+		// 1초에 한번 전송하기위함 
+		this_thread::sleep_for(1s);
+
+		Send((BYTE*)sendBuffer, sizeof(sendBuffer));
+		return len;
+	}
+
+	virtual void OnSend(int32 len) override
+	{
+		cout << "OnSend Len = " << len << endl;
+	}
+
+	virtual void OnDisconnected() override
+	{
+		cout << "Disconnected" << endl;
+	}
+};
+
+/*
+ServerSession 코드를 위와 같이 만들고 난 후 흐름이 어떻게 되냐면 
+클라쪽에서 Connect, 서버쪽에서 Accept를 하고 난 후 
+클라쪽 Connect와 동시에 "Hello World!" 를 Send 합니다. 이후 서버쪽에서 
+OnRecv에서 패킷을 받은후 그대로 다시 Send로 보냅니다. 
+클라의 OnRecv도 마찬가지로 Recv,Send 를 하면서 서버 클라간 패킷을 주고받게됩니다.
+*/
 
 
 int main()
 {
+	// 서버가 먼저 실행될때 까지 1초를 기다립니다. 
 	this_thread::sleep_for(1s);
 
-	WSAData wsaData;
-	if (::WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
-		return 0;	
+	ClientServiceRef service = MakeShared<ClientService>(
+		NetAddress(L"127.0.0.1", 7777),
+		MakeShared<IocpCore>(),
+		MakeShared<ServerSession>,
+		1);
 
-	SOCKET clientSocket = ::socket(AF_INET, SOCK_STREAM, 0);
-	if (clientSocket == INVALID_SOCKET)
-		return 0;
+	ASSERT_CRASH(service->Start());
 
-	u_long on = 1;
-	if (::ioctlsocket(clientSocket, FIONBIO, &on) == INVALID_SOCKET)
-		return 0;
 
-	SOCKADDR_IN serverAddr;
-	::memset(&serverAddr, 0, sizeof(serverAddr));
-	serverAddr.sin_family = AF_INET;
-	::inet_pton(AF_INET, "127.0.0.1", &serverAddr.sin_addr);
-	serverAddr.sin_port = ::htons(7777);
-
-	// Connect
-	while (true)
+	for (int32 i = 0; i < 2; i++)
 	{
-		if (::connect(clientSocket, (SOCKADDR*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR)
-		{
-			// 원래 블록했어야 했는데... 너가 논블로킹으로 하라며?
-			if (::WSAGetLastError() == WSAEWOULDBLOCK)
-				continue;
-			// 이미 연결된 상태라면 break
-			if (::WSAGetLastError() == WSAEISCONN)
-				break;
-			// Error
-			break;
-		}
+		GThreadManager->Launch([=]()
+			{
+				while (true)
+				{
+					service->GetIocpCore()->Dispatch();
+				}
+			});
 	}
 
-	cout << "Connected To Server!" << endl;
-
-	char sendBuffer[100] = "Hello World!";
-	// 이벤트 객체도 만듭니다. 
-	WSAEVENT wsaEvent = ::WSACreateEvent();
-	WSAOVERLAPPED overlapped = {};
-	overlapped.hEvent = wsaEvent;
-	while (true)
-	{
-		// 이번엔 클라이언트에서도 대칭적으로 WSASend를 사용해보겠습니다. 
-		WSABUF wsaBuf;
-		wsaBuf.buf = sendBuffer;
-		wsaBuf.len = 100;
-
-		DWORD sendLen = 0;
-		DWORD flags = 0;
-
-		if (::WSASend(clientSocket, &wsaBuf, 1, &sendLen, flags, &overlapped, nullptr)
-			== SOCKET_ERROR)
-		{
-			int32 errorCode = ::WSAGetLastError();
-			if (errorCode == WSA_IO_PENDING)
-			{
-				// Pending
-				cout << "Pending" << endl;
-				::WSAWaitForMultipleEvents(1, &wsaEvent, TRUE, WSA_INFINITE, FALSE);
-				::WSAGetOverlappedResult(clientSocket, &overlapped, &sendLen, FALSE, &flags);
-			}
-			else
-			{
-				// TODO : 문제 있는 상황
-				break;
-			}
-		}
-
-		cout << "Send Data Len = " << sendLen << endl;
-		this_thread::sleep_for(1s);
-	}
-
-	// WinSock 종료
-	::WSACleanup();
+	GThreadManager->Join();
 }

@@ -1,10 +1,5 @@
 ﻿#include "pch.h"
 #include <iostream>
-#include "CorePch.h"
-#include <atomic>
-#include <mutex>
-#include <windows.h>
-#include <future>
 #include "ThreadManager.h"
 
 // 이제 Service를 통해 사용할것이기 때문에 날려줍니다. 
@@ -16,12 +11,16 @@
 #include "Session.h"
 
 /*
-Session 클래스의 멤버 함수중 Process류 함수에서 호출하던 오버로딩용 함수들을 에코서버처럼 동작하게
+Session 클래스의 멤버 함수중 Process류 함수에서 호출하던 오버라이딩용 함수들을 에코서버처럼 동작하게
 만들어 봤습니다. 
 */
 class GameSession : public Session
 {
 public:
+	~GameSession()
+	{
+		cout << "~GameSession" << endl;
+	}
 	virtual int32 OnRecv(BYTE* buffer, int32 len) override
 	{
 		// Echo Server 처럼 동작하게 만들어 줘 보겠습니다.

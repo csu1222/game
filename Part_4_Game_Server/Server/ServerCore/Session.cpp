@@ -21,48 +21,62 @@ Session::~Session()
 
 void Session::Send(BYTE* buffer, int32 len)
 {
-	/*
-	생각할 문제 
-	1) 버퍼 관리?
-	2) sendEvent 관리? 단일? 여러개? WSASend 중첩?
-	- MMORPG를 가정했을때 Send를 한번에 한번씩 차례대로 호출하는게 아니라 몬스터 사냥, 귓속말 같은 
-	  한번 한번 일어날때 마다 중첩해서 Send를 호출해줘야 합니다. 그럴경우 _recvEvent 처럼 
-	  딱 하나만 만들어서 사용하다보면 중첩된 Send 호출을 감당할 수 없습니다. 
-	  지금은 임시로 Send함수 안에서 실시간 생성하는방식으로 구현해보겠습니다. 
-	*/
-
 	// TEMP
 	SendEvent* sendEvent = A_new<SendEvent>();
 	sendEvent->owner = shared_from_this();		// ADD_REF
-	// 임시로 SendEvent가 버퍼를 들고 있을것이고 거기에 보낼데이터를 저장해줍니다. 
 	sendEvent->buffer.resize(len);
 	::memcpy(sendEvent->buffer.data(), buffer, len);
 
-	/*
-	항상 Register, Process 순으로 진행했었습니다.보낼 버퍼와 연결된 sendEvent 를 인자로 받습니다.
-	Send의 경우 채팅, 아이템 획득, 경험치 획득 같이 주기적으로 호출되는게 아니라 특정상황에 한번에 여러
-	스레드로 호출될 수 있습니다. 
-	그럴때 RegisterSend 안의 WSASend 함수가 스레드 환경에서 안전한지를 알아야 하는데 공식문서를 보면 
-	스레드에서 안전이 보장되어 있지 않다고 합니다. 그러면 우리가 직접 순서를 보장해줘야 합니다. 
-	*/
 	WRITE_LOCK;
 	RegisterSend(sendEvent);
 
 }
 
+bool Session::Connect()
+{
+	/*
+	Connect 말 그대로 연결을 하는 함수 입니다. 서버 입장에서는 Accept를 기다리고 있다가 
+	접속한 클라를 상대로 통신을 하면 되기 때문에 사실 Connect가 왜 필요한지 감이 안 올 수 있는데
+	이전에 한번 언급했던 적이 있습니다. 서버도 단일서버로 동작할때도 있고 다중서버로 역할을 나눠서 
+	동작하는 경우도 있는데 다중 서버일때 서버끼리 연결을 할때 이 함수가 필요해집니다.
+
+	*/
+	return RegisterConnect();
+}
+
 void Session::Disconnect(const WCHAR* cause)
 {
+	/*
+	소켓을 닫을때 그냥 Session이 들고 있는 소켓을 강제로 닫아주고 있습니다. 
+	꼭 이게 문제라기 보다는 이렇게 소켓을 닫아줘도 연결이 끊기기는 합니다.
+	실제로도 이런방식으로 연결을 끊는 경우도 있기는한데 
+	우리가 SocketUtils 에서 런타임에 받아줬던 함수들중 DisconnectEx 라는것도 있습니다.
+	비동기 IO 함수중 하나인데 이걸 사용하면 호출하면 IOCP에 예약을 해놓고 
+	처리할 준비가 되면 쓰레드에서 처리해주는 방식입니다. 
+	
+	그러면 DisconnectEx를 사용하는 장점이 무엇인가하면 
+	지금은 Session 생성자, 소멸자, 그리고 여기 Disconnect에서 소켓을 만들고 닫아주고 하는데
+	사실 이 작업이 부담이 많이 가는 작업이라고 합니다. 그런만큼 한번 만든 소켓을 재사용한다면 
+	성능상 더욱 이득이 될겁니다. 
+	성능상으로도 좋고 어짜피 Iocp를 이용하고 있는데 굳이 DisconnectEx를 사용하지 않을 이유도 
+	없으니깐 이 방법으로 배워보겠습니다. 
+	*/
+	
+	// _connected의 값을 false 로 넣어주는데 이미 값이 false였으면 반환도 false가 반환됩니다.
+	// 즉, 이 Disconnect 함수를 한번만 호출하도록 한것입니다. 
 	if (_connected.exchange(false) == false)
 		return;
 
 	// TEMP
 	wcout << "Disconnet : " << cause << endl;
 
-	OnDisconnected();	// 컨텐츠 코드에서 오버로딩
+	OnDisconnected();	// 컨텐츠 코드에서 오버라이딩
 
-	SocketUtils::Close(_socket);	// 소켓도 닫습니다.
+	// SocketUtils::Close(_socket);	// 소켓도 닫습니다.
 	GetService()->ReleaseSession(GetSessionRef());	// Release Ref
-
+	
+	// SocketUtils::Close 대신 RegisterDisconnect 를 호출합니다. 
+	RegisterDisconnect();
 }
 
 HANDLE Session::GetHandle()
@@ -77,6 +91,8 @@ void Session::Dispatch(IocpEvent* iocpEvent, int32 numOfBytes)
 	case EventType::Connect:
 		ProcessConnect();
 		break;
+	case EventType::Disconnect:
+		ProcessDisconnect();
 	case EventType::Recv:
 		ProcessRecv(numOfBytes);
 		break;
@@ -86,8 +102,76 @@ void Session::Dispatch(IocpEvent* iocpEvent, int32 numOfBytes)
 	}
 }
 
-void Session::RegisterConnect()
+bool Session::RegisterConnect()
 {
+	// 이미 연결된 상태인지 체크 
+	if (IsConnected())
+		return false;
+
+	// 현재 이 세션이 속한 서비스의 타입이 클라이언트인지를 체크합니다. 
+	// 클라이언트타입이 다른 서버에 접속하고 서버 타입은 상대방이 나에게 연결을 시도하는것입니다. 
+	if (GetService()->GetServiceType() != ServiceType::Client)
+		return false;
+
+	// 소켓의 옵션들을 조정해줍니다. 
+	if (SocketUtils::SetReuseAddress(_socket, true) == false)
+		return false;
+	
+	// Listener쪽 소켓 옵션을 설정할때는 하지 않았는데 클라입장에서는 아무 Address, Port 를 
+	// 사용하도록 했습니다. 
+	if (SocketUtils::BindAnyAddress(_socket, 0/*0을 주면 남는 포트 아무거나 연결*/) == false)
+		return false;
+	
+	// Connect는 동시에 여러번 일어나는 작업이 아니기 때문에 직접 멤버 변수로 들고 있어도 됩니다.
+	_connectEvent.Init();
+	_connectEvent.owner = shared_from_this();	// ADD_REF
+
+	// ConnectEx 에 필요한 인자들
+	DWORD numOfBytes = 0;	// 접속과 동시에 보낸 데이터의 크기를 받을것입니다.
+	SOCKADDR_IN sockAddr = GetService()->GetNetAddress().GetSockAddr(); // 내가 어디로 연결할지
+
+	if (SOCKET_ERROR == SocketUtils::ConnectEx(_socket, reinterpret_cast<SOCKADDR*>(&sockAddr), sizeof(sockAddr), nullptr, 0, &numOfBytes, &_connectEvent))
+	{
+		// Pending상태인지 까지 체크
+		int32 errorCode = ::WSAGetLastError();
+		if (errorCode != WSA_IO_PENDING)
+		{
+			// Pending 상태가 아니라면 진짜로 실패
+			_connectEvent.owner = nullptr;	// RELEASE_REF
+			return false;
+		}
+		// Pending 상태라면 좀 더 대기
+	}
+	return true;
+}
+
+bool Session::RegisterDisconnect()
+{
+	// 반복되는 구조입니다.
+	// _disconnectEvent 초기화, 자신을 등록해 ADD_REF
+	_disconnectEvent.Init();
+	_disconnectEvent.owner = shared_from_this();	// ADD_REF
+
+	/*
+	DisConnectEx 함수의 인자입니다. 
+	1) 소켓
+	2) OVERLAPPED 의 포인터 우리는 IocpEvent 객체를 주면됩니다.
+	3) 함수 호출에 대한 플래그 입니다. 0을 주면 아무런 플래그가 설정되지 않고 
+	   지금 처럼 TF_REUSE_SOCKET 을 주면 DisconnectEx 호출 후 다시 AcceptEx나 ConnectEx에서
+	   이 소켓을 사용할 수 있습니다.
+	4) reserved 를 줘야한다고 하는데 꼭 0을 줘야합니다. 다른 값을 주면 잘못된 인자를 줬다는 에러가 뜹니다.
+	*/
+	if (false == ::SocketUtils::DisconnectEx(_socket, &_disconnectEvent, TF_REUSE_SOCKET, 0))
+	{
+		int32 errorCode = ::WSAGetLastError();
+		if (errorCode != WSA_IO_PENDING)
+		{
+			_disconnectEvent.owner = nullptr;	// RELEASE_REF
+			return false;
+		}
+	}
+
+	return true;
 }
 
 void Session::RegisterRecv()
@@ -122,30 +206,6 @@ void Session::RegisterRecv()
 
 void Session::RegisterSend(SendEvent* sendEvent)
 {
-	/*
-	Send 함수에서 락을 걸어주었습니다. 이제 순서대로 WSASend가 호출이 될 텐데 아무리 많은 
-	스레드에서 WSASend를 시도하더라도 락을 통해 먼저 시도한 순서대로 예약을 하게 됩니다. 
-	그 다음 IocpCore::Dispatch 안에 GetQueuedCompletionStatus 를 호출해줄텐데 
-	이부분에서는 순서보장을 할 수 없습니다. IocpCore 에서는 따로 락을 사용하지 않기 때문입니다. 
-	그래서 데이터를 보내는 순서가 중요한 경우는 문제가 될 수 있습니다.
-
-	또 한가지 WSASend를 호출한 다음 Pending 상황이 되었다는것은 커널쪽 SendBuffer가 꽉차 있다는 이야기입니다.
-	그 상황에서 무작정 다음 WSASend를 계속 밀어넣는게 좋은지는 생각해 봐야 합니다. 
-	우리가 WSASend를 호출할때 WSABUF의 내용물로 buf와 len을 넘겨주는데 Pending 상황에서는 
-	지금당장 커널쪽으로 이 WSABUF 를 넘겨줄 수 없다고 해도 언젠가는 커널쪽 버퍼로 복사가 이뤄질겁니다.
-	고급 내용이라서 자세히는 알아보지 않을테지만 이럴때 WSABUF 를 대상으로 페이지락 이라는것을 건다고 합니다.
-
-	그리고 WSASend를 호출할때 작은데이터를 각각 여러번 호출하는것보다 데이터를 한번에 모아서 
-	WSASend를 호출하는게 좋습니다. 인자에서도 WSABUF 와 이 WSABUF가 몇개인지를 받습니다.
-	즉, 모아서 보낼수 있도록 되어 있습니다. 
-
-	현재 작업중인 코드는 이러한 부분들이 아쉽습니다. 순서보장이 완전히 되는것도 아니고 
-	자잘한 데이터라도 매번 RegisterSend를 호출하게 되는데
-	그러지 말고 보낼 데이터를 멤버 변수에 저장하다가 일정 크기가 되면 한번에 보낼 수 있도록 해주면 
-	좀 더 성능상으로 유리하다고 할 수 있습니다. 
-	*/
-
-	// 접속여부 부터 체크
 	if (IsConnected() == false)
 		return;
 
@@ -166,24 +226,36 @@ void Session::RegisterSend(SendEvent* sendEvent)
 			A_delete(sendEvent);
 		}
 	}
-	// 이후 IocpCore->Dispatch 를 통해 ProcessSend로 넘어갈것입니다.
-	// 그런데 여기서도 마찬가지로 Session가 멤버 변수로서 SendEvent를 들고 있는게 아니기 때문에 
-	// 다시 인자로 넘겨주도록 해줘야 합니다. 
 	
 }
 
 void Session::ProcessConnect()
 {
+	/*
+	이 ProcessConnect 함수는 두가지 용도로 사용하게 됩니다. 
+	Listener::ProcessAccept 함수에서 호출되는 이 서버에 클라가 접속할때 도 사용하고 
+	이 서버가 클라이언트 서버로서 다른 서버에 접속하려고 할때도 사용됩니다. 
+	*/
+
+	_connectEvent.owner = nullptr;	// RELEASE_REF
+
 	_connected.store(true);
 
 	// 세션 등록 : 이코드에 와서야 서비스에 세션을 실제로 연결해주는겁니다. 
 	GetService()->AddSession(GetSessionRef());
 
-	// 컨텐츠 코드에서 오버로딩할 예정
+	// 컨텐츠 코드에서 오버라이딩할 예정
 	OnConnected();
 		
 	// 수신 등록 : 연결 후 여기서 부터 Recv를 Iocp에 등록을 해줍니다. 
 	RegisterRecv();
+}
+
+void Session::ProcessDisconnect()
+{
+	// 여기서는 접속 종료후에 할일인데 사실 연결이 끊긴뒤에는 딱히 할 일이없고 
+	// 세션의 참조카운트만 줄이고 마치겠습니다. 
+	_disconnectEvent.owner = nullptr;	// RELEASE_REF
 }
 
 void Session::ProcessRecv(int32 numOfBytes)
@@ -198,8 +270,6 @@ void Session::ProcessRecv(int32 numOfBytes)
 		return;
 	}
 
-	// TODO : 이전에 누락한 부분인데 로그찍는 코드는 생략하고 OnRecv라는 컨텐츠 쪽에서 오버로딩해 사용할 함수를 호출합니다. 
-	// cout << "Recv Data Len = " << numOfBytes << endl;
 	OnRecv(_recvBuffer, numOfBytes);
 
 	// 다음번 수신을 위해 다시 Register를 겁니다.
@@ -208,18 +278,16 @@ void Session::ProcessRecv(int32 numOfBytes)
 
 void Session::ProcessSend(SendEvent* sendEvent, int32 numOfBytes)
 {
-	// ProcessRecv와 마찬가지로 성공했다면 이 세션의 참조카운트를 줄여줍니다.
 	sendEvent->owner = nullptr;
 	A_delete(sendEvent);
 
 	if (numOfBytes == 0)
 	{
-		// Dispatch를 통과한 상태에서 보낸 데이터가 0이라면 연결이 끊겼다는 이야기
 		Disconnect(L"Recv 0");
 		return;
 	}
 
-	// 컨텐츠 코드에서 오버로딩
+	// 컨텐츠 코드에서 오버라이딩
 	OnSend(numOfBytes);
 
 }
