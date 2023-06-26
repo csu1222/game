@@ -1,0 +1,432 @@
+
+
+
+        RecvBuffer
+
+
+지난시간까지 Session에 대한 큰 틀은 잡아놓은 상태이고 이제는 더 세분화해서 완성도를 높여나가겠습니다.
+
+Session을 처음 만들때부터 임시로 사용하던 RecvBuffer가 이번 목표입니다. 
+
+Send와 Recv는 신경써야 할 것이 많이 다르다고 했었습니다.
+일단 좀 더 쉬운 RecvBuffer 부터 알아보는것입니다.
+
+Recv는 어떤 문제가 있었는지를 생각해보겠습니다.
+먼저 문제라기보다는 다행스러운 일이 Recv같은경우는 멀티스레드 환경을 고려하지 않아도 됩니다. 
+RegisterRecv, ProcessRecv 에 한번에 한 스레드만 들어올것이기 때문에 그렇습니다. 왜 그렇게 단정할 수 있는가 하면 우리가 예약한 WSARecv() 자체가 
+딱 하나이기 때문입니다. 예약된 _recvEvent 가 하나뿐이면 동작중인 스레드중 하나만 _recvEvent를 처리하게 됩니다.
+
+그럼에도 불구하고 지금처럼 
+
+BYTE _recvBuffer[1000]; 
+
+이렇게 생으로 사용하는건 문제가 될 수 있습니다. 어떤 문제이냐면 우리가 RegisterRecv()에서 WSARecv를 호출할때 WSABUF 구조체를 만드는데 
+WSABUF는 어느 위치에다가(buf) 최대 크기(len) 얼마 까지 받을수 있는지를 입력하고 있습니다.
+
+그런데 TCP의 특성상 상대방쪽에서 패킷을 100바이트를 보냈다고 해도 그 100바이트 전부가 왔다고 보장 할 수 없습니다. 
+이전 TCP vs UDP 를 비교하면서 알아봤듯이 TCP는 패킷의 바운더리가 없다고 했습니다. 
+패킷을 보낸측이 100바이트를 보냈다고 해도 받는 측에서는 20바이트에서 잘린 패킷을 받을 수 있습니다.
+그러면 문제가 되는게 무엇이냐면 패킷을 받을때 대부분은 완전한 패킷을 받아야 처리를 할 수 있을겁니다. 
+
+그렇기 때문에 지금 처럼 한번의 Recv 호출에 모든 데이터가 전송된 셈 치고 그 시작주소만 받아 그 위치에 덮어쓰는 방식은 안된다는 것입니다. 
+
+결국은 이게 패킷 설계와 연동이 되어 있습니다.
+어떻게든 패킷이 완전히 전송되었는지 아닌지를 판별해야 합니다. 이것은 패킷에 패킷헤더를 붙혀서 지금 이 패킷이 몇바이트인지 정보를 기입해주게 됩니다. 
+일단 패킷이 완전히 도착했는지 아닌지를 구별 할 수 있다고 치고 만약 패킷의 모든데이터가 넘어오지 않았다면 기존 데이터를 남겨두고 바로뒤부터 이어서 전송될 
+데이터를 이어붙이게 될겁니다. 
+
+***
+--RecvBuffer
+위 작업을 총괄해서 관리하는 RecvBuffer 클래스를 만들겠습니다. 
+
+/*
+-------------------------
+	RecvBuffer 선언부
+-------------------------
+*/
+
+class RecvBuffer
+{
+	// 데이터 복사비용을 줄이기 위한 방법
+	// 인자로 받은 버퍼 사이즈를 BUFFER_COUNT 만큼곱한 크기로 잡습니다. 
+	enum { BUFFER_COUNT = 10 };
+public:
+	RecvBuffer(int32 bufferSize);
+	~RecvBuffer();
+
+	void			Clean();
+	bool			OnRead(int32 numOfBytes);
+	bool			OnWrite(int32 numOfBytes);
+
+	BYTE*			ReadPos() { return &_buffer[_readPos]; }
+	BYTE*			WritePos() { return &_buffer[_writePos]; }
+	int32			DataSize() { return _writePos - _readPos; }
+	int32			FreeSize() { return _capacity - _writePos; }
+
+private:
+	/* 멤버 변수
+	_bufferSize와 _buffer는 말그대로 버퍼자체와 그 길이를 뜻합니다. 
+	_readPos와 _writePos가 무엇을 뜻이냐 하면 커서와 같은 역할을합니다. 
+	맨처음 아무런 데이터를 받지 않았을때는 _readPos와 _wirtePos가 _buffer 
+	맨앞에 같이 위치하고 있을것입니다. 
+	이후 Recv로 데이터를 _buffer에 차례대로 받아오면서 그만큼 _writePos도 같이
+	이동하게 되는 것이고 _readPos는 맨앞 그대로 있으면서 그 사이에 있는 데이터들이
+	사실상 지금까지 유효한 데이터 범위라고 볼 수 있는겁니다.
+	그래서 쓰는쪽에서는 _writePos에 이어서 쓰면 되고 읽는쪽에서는 _readPos부터
+	읽어 나가면 됩니다. 
+
+	읽고 쓰기를 진행하다보면 한도 끝까지 사용하게 될겁니다. 
+	오래되고 정석적인 방법은 순환 버퍼를 사용하는것입니다. 
+	즉, 커서가 버퍼 끝에 다다르면 버퍼의 처음과 끝이 이어져 있는것처럼 
+	커서를 다시 버퍼의 맨앞부터 읽도록 하면서 계속 사용할 수 있도록 하는것이 
+	순환버퍼입니다. 
+	또 다른 방법은 처음부터 버퍼사이즈를 넉넉하게 만들어놓고 
+	데이터를 받다가 언젠가 _readPos와 _writePos가 곂치게 되면 한번에 보낼만한 
+	데이터는 다 받았다는 뜻이기 때문에 _readPos, _wirtePos 둘다 버퍼의 맨 앞으로
+	이동시킵니다. 그러면 다시 버퍼를 처음부터 사용할 수 있게 됩니다. 
+	하지만 만약 넉넉하게 잡은 버퍼 마저도 넘는 크기의 데이터 였다면 
+	버퍼의 끝에 _writePos가 닿게 되고 _readPos는 조금 뒤에 위치 할것입니다. 
+	이 두 커서 사이의 데이터를 버퍼의 맨앞으로 옮기고 다시 떨어져 있던 거리만큼
+	커서의 거리를 유지해 버퍼 앞으로 가져다 놓으면 됩니다.
+	이 방법을 사용하면 만약 버퍼를 다 사용하기 전에 데이터를 다 받는다면 
+	복사 비용없이 커서들만 이동하면되고 만약 버퍼를 넘었다면 커서 사이의 만큼
+	비교적 작은 데이터만 복사이동할 수 있습니다. 
+	*/
+	int32			_bufferSize = 0;
+	int32			_readPos = 0;
+	int32			_writePos = 0;
+	Vector<BYTE>	_buffer;
+	// 데이터 복사 비용을 줄이기 위해 널널하게 잡는 실제 버퍼 크기
+	int32			_capacity = 0;
+};
+
+
+
+/*
+-------------------------
+	RecvBuffer 정의부
+-------------------------
+*/
+
+RecvBuffer::RecvBuffer(int32 bufferSize) : _bufferSize(bufferSize)
+{
+	// 성성자의 인자만큼 버퍼 사이즈를 설정해줍니다. 
+	_capacity = bufferSize * BUFFER_COUNT;
+	_buffer.resize(_capacity);
+}
+
+RecvBuffer::~RecvBuffer()
+{
+}
+
+void RecvBuffer::Clean()
+{
+	// 읽기 쓰기가 진행되면서 작업이 완료되었거나 버퍼에 여유 공간이 모자라는 상황일때 
+	// 커서와 데이터들을 버퍼 처음부터 다시 시작하도록 합니다. 
+
+	// DataSize는 _readPos와 _writePos사이의 간격입니다. 
+	int32 dataSize = DataSize();
+	if (dataSize == 0)
+	{
+		// 만약 dataSize가 0이라면 write한만큼 read도 완료된 상황입니다. 
+		_readPos = _writePos = 0;
+	}
+	else
+	{
+		// Clean 으로 들어 왔는데 read,write 좌표가 일치 하지 않았다는것은 
+		// 데이터와 커서들을 같이 앞으로 땡겨야 한다는 말입니다. 
+
+		// 먼저 데이터를 땡기는 코드입니다.
+		//::memcpy(&_buffer[0], &_buffer[_readPos], dataSize);
+		//_readPos = 0;
+		//_writePos = dataSize;
+		
+
+		// 여기 까지만 하면 깔끔한 코드가 될텐데 좀 더 성능상 개량할 여지가 있습니다. 
+		// TCP통신이다 보니 한 패킷만큼씩 전송되는것이 아니고 일부 데이터가 잘려서 
+		// 도착 할 수도 있습니다. 그러다 보면 버퍼에 여유가 있어도 조금 남은 데이터는 일단 
+		// 0번 인덱스로 이동시켜줘야 하는 상황이 생깁니다. 
+		// 데이터 이동에 복사 비용이 발생하는데 이것을 최대한 줄여주는 방법이 있습니다. 
+		// 처음부터 버퍼 사이즈를 아주 널널하게 잡고 이 Clean 함수를 미뤄서 최대한 
+		// memcpy 없이 커서만 옮길 수 있도록 유도하는것입니다. 
+
+		// 그래서 이제는 여유 공간이 버퍼 1개 크기 미만이면 데이터를 앞으로 땡깁니다.
+		if (FreeSize() < _bufferSize)
+		{
+			::memcpy(&_buffer[0], &_buffer[_readPos], dataSize);
+			_readPos = 0;
+			_writePos = dataSize;
+		}
+
+	}
+}
+
+bool RecvBuffer::OnRead(int32 numOfBytes)
+{
+	// 성공적으로 데이터를 읽은 후 _readPos 커서를 앞으로 땡겨줍니다. 
+
+	// 먼저 예외 처리로 인자인 numOfBytes는 읽은 데이터 크기 입니다. 
+	// numOfBytes보다 _writePos, _readPos의 차이 값보다 크다는것은 뭔가 이상한 상황입니다.
+	if (numOfBytes > DataSize())
+		return false;
+
+	_readPos += numOfBytes;
+	return true;
+}
+
+bool RecvBuffer::OnWrite(int32 numOfBytes)
+{
+	// OnRead와 비슷한데 성공적으로 데이터를 썼으면 _writePos를 앞으로 땡깁니다. 
+
+	if (numOfBytes > FreeSize())
+		return false;
+
+	_writePos += numOfBytes;
+	return true;
+}
+
+
+이렇게 RecvBuffer를 만들었습니다. 생성자에서 버퍼 하나 만큼의 크기를 받아 저장하고 실제 버퍼의 사이즈를 여유있게 버퍼사이즈 10개 만큼을 잡습니다.
+이 버퍼를 대상으로 _readPos, _writePos 라는 커서역할을 하는 int32 변수를 사용합니다. 
+
+두 커서는 가장 처음에는 버퍼의 0번 인덱스를 가리키고 있다가 버퍼에 데이터가 쓰여지면 그만큼 _writePos가 따라갑니다. 이후 이어서 쓰여지고 있는 데이터를 
+읽어 나가기도 할텐데 이 읽기 동작만큼을 _readPos가 따라갑니다. 
+
+RecvBuffer의 생성자 소멸자를 보면 소멸자에서는 별 다른 일을 하진 않고 생성자를 보겠습니다. 
+인자로 한번의 Recv로 받을것으로 예상되는 데이터의 크기를 버퍼사이즈로 받아 저장합니다. 그리고 그 10배가 되는 수를 _capacity 라는 변수에도 저장합니다. 
+또 실제 버퍼의 역할을 하는 벡터인 _buffer의 resize를 _capacity 만큼 합니다.
+
+OnRead() 함수와 OnWrite() 함수가 있습니다. 먼저 OnRead() 는 데이터를 읽으면서 한 프레임씩 읽은 데이터의 양을 인자로 받습니다. 이 읽은 데이터 만큼을 
+_readPos에 더해주면서 커서를 옮겨줍니다. 
+마찬가지로 OnWrite() 함수도 버퍼의 쓰기를 하는데 그만큼 _writePos 커서를 옮깁니다. 
+
+그러면 Clean()은 어떤 함수인가 하면 읽기와 쓰기가 완료되거나 _buffer의 남은 여유공간이 한 버퍼 만큼도 안남았다 하면 _buffer의 처음부터 다시 시작하도록 
+커서들과 데이터들을 옮겨주는 역할을합니다. 
+여기서 dataSize 라는 변수를 사용하는데 이 값은 Clean 함수가 실행되는 시점에서 _writePos - _readPos 값입니다. 이 값이 0이라면 깔끔하게 읽기와 쓰기가 
+맞아 떨어진것이고 만약 0이 아니고 _buffer의 남은 공간이 bufferSize 만큼이 되지 않는다면 커서들과 그 사이 데이터를 _buffer의 시작 지점으로 되돌려 다시 시도합니다. 
+
+이제 RecvBuffer 라는 부품을 만들었고 Session에서 임시로 사용하던 버퍼를 대신하도록 작업 해보겠스빈다.
+
+***
+-- Session
+
+Session.h 에 오늘 만든 RecvBuffer 클래스를 include 해줍니다. 
+그리고 이전에 배열로 만들어 임시로 사용하던 _recvBuffer 를 삭제 합니다. 
+대신 오늘 만든 RecvBuffer를 멤버 변수로 들려줍니다. 이 RecvBuffer가 Session 생성자에서 객체를 만들때 생성자에는 인자를 넘겨 줬어야힙니다. 
+ #pragma once
+#include "IocpCore.h"
+#include "IocpEvent.h"
+#include "NetAddress.h"
+#include "RecvBuffer.h"         // 추가점 
+
+
+/*
+--------------------
+	Session 선언부
+--------------------
+*/
+
+class Service;
+
+/*
+이번 시간은 RecvBuffer 클래스를 만들고 Session에 적용해봅니다. 
+*/
+
+class Session : public IocpObject
+{
+	friend class Listener;
+	friend class IocpCore;
+	friend class Service;
+	
+	// 버퍼 사이즈를 하드 코딩하기 보다는 enum으로 관리합니다. 
+        enum                      // 추가점 
+	{
+		BUFFER_SIZE = 0x10000, // 64kb
+	};
+
+public:
+	Session();
+	virtual ~Session();
+
+public:
+	/* 외부에서 사용 */
+	void				Send(BYTE* buffer, int32 len);
+
+	// Connect 함수 추가 
+	bool				Connect();
+	void				Disconnect(const WCHAR* cause);
+	
+	shared_ptr<Service> GetService() { return _service.lock(); }
+	void				SetService(shared_ptr<Service> service) { _service = service; }
+
+public:
+	/* 정보 관련 함수 */
+	void				SetNetAddress(NetAddress address) { _netAddress = address; }
+	NetAddress			GetAddress() { return _netAddress; }
+	SOCKET				GetSocket() { return _socket; }
+	
+	bool				IsConnected() { return _connected; }
+	SessionRef			GetSessionRef() { return static_pointer_cast<Session>(shared_from_this()); }
+	
+private:
+	/* 인터페이스 구현 */
+	virtual HANDLE		GetHandle() override;
+	virtual void		Dispatch(class IocpEvent* iocpEvent, int32 numOfBytes = 0) override;
+
+private:
+	/* 전송 관련 함수 */
+	bool				RegisterConnect();
+	bool				RegisterDisconnect();
+	void				RegisterRecv();
+	void				RegisterSend(SendEvent* sendEvent);
+
+	void				ProcessConnect();
+	void				ProcessDisconnect();
+	void				ProcessRecv(int32 numOfBytes);
+	void				ProcessSend(SendEvent* sendEvent, int32 numOfBytes);
+
+	void				HandleError(int32 errorCode);
+
+protected:
+	/* 컨텐츠 코드에서 오버라이딩 사용할 함수 */
+	
+	virtual void		OnConnected() {}
+	virtual int32		OnRecv(BYTE* buffer, int32 len) { return len; }
+	virtual void		OnSend(int32 len) { }
+	virtual void		OnDisconnected() { }
+
+private:
+	weak_ptr<Service>	_service;
+	SOCKET				_socket = INVALID_SOCKET;
+	NetAddress			_netAddress = {};
+	Atomic<bool>		_connected = false;
+
+private:
+	USE_LOCK;
+
+	/* 수신 관련 TODO */
+	RecvBuffer			_recvBuffer;            // 추가점 
+
+	/* 송신 관련 TODO */
+
+private:
+	/* IocpEvent 재사용 관련 */
+
+	ConnectEvent		_connectEvent;
+	DisconnectEvent		_disconnectEvent;
+	RecvEvent			_recvEvent;
+};
+
+정의부에서 수정하는 함수는 먼저 생성자 
+
+Session::Session() : _recvBuffer(BUFFER_SIZE)
+{
+	_socket = SocketUtils::CreateSocket();
+}
+
+그리고 이번에 수정한 _recvBuffer 가 개입한 함수들을 고쳐야 하는데 먼저 RegisterRecv() 를 보겠습니다 
+
+void Session::RegisterRecv()
+{
+	if (IsConnected() == false)
+		return;
+
+	WSABUF wsaBuf;
+	// wsaBuf.buf 는 _recvBuffer의 시작부터 쓰지않고 _writePos 부터 쓰기 시작
+	wsaBuf.buf = reinterpret_cast<char*>(_recvBuffer.WritePos());
+	// len은 받을 버퍼의 사이즈가 아닌 버퍼의 여유공간을 뜻합니다. 
+	wsaBuf.len = _recvBuffer.FreeSize();
+
+	// 커널에서 실제로 수신한 버퍼의 사이즈는 numOfBytes로 받아줄것입니다. 
+	DWORD numOfBytes = 0;
+	DWORD flags = 0;
+
+	_recvEvent.Init();
+	_recvEvent.owner = shared_from_this();
+
+
+	if (SOCKET_ERROR == ::WSARecv(_socket, &wsaBuf, 1, OUT & numOfBytes, OUT & flags, &_recvEvent, nullptr))
+	{
+		int32 errorCode = WSAGetLastError();
+		if (errorCode != WSA_IO_PENDING)
+		{
+			HandleError(errorCode); 
+			_recvEvent.owner = nullptr;
+		}	}
+}
+
+그리고 이 다음 흐름으로 IocpCore::Dispatch를 통해서 Session::ProcessRecv로 들어올겁니다. 
+
+
+void Session::ProcessRecv(int32 numOfBytes)
+{
+	_recvEvent.owner = nullptr;
+
+	if (numOfBytes == 0)
+	{
+		Disconnect(L"Recv 0");
+		return;
+	}
+
+	// 여기 까지 들어왔다는것은 IocpCore::Dispatch 에서 처리가 되어 
+	// _recvBuffer에 데이터가 복사 되었다는 말입니다.
+	if (_recvBuffer.OnWrite(numOfBytes) == false)
+	{
+		// OnWrite가 실패할 일은 많이 없지만 예외 처리는 꼼꼼히 해줍니다. 
+		Disconnect(L"OnWrite Overflow");
+		return;
+	}
+
+	// 다음은 지금까지 write 한 만큼의 데이터 사이즈르 받습니다. 
+	int32 dataSize = _recvBuffer.DataSize();
+
+	// _readPos 부터 쌓인 데이터 만큼을 인자로 컨텐츠 쪽으로 넘겨줘서 처리를 해주게 될겁니다. 
+	// 테스트 코드에서는 데이터를 처리한 셈 치고 그 사이즈를 콘솔에 출력해주고 있습니다. 
+	int32 processLen = OnRecv(_recvBuffer.ReadPos(), dataSize);
+
+	// OnRecv에서 쌓인 데이터를 처리했다는것은 Read를 했다는 게 됩니다. 
+	if (processLen < 0 || dataSize < processLen || _recvBuffer.OnRead(processLen) == false)
+	{
+		// processLen 값이 음수이거나 dataSize 보다 큰것은 말이 안되는 상황이고,
+		// 실질적으로 _recvBuffer.OnRead(processLen) 으로 _readPos를 땡긴 작업이 실패 했다면 문제가 있는 상황입니다. 
+		Disconnect(L"OnRead Overflow");
+		return;
+	}
+
+	// Read, Write를 다 했으면 커서 정리를 해줍니다.
+	_recvBuffer.Clean();
+
+	RegisterRecv();
+}
+
+그리고 또 한군데 수정해야 할 곳이 있는데 Session 쪽 코드가 아니라 Listener 입니다. 
+-- Listener
+
+
+void Listener::RegisterAccept(AcceptEvent* acceptEvent)
+{
+	SessionRef session = _service->CreateSession();
+	acceptEvent->Init();
+	acceptEvent->session = session;
+
+	DWORD bytesReceived = 0;
+	// AcceptEx의 인자로 버퍼를 줄때 Accept와 동시에 받을 데이터가 있다면 그 데이터를 받아줄 주소의 시작점을 
+	// 넘겨 줬어야 합니다. 이전에는 그냥 매번 배열의 시작주소를 주었지만 
+	// 이제는 RecvBuffer의 WritePos라는 커서를 넘겨주면 됩니다. 
+	if (false == SocketUtils::AcceptEx(_socket, session->GetSocket(), session->_recvBuffer.WritePos(), 0, sizeof(SOCKADDR_IN) + 16, sizeof(SOCKADDR_IN) + 16, OUT & bytesReceived, static_cast<LPOVERLAPPED>(acceptEvent)))
+	{
+		const int32 errorCode = ::WSAGetLastError();
+		if (errorCode != WSA_IO_PENDING)
+		{
+			RegisterAccept(acceptEvent);
+		}
+	}
+}
+
+이제 빌드를 하면 잘 통과 될것입니다. 
+
+테스트 코드는 건들지 않았고 내부적으로 RecvBuffer 만 교체를 했으니 이전 시간처럼 잘 동작하면 됩니다. 
+그리고 지금 까지 TCP 통신이지만 왠만하면 한번에 패킷이 쪼개져서 들어오지 않았었습니다. 그런만큼 대부분 RecvBuffer::Clean 안으로 들어올때 
+DataSize가 0인 경우 코드로 들어오게 될것입니다. 
+
+TCP 통신이라도 통신에 부하가 오지 않는 이상 왠만하면 정상적으로 끊겨 들어오지 않습니다. 

@@ -99,21 +99,19 @@ void Listener::Dispatch(IocpEvent* iocpEvent, int32 numOfBytes)
 
 void Listener::RegisterAccept(AcceptEvent* acceptEvent)
 {
-	// 이전 MakeShared 로 생성해주던 session 객체는 _service->CreateSession() 으로 대체합니다.
-	// CreateSession() 에서는 객체 생성뿐만아니라 그 세션을 CP에 등록까지 해줍니다. 
 	SessionRef session = _service->CreateSession();
 	acceptEvent->Init();
 	acceptEvent->session = session;
 
 	DWORD bytesReceived = 0;
-	if (false == SocketUtils::AcceptEx(_socket, session->GetSocket(), session->_recvBuffer, 0, sizeof(SOCKADDR_IN) + 16, sizeof(SOCKADDR_IN) + 16, OUT & bytesReceived, static_cast<LPOVERLAPPED>(acceptEvent)))
+	// AcceptEx의 인자로 버퍼를 줄때 Accept와 동시에 받을 데이터가 있다면 그 데이터를 받아줄 주소의 시작점을 
+	// 넘겨 줬어야 합니다. 이전에는 그냥 매번 배열의 시작주소를 주었지만 
+	// 이제는 RecvBuffer의 WritePos라는 커서를 넘겨주면 됩니다. 
+	if (false == SocketUtils::AcceptEx(_socket, session->GetSocket(), session->_recvBuffer.WritePos(), 0, sizeof(SOCKADDR_IN) + 16, sizeof(SOCKADDR_IN) + 16, OUT & bytesReceived, static_cast<LPOVERLAPPED>(acceptEvent)))
 	{
-		// 실패했으면 에러코드를 봅니다.
 		const int32 errorCode = ::WSAGetLastError();
 		if (errorCode != WSA_IO_PENDING)
 		{
-			// Pending 상태가 아니라면 문제가 있는 상황입니다.
-			// 이경우에는 RegisterAccept 호출하던게 끊긴 상황이니 직접 다시 걸어줘야 합니다.
 			RegisterAccept(acceptEvent);
 		}
 	}

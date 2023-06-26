@@ -9,7 +9,7 @@
 	Session 정의부 
 --------------------
 */
-Session::Session()
+Session::Session() : _recvBuffer(BUFFER_SIZE)
 {
 	_socket = SocketUtils::CreateSocket();
 }
@@ -181,10 +181,12 @@ void Session::RegisterRecv()
 		return;
 
 	WSABUF wsaBuf;
-	// _recvBuffer는 아직 임시로 사용하는 중이고 나중에 수정할 예정
-	wsaBuf.buf = reinterpret_cast<char*>(_recvBuffer);	
-	wsaBuf.len = len32(_recvBuffer);
+	// wsaBuf.buf 는 _recvBuffer의 시작부터 쓰지않고 _writePos 부터 쓰기 시작
+	wsaBuf.buf = reinterpret_cast<char*>(_recvBuffer.WritePos());
+	// len은 받을 버퍼의 사이즈가 아닌 버퍼의 여유공간을 뜻합니다. 
+	wsaBuf.len = _recvBuffer.FreeSize();
 
+	// 커널에서 실제로 수신한 버퍼의 사이즈는 numOfBytes로 받아줄것입니다. 
 	DWORD numOfBytes = 0;
 	DWORD flags = 0;
 
@@ -260,19 +262,42 @@ void Session::ProcessDisconnect()
 
 void Session::ProcessRecv(int32 numOfBytes)
 {
-	// 더이상 WSARecv 가 예약이 걸린 상태가 아니니 이 세션의 참조카운트를 줄여줍니다. 
 	_recvEvent.owner = nullptr;
 
 	if (numOfBytes == 0)
 	{
-		// Dispatch를 통과한 상태에서 받은 데이터가 0이라면 연결이 끊겼다는 이야기
 		Disconnect(L"Recv 0");
 		return;
 	}
 
-	OnRecv(_recvBuffer, numOfBytes);
+	// 여기 까지 들어왔다는것은 IocpCore::Dispatch 에서 처리가 되어 
+	// _recvBuffer에 데이터가 복사 되었다는 말입니다.
+	if (_recvBuffer.OnWrite(numOfBytes) == false)
+	{
+		// OnWrite가 실패할 일은 많이 없지만 예외 처리는 꼼꼼히 해줍니다. 
+		Disconnect(L"OnWrite Overflow");
+		return;
+	}
 
-	// 다음번 수신을 위해 다시 Register를 겁니다.
+	// 다음은 지금까지 write 한 만큼의 데이터 사이즈르 받습니다. 
+	int32 dataSize = _recvBuffer.DataSize();
+
+	// _readPos 부터 쌓인 데이터 만큼을 인자로 컨텐츠 쪽으로 넘겨줘서 처리를 해주게 될겁니다. 
+	// 테스트 코드에서는 데이터를 처리한 셈 치고 그 사이즈를 콘솔에 출력해주고 있습니다. 
+	int32 processLen = OnRecv(_recvBuffer.ReadPos(), dataSize);
+
+	// OnRecv에서 쌓인 데이터를 처리했다는것은 Read를 했다는 게 됩니다. 
+	if (processLen < 0 || dataSize < processLen || _recvBuffer.OnRead(processLen) == false)
+	{
+		// processLen 값이 음수이거나 dataSize 보다 큰것은 말이 안되는 상황이고,
+		// 실질적으로 _recvBuffer.OnRead(processLen) 으로 _readPos를 땡긴 작업이 실패 했다면 문제가 있는 상황입니다. 
+		Disconnect(L"OnRead Overflow");
+		return;
+	}
+
+	// Read, Write를 다 했으면 커서 정리를 해줍니다.
+	_recvBuffer.Clean();
+
 	RegisterRecv();
 }
 

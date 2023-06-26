@@ -2,6 +2,7 @@
 #include "IocpCore.h"
 #include "IocpEvent.h"
 #include "NetAddress.h"
+#include "RecvBuffer.h"
 
 
 /*
@@ -13,7 +14,7 @@
 class Service;
 
 /*
-* 이번시간은 연결하는 부분 Connect와 DisConnect를 수정해보겠습니다. 
+이번 시간은 RecvBuffer 클래스를 만들고 Session에 적용해봅니다. 
 */
 
 class Session : public IocpObject
@@ -21,6 +22,13 @@ class Session : public IocpObject
 	friend class Listener;
 	friend class IocpCore;
 	friend class Service;
+	
+	// 버퍼 사이즈를 하드 코딩하기 보다는 enum으로 관리합니다. 
+	enum
+	{
+		BUFFER_SIZE = 0x10000, // 64kb
+	};
+
 public:
 	Session();
 	virtual ~Session();
@@ -72,11 +80,6 @@ protected:
 	virtual void		OnSend(int32 len) { }
 	virtual void		OnDisconnected() { }
 
-public:
-	// TEMP
-	BYTE				_recvBuffer[1000] = {};
-
-
 private:
 	weak_ptr<Service>	_service;
 	SOCKET				_socket = INVALID_SOCKET;
@@ -87,6 +90,7 @@ private:
 	USE_LOCK;
 
 	/* 수신 관련 TODO */
+	RecvBuffer			_recvBuffer;
 
 	/* 송신 관련 TODO */
 
@@ -94,7 +98,6 @@ private:
 	/* IocpEvent 재사용 관련 */
 
 	ConnectEvent		_connectEvent;
-	// DisconnetEvent도 재사용해도 될것 같습니다. 
 	DisconnectEvent		_disconnectEvent;
 	RecvEvent			_recvEvent;
 };
