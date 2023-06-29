@@ -19,17 +19,22 @@ Session::~Session()
 	SocketUtils::Close(_socket);
 }
 
-void Session::Send(BYTE* buffer, int32 len)
+void Session::Send(SendBufferRef sendBuffer)
 {
-	// TEMP
-	SendEvent* sendEvent = A_new<SendEvent>();
-	sendEvent->owner = shared_from_this();		// ADD_REF
-	sendEvent->buffer.resize(len);
-	::memcpy(sendEvent->buffer.data(), buffer, len);
+	// 이전에는 SendEvent를 Send 호출때마다 생성하고 삭제 하고 있었는데 
+	// 그 이유는 Send 안에서 RegisterSend를 호출 할때 마다 인자로 넘겨줘야 했었습니다.
+	// 그래서 RegisterSend를 매번 Send에서 호출해주는게 아닌 최초에 한번 호출 해준 다음 
+	// ProcessSend를 마칠때 다시 RegisterSend를 호출하도록 해주면 같은 SendEvent를 계속 사용할 수 있습니다. 
 
+	// TODO
+	// 현재 RegisterSend가 걸리지 않은 상태라면, 걸어준다 
+	// 만약, 이미 RegisterSend가 처리되지 않은 상태라서 다시 걸지 못한다면 Queue에 넣어준다 
 	WRITE_LOCK;
-	RegisterSend(sendEvent);
 
+	_sendQueue.push(sendBuffer);
+	
+	if (_sendRegistered.exchange(true) == false)
+		RegisterSend();
 }
 
 bool Session::Connect()
@@ -96,8 +101,8 @@ void Session::Dispatch(IocpEvent* iocpEvent, int32 numOfBytes)
 	case EventType::Recv:
 		ProcessRecv(numOfBytes);
 		break;
-	case EventType::Send:	// 지금은 SendEvent를 인자로 넘겨줘야합니다.
-		ProcessSend(static_cast<SendEvent*>(iocpEvent), numOfBytes);
+	case EventType::Send:	// SendEvent를 멤버 변수로 들고 있게 되어 인자로 받지 않습니다.
+		ProcessSend(numOfBytes);
 		break;
 	}
 }
@@ -206,29 +211,80 @@ void Session::RegisterRecv()
 		}	}
 }
 
-void Session::RegisterSend(SendEvent* sendEvent)
+
+void Session::RegisterSend()
 {
+	// RegisterSend를 Send에서 매번 호출하는게 아닌 처음만 호출하고 ProcessSend에서 다음번 
+	// RegisterSend를 호출하도록 하면서 _sendEvent를 멤버 변수로 들고 있을 수 있게 되었습니다. 
+	// Send에서 WRITE_LOCK 을 사용하면서 한번에 한 스레드에서만 호출되도록 되었습니다.
 	if (IsConnected() == false)
 		return;
+	
+	_sendEvent.Init();
+	_sendEvent.owner = shared_from_this();	// ADD_REF
 
-	WSABUF wsaBuf;
-	wsaBuf.buf = (char*)sendEvent->buffer.data();
-	wsaBuf.len = (ULONG)sendEvent->buffer.size();
+	// 보낼 데이터를 SendEvent에 등록 
+	{
+		// 왜 중첩해서 락을 잡느냐 하면 나중에 혹시 RegisterSend를 락을 안잡고 호출하게 
+		// 바뀔 수 도 있기 때문에 2중으로 잡고 있습니다. 
+		WRITE_LOCK;
+		
+		// 기존 SendEvent.buffer는 BYTE 타입을 받는 vector였습니다. 지금은 SendBufferRef를 받는 
+		// vector로 수정했습니다. 
+
+		// Send때 _sendQueue에 넣어두었던 SendBufferRef를 꺼내 sendEvent에 연결해주고 있는데 왜 굳이 이렇게 하느냐?
+		// 보낼 SendBufferRef가 WSASend를 호출한 후부터는 사라지지 않도록 보존을 해야하는데 
+		// 중간에 _sendQueue 에서 꺼내다가 SendBufferRef의 RefCount 가 0이 되면 삭제가 될 수 있기때문에
+		// 삭제 되지 않도록 SendEvent가 참조 하고 있게 하는것입니다. 
+
+		// _sendQueue가 빌때 까지 반복하는 것으로 간단하게 만들겠습니다. 
+		int32 writeSize = 0;
+		while (_sendQueue.empty() == false)
+		{
+			SendBufferRef sendBuffer = _sendQueue.front();
+
+			// 꺼낸 버퍼들의 writeSize를 더해가면서 추적하는 이유는 
+			// 실제 버퍼의 capacity를 넘으면 안되기 때문에 중간에 끊어 주기 위함
+			writeSize += sendBuffer->WriteSize();
+
+			// TODO : 예외 체크 
+			
+			_sendQueue.pop();
+			_sendEvent.sendBuffers.push_back(sendBuffer);
+		}
+	}
+
+
+
+	// WSABUF 를 보낼때 여러 개를 뭉쳐서 한번에 보낼 수도 있었습니다. 
+	// Scatter-Gather (흩어져 있는 데이터들을 모아서 한방에 보낸다)
+
+	Vector<WSABUF> wsaBufs;
+	wsaBufs.reserve(_sendEvent.sendBuffers.size());
+	for (SendBufferRef sendBuffer : _sendEvent.sendBuffers)
+	{
+		WSABUF wsaBuf;
+
+		wsaBuf.buf = reinterpret_cast<char*>(sendBuffer->Buffer());
+		wsaBuf.len = static_cast<LONG>(sendBuffer->WriteSize());
+
+		wsaBufs.push_back(wsaBuf);
+	}
+
 
 	DWORD numOfBytes = 0;
-	if (SOCKET_ERROR == ::WSASend(_socket, &wsaBuf, 1, OUT & numOfBytes, 0, sendEvent, nullptr))
+	if (SOCKET_ERROR == ::WSASend(_socket,/*동적배열의 시작주소*/ wsaBufs.data(), static_cast<DWORD>(wsaBufs.size()), OUT & numOfBytes, 0, &_sendEvent, nullptr))
 	{
 		// 진짜 실패인지 PENDING 상태인지 체크 
 		int32 errorCode = WSAGetLastError();
 		if (errorCode != WSA_IO_PENDING)
 		{
 			HandleError(errorCode);
-			sendEvent->owner = nullptr;
-			//실시간으로 생성했던 sendEvent는 일이 끝났으니 삭제
-			A_delete(sendEvent);
+			_sendEvent.owner = nullptr; // RELEASE_REF
+			_sendEvent.sendBuffers.clear(); // RELEASE_REF
+			_sendRegistered.store(false);
 		}
 	}
-	
 }
 
 void Session::ProcessConnect()
@@ -301,10 +357,11 @@ void Session::ProcessRecv(int32 numOfBytes)
 	RegisterRecv();
 }
 
-void Session::ProcessSend(SendEvent* sendEvent, int32 numOfBytes)
+void Session::ProcessSend(int32 numOfBytes)
 {
-	sendEvent->owner = nullptr;
-	A_delete(sendEvent);
+	_sendEvent.owner = nullptr;	// RELEASE_REF
+	_sendEvent.sendBuffers.clear(); // RELEASE_REF
+	
 
 	if (numOfBytes == 0)
 	{
@@ -315,6 +372,13 @@ void Session::ProcessSend(SendEvent* sendEvent, int32 numOfBytes)
 	// 컨텐츠 코드에서 오버라이딩
 	OnSend(numOfBytes);
 
+	// _sendQueue에 데이터가 남았는지 아닌지에 따라 계속 RegisterSend를 호출해줄것인지 
+	// 다음번 Send호출을 기다릴것인지 나뉩니다.
+	WRITE_LOCK;	// _sendQueue는 멀티스레드 환경에서 동시 접근할 수 있기 때문
+	if (_sendQueue.empty())
+		_sendRegistered.store(false);
+	else
+		RegisterSend();
 }
 
 void Session::HandleError(int32 errorCode)

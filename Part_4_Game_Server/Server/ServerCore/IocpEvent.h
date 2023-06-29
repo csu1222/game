@@ -18,13 +18,6 @@ enum class EventType : uint8
 ----------------
 */
 
-/*
-Overlapped 구조체를 대신할 것이기 때문에 가장 앞에 Overlapped 구조체가 있거나
-상속을 받아줘야합니다. 여기서는 상속하는 방식으로 하겠습니다.
--주의할점-
-상위 클래스가 될것이라고 virtual 키워드를 쓰면 offset 0번에 OVERLAPPED 가 아닌 다른 정보가 
-들어가게되니 사용하면 안된다
-*/
 class IocpEvent : public OVERLAPPED
 {
 public:
@@ -32,10 +25,8 @@ public:
 
 	void		Init();
 
-	// private에서 public으로 열어줬는데 멤버 변수에 자주접근할 예정이다 보니 열었습니다.
 public:
 	EventType	eventType;
-	// 이벤트의 주인 객체를 shared_ptr로 들고 있습니다. 
 	IocpObjectRef owner;
 };
 
@@ -45,7 +36,6 @@ public:
 	ConnectEvent
 ----------------
 */
-// 아주 간단하게 EventType을 Connect로 들고 있게 합니다. 
 class ConnectEvent : public IocpEvent
 {
 public:
@@ -57,7 +47,6 @@ public:
 	DisconnectEvent
 ----------------
 */
-// 아주 간단하게 EventType을 Connect로 들고 있게 합니다. 
 class DisconnectEvent : public IocpEvent
 {
 public:
@@ -70,21 +59,13 @@ public:
 	AcceptEvent
 ----------------
 */
-// Accept는 예외적으로 EventType 외에 추가적인 변수가 있습니다. 
-// 그냥 accept 함수를 호출하면 반환으로 clientSocket이 반환 되었는데 앞으로 사용하려는 
-// AcceptEx의 인자를 보면 listenSocket 과 clientSocket으로 사용할 소켓도 같이 받아주고 있습니다.
-// 다른 IO 함수들과 달리 AcceptEvent 에서는 추가적으로 필요한 인자를 들고 있어야 합니다. 
-//
 class AcceptEvent : public IocpEvent
 {
 public:
 	AcceptEvent() : IocpEvent(EventType::Accept) { }
 
 	
-	// 멤버 변수를 그냥 public으로 열어서 직접 건드리겠습니다. 
 public:
-	// Session을 연동받아서 나중에 이 이벤트가 어떤 세션에 대한 이벤트인지를 기억합니다.
-	// shared_ptr로 들고 있게 해서 참조 카운팅을 해줍니다.
 	SessionRef	session = nullptr;
 };
 
@@ -109,6 +90,7 @@ class SendEvent : public IocpEvent
 public:
 	SendEvent() : IocpEvent(EventType::Send) { }
 
-	// TEMP
-	vector<BYTE> buffer;
+	// 이전에는 BYTE 타입으로만 버퍼를 받고 있었는데 이제 SendBuffer 단위로 
+	// 받아 관리하도록 하였습니다. 
+	Vector<SendBufferRef> sendBuffers;
 };
