@@ -1,0 +1,394 @@
+
+
+
+        SendBuffer Pooling
+
+
+Send 버퍼라는 개념을 도입해 매 Send 호출때마다 memcpy를 하는게 아닌 따로 버퍼를 shared_ptr 동적할당해 저장해 두고 
+필요한 만큼을 참조해 사용하다가 필요 없어지면 참조 카운트를 0으로 줄여주면서 자연스럽게 삭제 되게끔 만들어 주었었습니다. 
+
+또 Send는 멀티스레드 환경에서 동작하는게 유리 하기 때문에 Service 에서 공용으로 사용하는 IOCP 에 접근은 락을 걸어주도록 했습니다. 
+락을 걸었는데 멀티스레드를 사용하면 어쩔수 없이 병목현상이 일어나는데, 이 문제를 우회하는 방법으로 어느 스레드가 락을 걸고 
+RegisterSend를 호출하는 동안에는 _sendQueue라고 하는 컨테이너에 늦게온 스레드들의 SendBufferRef 를 담아두었다가 
+RegisterSend안의 WSASend의 인자로 WSABUF를 한번에 뭉쳐서 건내주는 Scatter-Gather 방식으로 만들었습니다. 
+
+처음 만들었던 구조에 비해 많이 효율적이게 수정이 되었습니다. 
+하지만 그럼에도 조금 아쉬운 부분이 있는데 매번 새로운 데이터를 보낼때마다 SendBufferRef 객체를 만들어 주는 부분이 조금 아쉽습니다. 
+물론 SendBufferRef 를 생성하는 MakeShared는 코드를 자세히 보면 프로젝트 실행 모드에 따라 디버그 모드에서는 스톰프 Allocator 를 사용해 
+곧바로 메모리를 해제하는 방식으로 동작하지만 Release 모드에서는 Pool Allocator 로 메모리 오염을 잡기보다는 메모리 풀링을 사용해 
+성능을 더 끌어올리는 방식으로 동작하도록 만들었었습니다. 
+
+이정도면 충분하지 않을까 넘어갈 수도 있지만 
+그럼에도 불구하고 메모리 풀을 만들었을때 메모리 양이 너무 커지면 메모리 풀링을 하지 않고 그냥 new delete를 하도록 했었습니다. 
+또 한가지 더 문제는 SendBuffer를 만들때 4kb 의 크기로 생성하고 그 후 받은 데이터의 크기 만큼을 writeSize로 들고 있도록 했었습니다. 
+아예 처음부터 데이터의크기를 알았으면 capacity도 거기에 맞게 생성하면되는데 널널하게 만든 이유는 
+경우에 따라 내가 보낼 데이터의 크기를 미리 예측할 수 없는 상황이 생기기도 하기 때문입니다. 
+이것은 패킷 설계에 따른 부분이긴한데 먼저 버퍼를 크게 할당하고 이리 저리 채워주고 그제서야 다 채운후의 사이즈를 writeSize로 사용하는 경우도 있고 
+아니면 먼저 보낼 데이터를 다 만들어 두고 그 크기를 가지고 버퍼를 생성하는 경우도 있습니다. 
+이 두가지 경우를 모두 커버하기 위해서는 결국 capacity도 큼지막하게 만들어 두고 그 중에 실제 데이터 크기를 writeSize로 사용하는 방식으로 만들었습니다. 
+
+그런데 이렇게 만들다 보니까 내가 보낼 데이터가 1byte 만 보낼 상황임에도 불구하고 capacity는 4kb크기로 잡는것이 마음에 걸립니다. 
+
+그래서 이번 시간에는 매번 SendBuffer를 매번 고정된 크기로 생성하지 않는 방법에 대해 실습을 해볼것입니다. 
+간단하게 생각하면 버퍼의 최대 크기를 정해두고 그 버퍼를 계속 재사용하면 되지 않을까 생각이 듭니다.
+이 방법도 메모리가 아깝기는하지만 가능한 방법입니다. 
+
+사실은 요즘 컴퓨터 성능이 워낙 좋기 때문에 매번 버퍼를 생성하는 방법도 괜찮기는 합니다. 그러나 이런저런 기법들을 실습해보면서 알아보는것은 학습하는 입장에서 
+매우 도움이 될것입니다. 
+
+
+오늘 작업 시작은 SendBuffer 파일들 부터입니다. SendBuffer 클래스 밑으로 두가지 클래스를 새로 만들어 줄것인데 
+SendBufferChunk, SendBufferManager 라는 이름으로 만들어 줄것입니다. 
+SendBufferChunk는 버퍼를 만들때 한번에 커다랗게 한번에 만들어 준 다음 그때 그때 필요에 따라 버퍼를 쪼개어 사용하는 정책이고 
+SendBufferManager는 전역객체로 만들어 SendBuffer들을 한번에 관리하는 기능을 할것입니다. 
+
+
+*** 
+
+-- SendBufferManager 부터 
+
+/*
+------------------------------
+	SendBufferManager 선언부
+------------------------------
+*/
+
+// SendBufferManager는 글로벌하게 하나만 만들어 사용할것입니다. 
+// CoreGlobal.h 에 추가합니다. 
+class SendBufferManager
+{
+public:
+	// 큼지막한 버퍼덩어리에서 사용할 만큼을 쪼개 가져가겠다
+	SendBufferRef				Open(uint32 size);
+
+private:
+	// SendBufferChunk를 풀에서 꺼내는 함수
+	SendBufferChunkRef			Pop();
+	// SendBufferChunk를 풀에 반납을 하는 함수
+        void					Push(SendBufferChunkRef buffer);
+
+        static void				PushGlobal(SendBufferChunk* buffer);
+
+private:
+	// 전역으로 사용할것이다 보니 Lock을 사용합니다. 
+	USE_LOCK;
+	// Types.h 에 SendBufferChunkRef 정의를 추가 합니다. 
+	Vector<SendBufferChunkRef>	        _sendBufferChunks;
+};
+
+몇가지 기존 만들어 놨던 파일에 추가할게 있습니다. CoreGlobal에는 전역 객체로 관리하도록 하였고 SendBufferChunk 도 새로 shared_ptr 관리하기 위해 
+Types.h 에도 SendBufferChunkRef를 추가하였습니다. 
+
+
+/*
+------------------------------
+	SendBufferManager 정의부
+------------------------------
+*/
+SendBufferRef SendBufferManager::Open(uint32 size)
+{
+	// 큼지막한 버퍼덩어리에서 사용할 만큼을 쪼개 가져가겠다
+
+	// Open으로 가져간 영역의 버퍼를 꼭 다 사용할 필요는 없고 나중에 버퍼에 저장할 만큼
+	// 저장한 다음 Close를 해주게 될건데 그 Close된 영역이 실제 버퍼에서 사용된 데이터 크기입니다. 
+
+	// 실질적으로 컨텐츠 단에서 사용하는 함수는 이 Open입니다. 
+
+	// 매번 GSendBufferManager 에서 SendBufferChunk를 꺼내사용하기 보다는 
+	// TLS에 SendBufferChunkRef를 하나 들고 있게 해서 최대한 락을 덜 걸어도 되도록 해주겠습니다. 
+	// CoreTLS 파일들에 LSendBufferChunk 로 추가했습니다. 
+
+
+	if (LSendBufferChunk == nullptr)
+	{
+		LSendBufferChunk = Pop();	// Pop내부에서 WRITE_LOCK 
+		LSendBufferChunk->Reset();
+	}
+	// LSendBufferChunk 가 이미 Open을 한 상태인지 체크
+	ASSERT_CRASH(LSendBufferChunk->IsOpen() == false);
+
+	// 다 썼으면 버리고 새거로 교체
+	// 다 썻다는것이 무슨 말이냐 하면 SendBufferChunk를 사용하는 방법이 할당된 메모리의 
+	// 앞쪽 주소부터 필요한 만큼 쪼개 사용한다음 한번 쪼갠 만큼의 메모리는 재사용하지 않고 
+	// 다음 뒷쪽 주소로 쭉 이어 사용합니다. 그러면서 SendBufferChunk의 용량을 다 사용하면 
+	// 기존것은 폐기하고 새것을 Pop해 사용합니다. 그러면 기존것이 폐기된다는것은 어떤 의미인가 하면 
+	// 아무도 그 BufferChunk를 참조하지 않게 되면 A_delete 대신 설정해준 PushGlobal이 호출되어 
+	// 다시 _sendBufferChunks로 들어오게 됩니다. 
+
+	// 스레드의 로컬 영역에 있는 버퍼 청크의 남은 공간이 Open하려고 하는 size 보다 작다면
+	if (LSendBufferChunk->FreeSize() < size)
+	{
+		// 새로 Pop을 해줍니다. 꺼낸 버퍼청크는 Reset으로 밀어줍니다. 
+		LSendBufferChunk = Pop();
+		LSendBufferChunk->Reset();
+	}
+
+	// 여기까지 왔다면 이 스레드의 버퍼 청크는 원래 nullptr 이었으면 Pop,
+	// 남은공간이 충분치 않았다면 Pop, 이미 버퍼청크가 있고 남은공간도 충분하다면 그냥 그대로 반환합니다. 
+	return LSendBufferChunk->Open(size);
+}
+
+SendBufferChunkRef SendBufferManager::Pop()
+{
+	{
+		// 락의 영역을 조절하는 중괄호
+		WRITE_LOCK;
+		if (_sendBufferChunks.empty() == false)
+		{
+			// 풀이 비지 않았으면 그 청크를 반환합니다. 
+			SendBufferChunkRef sendBufferChunk = _sendBufferChunks.back();
+			_sendBufferChunks.pop_back();
+			return sendBufferChunk;
+		} 
+	}
+
+	return SendBufferChunkRef(A_new<SendBufferChunk>(), PushGlobal);
+	// SendBufferChunkRef를 반환하는 방법이 생소합니다. 평소에는 shared_ptr은 MakeShared를 통해 
+	// A_new를 해주면서 PoolAllocator 를 사용하고, A_delete를 통해 또 PoolAllocator::Release를 
+	// 통해 메모리 풀로 돌아가고 있었는데 
+	// 이것들을 직접 A_new<SendBufferChunk>(), PushGlobal를 사용하게끔 만들어 주고 있는겁니다.
+	// SendBufferChunkRef의 참조 카운트가 0이 되었을때 호출되는 PushGlobal 로 인해 메모리를 날리는게 아닌
+	// SendBufferManager::_sendBufferChunks 로 돌아오게끔 해줍니다. 
+	// 그러니까 계속 재사용을 할것이라는 말입니다. 
+	// 이렇게 외부에서 사용할수 있도록 PushGlobal 함수만 static 이 붙은것입니다. 
+}
+
+void SendBufferManager::Push(SendBufferChunkRef buffer)
+{
+	WRITE_LOCK;
+	_sendBufferChunks.push_back(buffer);
+}
+
+void SendBufferManager::PushGlobal(SendBufferChunk* buffer)
+{
+	// 글로벌 객체인 GSendBufferManager에 Push해줍니다. 이때 다시 참조 카운트 0일때 PushGlobal이 
+	// 실행되도록 합니다. 
+	GSendBufferManager->Push(SendBufferChunkRef(buffer, PushGlobal));
+}
+
+
+그냥 조금이라도 이해하기 쉽도록 SendBufferManager 부터 만들었고 그 때문에 아진 구현하지 않은 SendBufferChunk 클래스의 함수들도 많이 등장했습니다. 
+
+-- SendBufferChunk
+
+
+/*
+------------------------------
+	SendBufferChunk 선언부
+------------------------------
+*/
+
+class SendBufferChunk : public enable_shared_from_this<SendBufferChunk>
+{
+	// SendBufferChunk는 각 스레드가 SendBufferManager로 부터 꺼낸후 
+	// TLS에서 사용할것이기 때문에 싱글스레드에서의 동작을 기준으로 만들 수 있습니다. 
+
+	// 사용할 청크의 사이즈를 enum으로 정해둡니다. 나중에 수정하기 쉽도록 
+	enum
+	{
+		SEND_BUFFER_CHUNK_SIZE = 0x1000
+	};
+
+public:
+	SendBufferChunk();
+	~SendBufferChunk();
+
+	void			Reset();
+	SendBufferRef	Open(uint32 allocSize);	// 할당할 공간 
+	void			Close(uint32 writeSize);			// 실질적으로 사용한 공간 
+
+	bool			IsOpen() { return _open; }	// Open후 Close를 했는지 안했는지 
+	BYTE*			Buffer() { return &_buffer[_usedSize]; }	// 현재까지 꺼내간 버퍼이후의 주소 
+	uint32			FreeSize() { return static_cast<uint32>(_buffer.size() - _usedSize); }
+private:
+	// Container.h 에 새로 Array를 추가 
+	Array<BYTE, SEND_BUFFER_CHUNK_SIZE>	_buffer = {};
+	bool								_open = false;
+	uint32								_usedSize = 0; // SEND_BUFFER_CHUNK_SIZE 중 지금까지 사용한 크기
+};
+
+
+/*
+------------------------------
+	SendBufferChunk 정의부
+------------------------------
+*/
+
+SendBufferChunk::SendBufferChunk()
+{
+}
+
+SendBufferChunk::~SendBufferChunk()
+{
+}
+
+void SendBufferChunk::Reset()
+{
+	_open = false;
+	_usedSize = 0;	// 이걸 0으로 밀어주면서 이 버퍼청크의 시작 위치부터 다시 사용할 수 있도록 합니다. 
+}
+
+SendBufferRef SendBufferChunk::Open(uint32 allocSize)
+{
+	// 예외처리를 두가지 하고 있습니다. 할당받고 싶은 크기가 정해뒀던 버퍼 청크의 최대 크기 보다 작은가?
+	// 이미 Open을 하고 있는 중인가? 를 체크합니다. 
+	ASSERT_CRASH(allocSize <= SEND_BUFFER_CHUNK_SIZE);
+	ASSERT_CRASH(_open == false);
+
+	// allocSize가 남은 사이즈보다 크다면 Open 실패로 nullptr을 반환
+	if (allocSize > FreeSize())
+		return nullptr;
+
+	// 여기 까지 왔다면 Open을 할 수 있습니다. 
+	_open = true;
+	 
+	// 반환으로 ObjectPool을 사용해 반환 해주게 됩니다. 
+	return ObjectPool<SendBuffer>::MakeShared(shared_from_this(), Buffer(), allocSize);
+
+	// 반환할때 사용한 방법은 <> 안의 클래스를 shared_ptr 로 만들고 MakeShared () 안의 인자들을 생성자에게 넘겨주는 코드 였습니다. 
+	// 참조 카운트가 0이 되면 Push로 ObjectPool 안으로 되돌아 오는 식입니다. 
+	// 즉 SendBuffer의 생성자 인자 등 수정을 해야 합니다. 
+}
+
+
+void SendBufferChunk::Close(uint32 writeSize)
+{
+	// open을 하지 않았는데 close 할 수는 없습니다. 
+	ASSERT_CRASH(_open == true);
+	// 체크후에는 잊지말고 _open을 false로, _usedSize는 writeSize 만큼 증가
+	_open = false;
+	_usedSize += writeSize;
+}
+
+
+-- SendBuffer
+SendBufferChunk 를 도입하면서 기존 SendBuffer 클래스의 구조를 수정해야합니다. 
+
+/*
+-------------------------
+	SendBuffer 선언부 
+-------------------------
+*/
+
+// 전방선언 
+class SendBufferChunk;
+ 
+class SendBuffer
+{
+public:
+	// 생성자가 받는 인자가 수정되었습니다. 
+	SendBuffer(SendBufferChunkRef owner, BYTE* buffer, int32 allocSize);
+	~SendBuffer();
+
+	// _buffer가 더이상 Vector 가 아닌 포인터의 형태이기 때문에 그대로 반환
+	BYTE* Buffer() { return _buffer; }
+	int32 WriteSize() { return _writeSize; }
+	void Close(uint32 writeSize);
+
+	// Capacity(), CopyData() 는 더이상 사용하지 않습니다. 
+	//int32 Capacity() { return static_cast<int32>(_buffer.size()); }
+	//void CopyData(void* data, int32 len);
+
+private:
+	// SendBufferChunk를 도입하면서 SendBuffer 자체에서는 _buffer를 Vector로 
+	// 들고 있지 않고 시작주소인 BYTE* 와 얼만큼 할당받았는지 allocSize로 범위를 
+	// 가지고 있을것입니다. 
+	// 또 SendBufferChunk로 부터 가져온 버퍼를 사용하는 중에 먼저 SendBufferChunk가
+	// 삭제 되면 안되기 때문에 자신의 owner를 참조 하고 있도록 하겠습니다. 
+	BYTE*				_buffer;
+	uint32				_allocSize = 0;
+	uint32				_writeSize = 0;
+	SendBufferChunkRef	_owner;
+};
+
+/*
+-------------------------
+	SendBuffer 정의부
+-------------------------
+*/
+
+SendBuffer::SendBuffer(SendBufferChunkRef owner, BYTE* buffer, int32 allocSize)
+	: _owner(owner), _buffer(buffer), _allocSize(allocSize)
+{
+}
+
+SendBuffer::~SendBuffer()
+{
+}
+
+void SendBuffer::Close(uint32 writeSize)
+{
+	// 기존 Capacity() 대신 _allocSize
+	ASSERT_CRASH(_allocSize >= writeSize);
+
+	// 앞으로 memcpy는 외부에서 해줄것입니다.  
+	//::memcpy(_buffer.data(), data, len);
+
+	_writeSize = writeSize;
+
+	// 할당받은 메모리중 실제 사용한 크기인 writeSize로 확정을 지어줍니다. 
+	_owner->Close(_writeSize);
+}
+
+
+
+이렇게 그냥 SendBuffer를 매번 생성 삭제 하는것이 아닌 좀더 큰 덩어리인 SendBufferChunk를 만들고 또 이것의 메모리 풀링을 하는 SendBufferManager 도 
+만들었습니다. 
+
+한번 어떻게 동작할것인지 흐름을 쭉 훑어 보겠습니다. 
+어떤 스레드에서 Send를 하기 위해 GSendBufferManager 라는 전역 객체에게 필요한 사이즈를 주면서 SendBufferManager::Open(allocSize) 를 호출하게 됩니다. 
+SendBufferManager::Open 안에서는 호출한 스레드의 TLS 안에 LSendBufferChunk 를 확인하여 nullptr 이라면 Pop(), Reset() 을 해주고, allocSize가 LSendBufferChunk의 FreeSize 보다 크다면
+또 Pop(), Reset() 을 해줍니다. 둘 다 아니라면 이미 LSendBufferChunk 에 버퍼 청크가 있고 여유공간도 충분하다는 뜻이니 그걸 사용하게 합니다. 
+
+여기서 나온 SendBufferManager::Pop 은 _sendBufferChunks 라는 곳에 남는 버퍼 청크가 있다면 그걸 반환하고 없다면 새로 SendBufferChunkRef 를 만들어 반환합니다. 
+이때 새로 만들어 반환하는 SendBufferChunkRef 는 할당자 해제자를 직접 선택해 만드는데 할당자는 기존의 만든 PoolAllocator를 사용하는 A_new 를 사용하고 ,
+해제자는 PushGlobal() 이라는 함수를 사용합니다. PushGlobal은 Open으로 스레드에 넘겨준 SendBufferChunk의 참조 카운트가 0이 되면 A_delete 대신 _sendBufferChunks로 회수되도록 해줍니다. 
+
+이제는 SendBufferChunk클래스가 무슨일을 하는지, Open이 무엇인지를 보겠습니다. 자신의 크기를 SEND_BUFFER_CHUNK_SIZE 라는 enum으로 설정해 두고 그 만큼 수의 BYTE를 Array로 만들어 들고 있습니다. 
+또한 지금 자신이 Open을 하고 있는지를 bool로 체크하고, 전체 SendBufferChunk 중 어느 정도를 이미 사용했는지를 _usedSize 라고 들고 있을것입니다. 
+스레드에서 Open을 호출하면서 SendBuffer의 생성자 인자로 owner를 LSendBufferChunk로 지정하고 버퍼의 시작주소를 설정하고 이후 어느정도의 크기를 할당할지를 만들어 SendBuffer로 만들어 사용하게 됩니다. 
+이후 컨텐츠 단에서 할당받은 영역에서 원하는 대로 사용하는데 꼭 전부를 다 사용해야 하는것은 아니고 남길 수도 있습니다. 다 사용한 다음은 Close를 호출할것입니다. 
+Close 의 인자로 실제로 사용한 데이터의 크기를 확정짓고 그 주소부터 다시 SendBufferChunk가 버퍼를 나눠 주게 될것입니다. 
+
+이 과정중에 멀티스레드 환경에서 동작하기 때문에 주의 해야하는 사용중 삭제문제를 해결하기 위해 WSASend를 호출하면서 SendEvent 에서도 SendBuffer를 참조 하고 있고 또 SendBuffer는 owner로서 
+SendBufferChunk를 참조 하고 있습니다. 
+
+*** 
+-- 테스트 
+오늘 작업한 내용을 테스트 하기 위해서 Send를 하고 있던 코드인 GameSession 클래스 코드를 수정하겠습니다. 
+
+int32 GameSession::OnRecv(BYTE* buffer, int32 len)
+{
+	cout << "OnRecv Len = " << len << endl;
+
+	// MakeShared<SendBuffer> 대신 GSendBufferManager->Open 으로 버퍼를 받아옵니다. 
+	SendBufferRef sendBuffer = GSendBufferManager->Open(4096);
+	// 여기서 직접 memcpy로 보낼 데이터를 복사 합니다. 
+	::memcpy(sendBuffer->Buffer(), buffer, len);
+	// 다 복사해서 확정할때가 되면 Close로 닫아줍니다. 
+	sendBuffer->Close(len);
+	
+	// 데이터를 받았으면 자신 연결되 있는 클라뿐만 아니라 세션 매니저의 모든 세션에 Send
+	GSessionManager.Broadcast(sendBuffer);
+
+	return len;
+}
+
+똑같이 DummyClient 쪽에서도 수정했습니다. 
+
+그런데 지금 테스트 중에 Open 할때 가져오는 버퍼 사이즈가 4096, 4kb 입니다. 아까 임의로 정해줬던 SendBufferChunk 크기인 SEND_BUFFER_CHUNK_SIZE 도 마침 4kb 입니다. 
+테스트상 버퍼 청크에서 잘 쪼개서 넘겨주고 있는지를 살펴보고 싶으니 일단 SEND_BUFFER_CHUNK_SIZE를 6000 으로 수정하고 
+도 SendBufferManager::Open를 하면서 로그를 찍어 보겠습니다. 
+
+실행해서 로그를 살펴보면 처음에는 설정했던 6000 이라는 크기의 버퍼가 서로 주고 받는 13 바이트의 문자열만큼씩 줄어 드는걸 확인할 수 있습니다. 
+
+지금까지의 결과와 비슷해보이지만 이번 시간을 통해 더 나아진 점은 각 세션에서 Send를 할때 마다 SendBuffer를 할당받는게 아닌 처음에 6000이라는 사이즈의 큰 덩어리를 할당받은다음 
+그걸 사용한 만큼씩을 쪼개 사용한다는 것입니다. 한번 Send를 마치면서 그때 사용한 SendBuffer의 소멸자가 호출될때 마다 
+SendBuffer의 owner인 LSendBufferChunk에 대한 참조 카운트가 줄어 들고 언젠가는 6000 이라는 메모리를 다 사용한 다음은 이 LSendBufferChunk의 참조 카운트가 0이 될겁니다. 
+그러면 PushGlobal로 인해 다시 SendBufferManager로 돌아가고 스레드의 LSendBufferChunk는 새로운 SendBufferChunkRef를 Pop해 다시 6000만큼의 메모리를 받아와 Send를 해 나가갈겁니다. 
+
+이 구조에서는 SEND_BUFFER_CHUNK_SIZE의 사이즈를 아무리 크게 해도 상관 없는것이 맨처음 할당을 받은 후에는 스레드 내부에서 알아서 쪼개 사용하고 
+다 사용했다면 SendBuffer 풀에서 꺼내 다시 재사용하게 되는 것입니다. 
+
+또 좋은 점은 스레드의 TLS 안에서 버퍼를 사용함으로써 따로 Lock을 잡지 않아도 되는것입니다. 게임에서는 Send가 몰릴때가 있는데 하나하나 Lock을 잡고 동작하다보면 
+너무 오래 걸릴것이기 때문에 TLS는 경합을 하지 않아도 되는 만큼 더 부드럽게 동작하게 될것입니다. 

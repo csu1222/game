@@ -21,8 +21,10 @@ public:
 		// 연결할때 Send를 한번 합니다. 
 		cout << "Connected To Server" << endl;
 
-		SendBufferRef sendBuffer = MakeShared<SendBuffer>(4096);
-		sendBuffer->CopyData(sendData, sizeof(sendData));
+		SendBufferRef sendBuffer = GSendBufferManager->Open(4096);
+		::memcpy(sendBuffer->Buffer(), sendData, sizeof(sendData));
+		sendBuffer->Close(sizeof(sendData));
+
 
 		Send(sendBuffer);
 	}
@@ -34,8 +36,9 @@ public:
 		// 1초에 한번 전송하기위함 
 		this_thread::sleep_for(1s);
 
-		SendBufferRef sendBuffer = MakeShared<SendBuffer>(4096);
-		sendBuffer->CopyData(buffer, len);
+		SendBufferRef sendBuffer = GSendBufferManager->Open(4096);
+		::memcpy(sendBuffer->Buffer(), sendData, sizeof(sendData));
+		sendBuffer->Close(sizeof(sendData));
 
 		Send(sendBuffer);
 		return len;

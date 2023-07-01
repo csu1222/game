@@ -20,13 +20,14 @@ using UnipueLock = std::unique_lock<std::mutex>;
 using LockGuard = std::lock_guard<std::mutex>;
 
 // shared_ptr 을 간편히 
-using IocpCoreRef = std::shared_ptr<class IocpCore>;
-using IocpObjectRef = std::shared_ptr<class IocpObject>;
-using SessionRef = std::shared_ptr<class Session>;
-using ListenerRef = std::shared_ptr<class Listener>;
-using ServerServiceRef = std::shared_ptr<class ServerService>;
-using ClientServiceRef = std::shared_ptr<class ClientService>;
-using SendBufferRef = std::shared_ptr<class SendBuffer>;
+using IocpCoreRef			= std::shared_ptr<class IocpCore>;
+using IocpObjectRef			= std::shared_ptr<class IocpObject>;
+using SessionRef			= std::shared_ptr<class Session>;
+using ListenerRef			= std::shared_ptr<class Listener>;
+using ServerServiceRef		= std::shared_ptr<class ServerService>;
+using ClientServiceRef		= std::shared_ptr<class ClientService>;
+using SendBufferRef			= std::shared_ptr<class SendBuffer>;
+using SendBufferChunkRef	= std::shared_ptr<class SendBufferChunk>;
 
 // 자주 사용하게 될 정수 크기 변환 매크로
 #define size16(val) static_cast<int16>(sizeof(val))

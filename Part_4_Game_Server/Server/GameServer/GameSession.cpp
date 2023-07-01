@@ -24,8 +24,9 @@ int32 GameSession::OnRecv(BYTE* buffer, int32 len)
 {
 	cout << "OnRecv Len = " << len << endl;
 
-	SendBufferRef sendBuffer = MakeShared<SendBuffer>(4096);
-	sendBuffer->CopyData(buffer, len);
+	SendBufferRef sendBuffer = GSendBufferManager->Open(4096);
+	::memcpy(sendBuffer->Buffer(), buffer, len);
+	sendBuffer->Close(len);
 	
 	// 데이터를 받았으면 자신 연결되 있는 클라뿐만 아니라 세션 매니저의 모든 세션에 Send
 	GSessionManager.Broadcast(sendBuffer);

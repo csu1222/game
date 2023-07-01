@@ -15,31 +15,6 @@
 Session 클래스의 멤버 함수중 Process류 함수에서 호출하던 오버라이딩용 함수들을 에코서버처럼 동작하게
 만들어 봤습니다. 
 */
-class GameSession2 : public Session
-{
-public:
-	~GameSession2()
-	{
-		cout << "~GameSession" << endl;
-	}
-	virtual int32 OnRecv(BYTE* buffer, int32 len) override
-	{
-		cout << "OnRecv Len = " << len << endl;
-
-		// 받은 데이터를 SendBuffer에 한번은 복사해 들고 있고 
-		// Send를 호출할때 마다 이걸 참조하도록 합니다. 
-		SendBufferRef sendBuffer = MakeShared<SendBuffer>(4096);
-		sendBuffer->CopyData(buffer, len);
-		
-		Send(sendBuffer);
-		return len;
-	}
-
-	virtual void OnSend(int32 len) override
-	{
-		cout << "OnSend Len = " << len << endl;
-	}
-};
 
 int main()
 {	
