@@ -4,11 +4,10 @@
 #include "Service.h"
 #include "Session.h"
 
-// TEMP : 임시로 보낼 데이터 버퍼를 만들었습니다. 
 char sendData[] = "Hello World!";
 
-
-class ServerSession : public Session
+// Session 대신 PacketSession을 상속 받습니다.
+class ServerSession : public PacketSession
 {
 public:
 	~ServerSession()
@@ -18,40 +17,36 @@ public:
 
 	virtual void OnConnected() override
 	{
-		// 연결할때 Send를 한번 합니다. 
-		cout << "Connected To Server" << endl;
+		// cout << "Connected To Server" << endl;
 
-		SendBufferRef sendBuffer = GSendBufferManager->Open(4096);
-		::memcpy(sendBuffer->Buffer(), sendData, sizeof(sendData));
-		sendBuffer->Close(sizeof(sendData));
-
-
-		Send(sendBuffer);
+		// Connect때 Send를 하는것 대신 GameServer 에서 뿌려주는 패킷을 받을것입니다. 
 	}
 	
-	virtual int32 OnRecv(BYTE* buffer, int32 len) override
+	// OnRecv 대신 OnRecvPacket
+	virtual int32 OnRecvPacket(BYTE* buffer, int32 len) override
 	{
-		cout << "OnRecv Len = " << len << endl;
+		// GameSession 에서 하던것처럼 받은 패킷의 헤더 내용들을 추출해 출력
+		PacketHeader header = *(reinterpret_cast<PacketHeader*>(&buffer[0]));
 
-		// 1초에 한번 전송하기위함 
-		this_thread::sleep_for(1s);
+		cout << "Packet ID : " << header.id << " Size : " << header.size << endl;
 
-		SendBufferRef sendBuffer = GSendBufferManager->Open(4096);
-		::memcpy(sendBuffer->Buffer(), sendData, sizeof(sendData));
-		sendBuffer->Close(sizeof(sendData));
+		// 헤더 외에 받은 내용이 궁금하다면 임시 버퍼를 만들어 줍니다.
+		char recvBuffer[4096];
+		::memcpy(recvBuffer, &buffer[4], header.size - sizeof(PacketHeader));
+		
+		cout << "Recv Data = " << recvBuffer << endl;
 
-		Send(sendBuffer);
 		return len;
 	}
 
 	virtual void OnSend(int32 len) override
 	{
-		cout << "OnSend Len = " << len << endl;
+		//cout << "OnSend Len = " << len << endl;
 	}
 
 	virtual void OnDisconnected() override
 	{
-		cout << "Disconnected" << endl;
+		//cout << "Disconnected" << endl;
 	}
 };
 
@@ -66,7 +61,7 @@ int main()
 		NetAddress(L"127.0.0.1", 7777),
 		MakeShared<IocpCore>(),
 		MakeShared<ServerSession>,
-		5);
+		1000);
 
 	ASSERT_CRASH(service->Start());
 

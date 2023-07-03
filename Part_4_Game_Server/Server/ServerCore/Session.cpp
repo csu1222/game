@@ -21,19 +21,25 @@ Session::~Session()
 
 void Session::Send(SendBufferRef sendBuffer)
 {
-	// 이전에는 SendEvent를 Send 호출때마다 생성하고 삭제 하고 있었는데 
-	// 그 이유는 Send 안에서 RegisterSend를 호출 할때 마다 인자로 넘겨줘야 했었습니다.
-	// 그래서 RegisterSend를 매번 Send에서 호출해주는게 아닌 최초에 한번 호출 해준 다음 
-	// ProcessSend를 마칠때 다시 RegisterSend를 호출하도록 해주면 같은 SendEvent를 계속 사용할 수 있습니다. 
+	// 연결이 되어있는지 체크
+	if (IsConnected() == false)
+		return;
 
-	// TODO
-	// 현재 RegisterSend가 걸리지 않은 상태라면, 걸어준다 
-	// 만약, 이미 RegisterSend가 처리되지 않은 상태라서 다시 걸지 못한다면 Queue에 넣어준다 
-	WRITE_LOCK;
+	// 스택 메모리에 이 Send명령을 예약해야하는지를 만들었습니다.
+	bool registerSend = false;
 
-	_sendQueue.push(sendBuffer);
-	
-	if (_sendRegistered.exchange(true) == false)
+	// 락을 거는 범위를 조절합니다. 
+	{
+		WRITE_LOCK;
+
+		_sendQueue.push(sendBuffer);
+
+		if (_sendRegistered.exchange(true) == false)
+			registerSend = true;
+	}
+
+	// 락의 범위 밖에서 RegisterSend를 호출하면서 스레드 끼리 정체되는걸 줄였습니다.
+	if (registerSend)
 		RegisterSend();
 }
 
@@ -75,10 +81,6 @@ void Session::Disconnect(const WCHAR* cause)
 	// TEMP
 	wcout << "Disconnet : " << cause << endl;
 
-	OnDisconnected();	// 컨텐츠 코드에서 오버라이딩
-
-	// SocketUtils::Close(_socket);	// 소켓도 닫습니다.
-	GetService()->ReleaseSession(GetSessionRef());	// Release Ref
 	
 	// SocketUtils::Close 대신 RegisterDisconnect 를 호출합니다. 
 	RegisterDisconnect();
@@ -314,6 +316,10 @@ void Session::ProcessDisconnect()
 	// 여기서는 접속 종료후에 할일인데 사실 연결이 끊긴뒤에는 딱히 할 일이없고 
 	// 세션의 참조카운트만 줄이고 마치겠습니다. 
 	_disconnectEvent.owner = nullptr;	// RELEASE_REF
+
+	OnDisconnected();
+
+	GetService()->ReleaseSession(GetSessionRef());
 }
 
 void Session::ProcessRecv(int32 numOfBytes)
@@ -394,4 +400,61 @@ void Session::HandleError(int32 errorCode)
 		cout << "Handle Error : " << errorCode << endl;
 		break;
 	}
+}
+
+
+
+/*
+--------------------------
+	PacketSession 정의부
+--------------------------
+*/
+
+PacketSession::PacketSession()
+{
+}
+
+PacketSession::~PacketSession()
+{
+}
+
+int32 PacketSession::OnRecv(BYTE* buffer, int32 len)
+{
+	// [size(2)][id(2)][data......][size(2)][id(2)][data......]...
+	// 이런 형태로 패킷이 오게 만든다고 했습니다. 
+	// 일단 무한 루프 안에서 진행합니다.
+
+	int32 processLen = 0;	// 데이터 처리가 얼만큼 진행됐는지를 표현할것입니다. 
+
+	while (true)
+	{
+		// OnRecv로 받은 총 버퍼의 크기에 처리한 패킷의 크기를 빼줘서 
+		// 반복할때마다 패킷하나만큼의 크기씩 줄어들게 합니다. 
+		int32 dataSize = len - processLen;
+
+		// 최소한 len이 패킷헤더가 들어 있어야 합니다. 
+		if (dataSize < sizeof(PacketHeader))
+			break;
+
+		// 최소 패킷헤더는 포함되었다면 헤더 내용을 확인 해봅니다. 
+		// 사실 id는 지금은 필요없고 size가 필요합니다. 
+		// buffer의 시작주소부터 PacdetHeader 만큼의 길이를 복사해 PacketHeader로 해석하면 됩니다.
+		PacketHeader header = *(reinterpret_cast<PacketHeader*>(&buffer[0]));
+
+		// 헤더에 기록된 패킷크기를 파싱할 수 있어야 합니다. 
+		if (dataSize < header.size)
+			break; 
+		// 위에서 나온 header.size가 헤더 4바이트와 데이터를 포함할것인지 헤더빼고 뒤의 데이터의크기만을 말할것인지
+		// 스스로 정해줄 수 있습니다. 그에 맞게 모든 코드를 적용시켜주면되는데
+		// 지금 배우는 코드에서는 데이터 + 헤더의 크기를 모두 더한 크기를 size라고 하겠습니다. 
+
+		// 위의 조건문을 통과했다는것은 의도했던 패킷의 크기이상을 받아왔다는 뜻입니다.
+		// OnRecvPacket을 호출해 컨텐츠단에서 처리하게 넘겨줍니다.
+		OnRecvPacket(&buffer[0], header.size);
+
+		// 이제 처리한 패킷 사이즈 만큼을 기록합니다. 
+		processLen += header.size;
+	}
+
+	return processLen;
 }

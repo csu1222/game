@@ -6,7 +6,7 @@
 	GameSession 선언부 
 -------------------------
 */
-class GameSession : public Session
+class GameSession : public PacketSession
 {
 public:
 	~GameSession()
@@ -16,7 +16,8 @@ public:
 
 	virtual void OnConnected() override;
 	virtual void OnDisconnected() override;
-	virtual int32 OnRecv(BYTE* buffer, int32 len) override;
+	// OnRecv는 sealed로 잠궜고 대신 OnRecvPacket을 재정의해 사용합니다. 
+	virtual int32 OnRecvPacket(BYTE* buffer, int32 len) override;
 	virtual void OnSend(int32 len) override;
 };
 

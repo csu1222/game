@@ -131,6 +131,8 @@ SendBufferRef SendBufferManager::Open(uint32 size)
 
 SendBufferChunkRef SendBufferManager::Pop()
 {
+
+	cout << "Pop SendBufferChunk" << endl;
 	{
 		// 락의 영역을 조절하는 중괄호
 		WRITE_LOCK;
@@ -162,6 +164,7 @@ void SendBufferManager::Push(SendBufferChunkRef buffer)
 
 void SendBufferManager::PushGlobal(SendBufferChunk* buffer)
 {
+	cout << "PushGlobal SendBufferChunk" << endl;
 	// 글로벌 객체인 GSendBufferManager에 Push해줍니다. 이때 다시 참조 카운트 0일때 PushGlobal이 
 	// 실행되도록 합니다. 
 	GSendBufferManager->Push(SendBufferChunkRef(buffer, PushGlobal));

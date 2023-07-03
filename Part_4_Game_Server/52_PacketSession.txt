@@ -1,0 +1,467 @@
+
+
+
+            PacketSession
+
+    
+이전 시간에 SendBuffer를 좀 더 개량해 Pooling 을 더한 SendBufferChunk와 이것을 관리하는 SendBufferManager를 작업했습니다. 
+
+멀티스레드 환경에서 각 스레드의 TLS영역에 SendBufferChunk를 들고 있게 해서 SendBufferManager에서 버퍼 덩어리를 꺼낼때 경합이 최소한으로 일어나도록 
+하였고 또 각 스레드에서 버퍼 덩어리인 SendBufferChunk를 Send에 필요한만큼만 쪼개어 사용하는 식으로 SendBuffer의 생성과 삭제가 보다 적은 횟수로 일어나게끔 하였습니다. 
+
+인상적이었던것은 자주 경합이 일어날만한 메모리를 TLS에 위치시킨다면 경합이 많이 줄어든다는 것이었습니다. 
+
+
+그러면 이번 강의에서 알아볼 내용은 무었이나면 Send쪽 내용중 알아볼것이 조금 더 있어서 추가로 알아보고 다음은 PacketSession에 대해서도 알아볼것입니다. 
+
+
+*** 
+지난 시간에 작업했던 코드중 버그가 있다고 합니다. 
+
+
+void Session::Send(SendBufferRef sendBuffer)
+{
+	WRITE_LOCK;
+
+	_sendQueue.push(sendBuffer);
+	
+	if (_sendRegistered.exchange(true) == false)
+		RegisterSend();
+}
+
+Send함수를 이렇게 만들었었습니다. _sendQueue 라고 하는 큐에 보낼 데이터들을 예약해두고 RegisterSend 안에서 쌓인 예약을 처리해 갑니다. 
+여기서 _sendQueue에 해당하는 컨테이너는 꼭 Queue이어야 하는것은 아니고 LockFree Queue라던가 다른 컨테이너를 사용해도 된다고 합니다. 
+
+그리고 Send 내용 전체에 대해 WRITE_LOCK으로 락을 걸어 두고 진행하고 있습니다. 이 방법은 간단하게 구현하기 위해 사용했던 방법인데 
+이 방식의 문제점은 _sendQueue.push 에 만 락이 걸리는게 아니고 이후 RegisterSend의 동작에도 락이 걸린채 진행된다는것입니다. 
+RegisterSend의 안에서는 WSASend를 호출하면서 IOCP를 건드리고 있는데 락이 걸려있기때문에 다른 스레드에서는 IOCP에 접근하지 못하게 되고 
+잠깐 그러는것은 그렇다 치는데 WSASend를 하면서 Pending 상태라도 된다면 이 Pending이 풀릴때 까지 모든 스레드는 동작을 멈추게 됩니다. 
+
+이런 문제를 해결하기 위한 추가 수정을 해보겠습니다. 
+
+void Session::Send(SendBufferRef sendBuffer)
+{
+	// 연결이 되어있는지 체크
+	if (IsConnected() == false)
+		return;
+
+	// 스택 메모리에 이 Send명령을 예약해야하는지를 만들었습니다.
+	bool registerSend = false;
+
+	// 락을 거는 범위를 조절합니다. 
+	{
+		WRITE_LOCK;
+
+		_sendQueue.push(sendBuffer);
+
+		if (_sendRegistered.exchange(true) == false)
+			registerSend = true;
+	}
+
+	// 락의 범위 밖에서 RegisterSend를 호출하면서 스레드 끼리 정체되는걸 줄였습니다.
+	if (registerSend)
+		RegisterSend();
+}
+
+_sendQueue에 접근하는것과 RegisterSend()모두 한번에 락을 걸기보다는 _sendQueue에 접근하는 부분만을 락의 범위에 두고 현재 RegisterSend를 호출해야 할지를 
+정하는 flag에 따라 RegisterSend()를 호출해 주는것입니다. 
+
+RegisterSend() 내부에서도 또 _sendQueue의 내용물들을 하나씩 꺼내 _sendEvent.sendBuffers에 담는 부분이 있었는데 여기도 이전에 부분을 잡아 락을 걸어주었기 때문에 
+멀티 스레드 환경에서도 동작순서를 보장 할 수 있습니다. 
+
+
+*** 
+-- PacketSession
+
+이어서 이번 강의의 주 내용인 PacketSession에 대해 알아보겠습니다. 
+따로 파일을 만들어 관리하지는 않고 Session 파일들에 이어서 추가합니다. 
+/*
+--------------------------
+	PacketSession 선언부
+--------------------------
+*/
+
+// PacketSession은 받는쪽과 관련이 있습니다.
+// 받는 함수인 ProcessRecv 안에서 받은데이터는 _recvBuffer에 여러 정보들과 함께 받아져 
+// 있을것입니다. 일단 받은 이 버퍼를 컨텐츠쪽으로 연결해주는 OnRecv를 읽기 시작할 위치의 
+// 주소 ReadPos() 와 받은 데이터 크기를 함께 건내주게 됩니다. 
+// 컨텐츠단 역할을 하는 GameSession에서는 OnRecv로 받은 데이터들을 처리해주게 되는데 
+// 반환 으로 얼마나 처리했는지를 반환합니다. (현재는 받은데이터 모두를 처리했다고 치고 크기 전부를 반환)
+// 그런데 나중에 제대로 MMORPG를 만들게 되면 TCP의 특성상 받은 모든 패킷이 한번에 전송되었다고 보장할 수 없었습니다. 
+// 100byte 를 받아야 하는데 어떤 이유로 20byte만을 받게 될 수도 있었습니다. 
+// 그렇기 때문에 받은 데이터(패킷)이 온전히 왔는지를 체크할 수 있는 수단이 필요한것이고 
+// 그를 위해 우리만의 프로토콜을 정해줘야 합니다. 
+// 쉽게 생각하면 데이터중에서 어떤 특정 문자가 나오면 여기까지가 바운더리라고 정하면 되지않을까? 
+// 생각할 수 있는데 그러기 어려운 이유는 
+// 만약 끝이라고 정했던 데이터가 0x0001 이라는 수였고 받은 데이터중에 운나쁘게 이 수에 곂치는 값이 들어오면 
+// 원하던 대로의 바운더리가 그어지지 않고 오동작을 하게 됩니다.
+// 그래서 가장 자주 사용하는 방법은 PacketHeader 라는 것을 패킷앞에 붙여서 보내는것입니다. 
+
+struct PacketHeader
+{
+	// 대부분 이렇게 size, id를 2바이트씩 둔다고 합니다. 
+	uint16 size;
+	uint16 id;	// 프로토콜 id (ex. 1 = 로그인, 2 = 이동요청 등)
+	// 프로토콜 id에 따라 이 패킷이 하는 일을 구별합니다. 
+	// 그러면 하는일이 구별이 되면 각 하는일마다의 size를 정해놓으면 헤더의 size를 같이 
+	// 들고 있을 이유가 없지 않는가 할 수 있는데 
+	// 역할에 따라 패킷이 가변적일 수 있기때문에 size도 같이 기입해 놓는것입니다. 
+	// (ex. 이름(wstring), 유저목록(vector) 등) 
+};
+
+// 우리가 사용할 정책
+// [size(2)][id(2)][data......][size(2)][id(2)][data......]...
+// 이런 형태로 패킷을 받을것입니다. 
+// 패킷을 받으면 맨앞의 4바이트의 헤더를 해석해 뒤에 이어질 실제 데이터의 크기와 
+// 어떤 용도로 사용될것인지를 먼저 확인할 수 있을것입니다. 
+
+class PacketSession : public Session
+{
+	// 앞으로 컨텐츠단에서는 Session 대신 이 PacketSession을 상속받게 할것입니다. 
+public:
+	PacketSession();
+	~PacketSession();
+
+	// PacketSessionRef는 Types.h 에 추가합니다.
+	PacketSessionRef GetPacketsessionRef() { return static_pointer_cast<PacketSession>(shared_from_this()); }
+
+protected:
+	// OnRecv뒤에 sealed를 붙힘으로써 앞으로는 OnRecv는 사용하지 못하게 막았습니다. 
+	virtual int32		OnRecv(BYTE* buffer, int32 len) sealed;
+	// 대신 OnRecvPacket을 사용하게 하고 abstract 키워드로 반드시 재정의해 사용하도록 합니다. 
+	virtual int32		OnRecvPacket(BYTE* buffer, int32 len) abstract;
+};
+
+/*
+--------------------------
+	PacketSession 정의부
+--------------------------
+*/
+
+// 생성자와 소멸자는 딱히 하는일은 없습니다.
+PacketSession::PacketSession()
+{
+}
+
+PacketSession::~PacketSession()
+{
+}
+
+int32 PacketSession::OnRecv(BYTE* buffer, int32 len)
+{
+	// [size(2)][id(2)][data......][size(2)][id(2)][data......]...
+	// 이런 형태로 패킷이 오게 만든다고 했습니다. 
+	// 일단 무한 루프 안에서 진행합니다.
+
+	int32 processLen = 0;	// 데이터 처리가 얼만큼 진행됐는지를 표현할것입니다. 
+
+	while (true)
+	{
+		// OnRecv로 받은 총 버퍼의 크기에 처리한 패킷의 크기를 빼줘서 
+		// 반복할때마다 패킷하나만큼의 크기씩 줄어들게 합니다. 
+		int32 dataSize = len - processLen;
+
+		// 최소한 len이 패킷헤더가 들어 있어야 합니다. 
+		if (dataSize < sizeof(PacketHeader))
+			break;
+
+		// 최소 패킷헤더는 포함되었다면 헤더 내용을 확인 해봅니다. 
+		// 사실 id는 지금은 필요없고 size가 필요합니다. 
+		// buffer의 시작주소부터 PacdetHeader 만큼의 길이를 복사해 PacketHeader로 해석하면 됩니다.
+		PacketHeader header = *(reinterpret_cast<PacketHeader*>(&buffer[0]));
+
+		// 헤더에 기록된 패킷크기를 파싱할 수 있어야 합니다. 
+		if (dataSize < header.size)
+			break; 
+		// 위에서 나온 header.size가 헤더 4바이트와 데이터를 포함할것인지 헤더빼고 뒤의 데이터의크기만을 말할것인지
+		// 스스로 정해줄 수 있습니다. 그에 맞게 모든 코드를 적용시켜주면되는데
+		// 지금 배우는 코드에서는 데이터 + 헤더의 크기를 모두 더한 크기를 size라고 하겠습니다. 
+
+		// 위의 조건문을 통과했다는것은 의도했던 패킷의 크기이상을 받아왔다는 뜻입니다.
+		// OnRecvPacket을 호출해 컨텐츠단에서 처리하게 넘겨줍니다.
+		OnRecvPacket(&buffer[0], header.size);
+
+		// 이제 처리한 패킷 사이즈 만큼을 기록합니다. 
+		processLen += header.size;
+	}
+
+	return processLen;
+}
+
+이제 OnRecv는 sealed 키워드 때문에 이후로 재정의 하지 못하고 이대로 사용하게 됩니다. 버퍼의 시작주소와 받은 버퍼의 크기를 인자로 받게 되고 
+버퍼안에 패킷마다의 헤더로 패킷의 바운더리를 알수 있어 패킷이 온전히 왔는지를 확인할 수 있게 되었습니다. 
+받은 온전한 패킷은 OnRecvPacket을 통해 원하는대로 컨텐츠쪽에서 사용하게 되고 온전히 받았다고 확인되는 패킷들의 사이즈를 합친 processLen을 반환하게 됩니다. 
+
+이 반환 값이 어떻게 사용되냐면 Session::ProcessRecv 에서 _recvBuffer.ReadPos()와 그 이후 크기를 OnRecv에 넣어주게 되고 처리되고 나온 processLen 까지
+RecvBuffer::OnRead() 로 커서를 앞으로 옮기게 됩니다. 옮겨진 ReadPos 부터 다시 다음번 Recv로 더 데이터를 받아와 패킷을 완성시킨다음 다시 처리를 시킬수 있게 될겁니다. 
+
+
+*** 
+
+이제 앞으로 컨텐츠단 이라고 만들었던 GameSession에서도 기존에 상속받고 있던 Session이 아닌 PacketSession을 상속받아 OnRecv로 데이터를 처리하는게 아닌 
+OnRecvPacket으로 처리하도록 수정해줘야합니다. 
+
+-- GameSession
+
+/*
+-------------------------
+	GameSession 선언부 
+-------------------------
+*/
+class GameSession : public PacketSession
+{
+public:
+	~GameSession()
+	{
+		cout << "~GameSession" << endl;
+	}
+
+	virtual void OnConnected() override;
+	virtual void OnDisconnected() override;
+	// OnRecv는 sealed로 잠궜고 대신 OnRecvPacket을 재정의해 사용합니다. 
+	virtual int32 OnRecvPacket(BYTE* buffer, int32 len) override;
+	virtual void OnSend(int32 len) override;
+};
+
+
+/*
+-------------------------
+	GameSession 정의부
+-------------------------
+*/
+int32 GameSession::OnRecvPacket(BYTE* buffer, int32 len)
+{
+	// 이제는 OnRecvPacket으로 받은 데이터는 온전한 패킷이라는걸 보장 받을 수 있습니다. 
+
+	// 이것저것 테스트를 할것인제 먼저 받은 패킷의 헤더 정보를 추출해보겠습니다. 
+	PacketHeader header = *(reinterpret_cast<PacketHeader*>(&buffer[0]));
+
+	cout << "Packet ID : " << header.id << " Size : " << header.size << endl;
+
+	// 이번 테스트에서는 Echo 서버가 아닌 GameServer.cpp 쪽에서 전체적으로 뿌려주겠습니다. 
+
+	return len;
+}
+
+이번에는 Echo 서버 처럼 Recv 하자 마다 그대로 그걸 Send 하는게 아닌 OnRecvPacket 에서는 그냥 받아서 헤더의 id와 size 값을 출력해주고 끝입니다. 
+
+
+***
+
+Send는 GameServer.cpp 에서 직접 모든 클라이언트에게 broadcast를 해줄겁니다. 
+-- GameServer
+
+/*
+GameServer 메인 스레드에서 직접 접속한 모든 클라이언트에 Send를 뿌립니다. 
+*/
+
+int main()
+{	
+	ServerServiceRef service = MakeShared<ServerService>(
+		NetAddress(L"127.0.0.1", 7777),
+		 MakeShared<IocpCore>(),
+		MakeShared<GameSession>,
+		100);
+
+	ASSERT_CRASH(service->Start());
+
+	for (int32 i = 0; i < 5; i++)
+	{
+		GThreadManager->Launch([=]()
+			{
+				while (true)
+				{
+					service->GetIocpCore()->Dispatch();
+				}
+			});
+	}
+
+	// 메인 스레드에서 데이터를 뿌립니다. 
+	// 이렇게 게임서버쪽에서 로직을 계산해 전체 클라이언트에 뿌리는 상황이 빈번할겁니다.
+	// 예를들어 몬스터가 리젠되었다는 게임 서버에서 자체 처리하는 로직을 모든 클라이언트에 적용시킬때 같은
+
+	// 이 문자열이 임시로 모든 클라에 뿌릴 데이터입니다. 
+	char sendData[] = "Hello World!";
+
+	while (true)
+	{
+		// 메인스레드의 TLS에 SendBuffer를 할당받습니다.
+		SendBufferRef sendBuffer = GSendBufferManager->Open(4096);
+
+		BYTE* buffer = sendBuffer->Buffer();
+		(reinterpret_cast<PacketHeader*>(buffer)->size) = (sizeof(sendData) + sizeof(PacketHeader));
+		(reinterpret_cast<PacketHeader*>(buffer)->id) = 1;	// 1번 id가 Hello World! 라고 정해둡시다.
+
+		// 이제 버퍼에 데이터를 넣어줍니다. 
+		::memcpy(&buffer[4], sendData, sizeof(sendData));
+		sendBuffer->Close((sizeof(sendData) + sizeof(PacketHeader)));
+		
+		// 데이터를 받았으면 자신 연결되 있는 클라뿐만 아니라 세션 매니저의 모든 세션에 Send
+		GSessionManager.Broadcast(sendBuffer);
+        
+		this_thread::sleep_for(250ms);
+	}
+
+	GThreadManager->Join();
+}
+
+ServerService를 만들고 Start, 스레드들을 만들어 각각 Dispatch를 하도록 시키는것까지 동일합니다. 
+다만 Service 내부의 GamseSession에서 Send를 하는것 대신 메인스레드의 TLS에다가 SendBuffer를 받는 GSendBufferManager->Open 을 해주었습니다. 
+
+Send의 준비를 하는 과정이 복잡해 졌는데 SendBuffer의 앞의 4바이트를 PacdetHeader로 사용하게끔 값을 넣어주고 실제 보낼 데이터인 문자열을 
+그 뒤 인덱스인 &buffer[4] 부터 memcpy 해주었습니다. Open 했으면 잊지말고 사용한 만큼의 사이즈로 Close에 넘겨주었습니다. 
+
+이 복잡한 과정을 매번 하기는 어렵고 위험하니 나중에 이걸 보안할 작업을 해줄것인데 일단은 한번 전체 과정을 직접 적어 봤습니다. 
+
+GameServer 쪽은 이정도로 하면 되겠습니다. 
+
+*** 
+-- DummyClient
+
+char sendData[] = "Hello World!";
+
+// Session 대신 PacketSession을 상속 받습니다.
+class ServerSession : public PacketSession
+{
+public:
+	~ServerSession()
+	{
+		cout << "~ServerSession" << endl;
+	}
+
+	virtual void OnConnected() override
+	{
+		// cout << "Connected To Server" << endl;
+
+		// Connect때 Send를 하는것 대신 GameServer 에서 뿌려주는 패킷을 받을것입니다. 
+	}
+	
+	// OnRecv 대신 OnRecvPacket
+	virtual int32 OnRecvPacket(BYTE* buffer, int32 len) override
+	{
+		// GameSession 에서 하던것처럼 받은 패킷의 헤더 내용들을 추출해 출력
+		PacketHeader header = *(reinterpret_cast<PacketHeader*>(&buffer[0]));
+
+		cout << "Packet ID : " << header.id << " Size : " << header.size << endl;
+
+		// 헤더 외에 받은 내용이 궁금하다면 임시 버퍼를 만들어 줍니다.
+		char recvBuffer[4096];
+		::memcpy(recvBuffer, &buffer[4], header.size - sizeof(PacketHeader));
+		
+		cout << "Recv Data = " << recvBuffer << endl;
+
+		return len;
+	}
+
+	virtual void OnSend(int32 len) override
+	{
+		//cout << "OnSend Len = " << len << endl;
+	}
+
+	virtual void OnDisconnected() override
+	{
+		//cout << "Disconnected" << endl;
+	}
+};
+
+DummyClient 에서 사용하는 세션인 ServerSessoin 을 이렇게 수정했습니다. 
+이전에는 Connected와 동시에 Hello World! 를 Send 하고 되돌아온 문자열을 다시 보내는 식으로 만들었었는데 
+이번 테스트에서는 그냥 매 250ms 마다 서버에서 뿌리는 문자열을 받기만 하도록 만들었습니다. 
+
+***
+테스트를 해보면 GameServer로 부터 DummyClient로 5개의 ServerSession에게 Hello World! 를 뿌리는 걸 확인할 수 있습니다. 
+
+여기까지 내용중 중요한것은 지금 패킷을 보낼 때 맨 앞 헤더의 정책을 2바이트씩 size와 id정보를 물려서 보내고 이 정보를 가지고 받는쪽에서는 
+하나의 패킷이 얼만큼의 크기인지를 알아 온전히 바운더리만큼 왔는지를 체크할수 있는것입니다. 
+
+여기서 주의 해야할 점이 있습니다. 보안관련 문제인데 우리가 데이터를 보낼때 실제 데이터와 헤더를 보낼것인데 헤더의 정보중 size를 잘못 기입하게 되면 어떻게 될까요
+보낼 데이터 중간까지를 하나의 패킷으로 인식하거나 하나의 패킷을 넘어서 까지를 인식하거나 할겁니다. 
+MMORPG는 항상 해킹을 고려해야 하는데 해커들이 가장 먼저 하는것이 패킷 해더의 size, id를 변조해보는것이라고 합니다. 
+변조된 패킷 헤더를 받으면 받은 버퍼들은 오염이 일어나게 됩니다. 
+
+그래서 항상 이 패킷 헤더가 변조되었는지를 체크하면서 이상한 시도가 있으면 kick을 해버려야 합니다. 
+
+그러면 이렇게 신용할 수 없는 변조에 약한 패킷 헤더라는 방식을 사용하는가 하면 
+그냥 이 패킷 헤더라는것을 부분적으로 신용한다고 하면됩니다. 일단은 패킷이 제대로 왔다고 치고 진행을 하되 나중에 가서 이상한 낌새를 알게 되면 상대를 해커라고 판단해 kick을 해줘야합니다. 
+
+TCP통신의 특성상 주고 받는 패킷의 크기를 정확히 알수 없기 때문에 패킷 헤더를 사용하는것은 필연적인 일입니다. 
+다만 조작이 될수 있다는것을 알고 그걸 염두에 둬야 한다는것입니다. 
+
+만약 패킷 헤더가 변조되어 size가 기존 4바이트 짜리 였는데 6만 바이트라고 변조가 되었다면 6만 바이트가 전부 올때 까지 실행이 되지 않을것이니 상관없지만 
+그 다음 뭔가 문제가 있다라는걸 눈치채야 한다는 것입니다. 
+
+온라인게임은 이런 보안 이슈를 신경써야 합니다. 게임내에서 실제 재화를 거래하고 여러 유저가 같이 접속하는 게임에 
+해킹때문에 그 가치를 보장 받지 못하는것은 매우 위험합니다. 
+
+
+
+*** 
+사실 이전에 작업했던 내용중 GamsSessionManager 의 코드에 문제가 있습니다. 
+코드를 쌓아 나가다 보면 나도 모르게 점점 버그가 쌓이게 됩니다. 
+
+어떤 상황에서 이 버그가 발견되냐면 DummyClient의 ClientService의 동시접속자 수를 5개의 클라가 접속할 수 있도록 했었는데 이 수를 확 늘려서 1000개의 클라가 접속하도록 해보겠습니다.
+잘 드러나지 않는 버그는 이렇게 동시 접속 클라수를 1000개 까지늘려서 테스트 해보면 발견된다고 합니다. 
+
+이상태에서 디버깅을 실행하면 클라이언트 쪽에서 엄청난 수의 Hello World! 가 출력됩니다. 여기다가 한번 클라이언트 콘솔을 강제 종료를 해보면 
+서버쪽 Broadcast 중에 갑자기 크래시가 납니다. 
+
+보통 처음 포트폴리오를 만들때 이런 버그가 나면 멘붕이 옵니다. 내가 멀티스레드에 대해 잘 몰라서 나는 버그인지 아니면 구조를 잘못짜서 나는 버그인지를 알 수가 없습니다. 
+
+왜 이런 버그가 나는지 이유를 찾아 보겠습니다. 
+브로드 캐스트를 하는 도중에 버그가 났으니 브로드 캐스트에 어떤 문제가 있을 수도 있고, 아니면 락을 잡을때 WRITE_LOCK 으로 잡았는데 이것 자체가 어떤 문제가 있다거나 
+아니면 Session의 참조 카운트에 문제가 생겨서 버그가 났을까? 생각도 듭니다. 
+
+먼저 Session의 참조 카운트는 우리가 직접 하지 않고 원리에 따라 카운팅을 해주게 만들었으니 이게 문제일 확률은 낮고,
+우리가 만든 락이 문제인가 싶어서 mutex를 사용해 보면 이것도 원인이 아니라는걸 알 수 있습니다. 
+그러면 애초에 GamsSessionManager에서 세션들을 관리하는 Set에 스마트 포인터를 사용하는게 문제 인가 생각도 해보는데 스마트 포인터로 그 주소를 key로 사용하는 Set기 때문에 
+상관없어 보입니다. 
+
+또 한가지 재밌는것은 디버깅 실행중에 서버를 강제 종료하면 클라쪽은 크래시가 안나고 정상적으로 종료되는걸 확인할 수 있습니다. 
+
+결론을 말하자면 처음에 말했던것처럼 GamsSessionManager에 문제가 있습니다. 
+그 중 GameSessionManager::Broadcast() 코드인데 
+
+
+void GameSessionManager::Broadcast(SendBufferRef sendBuffer)
+{
+	WRITE_LOCK;
+	for (GameSessionRef session : _sessions)
+	{
+		session->Send(sendBuffer);
+	}
+}
+
+여기서 세션 매니저가 관리하는 세션들이 담긴 Set, _sessions 를 하나씩 for문으로 순회하면서 Send를 해주고 있습니다. 
+이렇게 for문을 돌고 있을때 담겨 있던 컨테이너인 _sessions를 Clear() 로 변화를 준다거나 하면 안됩니다. 메모리가 오염이 되는데 
+
+그런데 지금까지 생각해보면 딱히 이런 상황에서 _sessions를 건들면 안된다는 코드를 만든 적이 없습니다. 
+이제 Send() 함수안에서 어떤 일이 일어나는지를 보겠습니다. 
+
+Send() 에서 이 세션이 지금 RegisterSend를 진행중에 있는지를 체크해 아니라면 RegisterSend를 호출 진행 중이라면 _sendQueue에 보낼 버퍼를 추가 합니다. 
+이어서 RegisterSend를 보겠습니다. 생각해보면 크래시가 나는 상황이 그냥 프로그램 진행중에 일어나는게 아니라 연결을 끊을때 크래시가 났습니다. 
+연결을 끊었을때 영향이 가는 부분이 아마 WSASend중간에 연결이 끊겨서 WSASend 실패에 errorCode도 Pending 상황이 아닌 경우로 들어올겁니다. 
+그러면 흐름을 따라 가다 Disconnect() 함수로 갑니다. 이안에서 OnDisconnect() 라는 함수를 호출하고 있습니다. 
+OnDisconnect는 컨텐츠 단에서 재정의해 사용하는 함수였고 지금은 GameSession 에서 재정의 해주고 있습니다. 그 내용은 
+
+void GameSession::OnDisconnected()
+{
+	// 접속과 반대 
+	GSessionManager.Remove(static_pointer_cast<GameSession>(shared_from_this()));
+}
+
+이렇게 세션 매니저에게 Remove로 자신을 지워달라고 하고 있습니다. 현재 세션 매니저는 for문을 돌면서 _sessions를 순회 중이었는데 
+그중 한 세션이 돌면서 중간에 자기를 지우게 되는겁니다. 
+
+결국 이 버그는 브로드 캐스트를 하는 도중 내부적으로 컨테이너를 중간에 삭제하면서 생기는 문제라는걸 알 수 있습니다.
+
+그러면 이 문제를 현재 어떻게 수정해야 하냐면 Disconnect() 안에서 바로 OnDisconnect()와 Service에서 ReleaseSession을 처리하는게 아니라 그냥 RegisterDisconnect까지 하게끔하고 
+
+나중에 RegisterDisconnect 가 처리되는 Dispatch를 지나 ProcessDisconnect 에서 OnDisconnect, ReleaseSession을 호출해주는것입니다. 
+
+뭐가 다르냐면 GameSessionManager::Broadcast 에서 _sessions 를 순회중에 자기 원소가 삭제되는게 문제였는데 Broadcast내부적으로 락을 잡고 순회도는 동안은 
+자기 원소가 삭제 되지 않고 순회가 다 끝난다음 Dispatch를 통해 삭제 되는 것입니다. 
+
+이 경우에서 꼭 기억하면 좋은 것이 순회를 돌면서 처리를 할때 어찌저찌 순회를 돌던 컨테이너의 원소가 삭제되는 경우가 생기지 않도록 해야한다는것입니다. 
+
+하는 김에 또 SendBuffer 쪽에서도 SendBufferManager에서 Pop을 해서 버퍼청크를 꺼내 사용하고 다 사용한 다음 제대로 PushGlobal로 다시 풀에 돌아오는지를 체크하면 
+좋습니다. 어디선가 참조카운트가 계속 물려있어 샌드버퍼청크가 끝까지 풀에 돌아오지 않으면 그만큼 메모리가 낭비되는것이기 때문입니다. 
