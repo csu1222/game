@@ -3,10 +3,10 @@
 #include "ThreadManager.h"
 #include "Service.h"
 #include "Session.h"
+#include "BufferReader.h"
 
 char sendData[] = "Hello World!";
 
-// Session 대신 PacketSession을 상속 받습니다.
 class ServerSession : public PacketSession
 {
 public:
@@ -17,22 +17,34 @@ public:
 
 	virtual void OnConnected() override
 	{
-		// cout << "Connected To Server" << endl;
-
-		// Connect때 Send를 하는것 대신 GameServer 에서 뿌려주는 패킷을 받을것입니다. 
 	}
 	
-	// OnRecv 대신 OnRecvPacket
 	virtual int32 OnRecvPacket(BYTE* buffer, int32 len) override
 	{
-		// GameSession 에서 하던것처럼 받은 패킷의 헤더 내용들을 추출해 출력
-		PacketHeader header = *(reinterpret_cast<PacketHeader*>(&buffer[0]));
+		// BufferReader 도 읽을 버퍼의 영역을 찝어 줍니다. 
+		BufferReader br(buffer, len);
 
-		cout << "Packet ID : " << header.id << " Size : " << header.size << endl;
+		// header 변수에 받은 패킷에 PacketHeader 만큼의 데이터를 넘겨주고 그 만큼 _pos를 땡겨놓습니다.
+		PacketHeader header;
+		br >> header;
 
-		// 헤더 외에 받은 내용이 궁금하다면 임시 버퍼를 만들어 줍니다.
+		// 데이터를 읽을때 조심해야하는것이 데이터를 쓴 순서 그대로 읽어야 합니다. 
+		// id(uint64), 체력(uint32), 공격력(uint16)
+		uint64 id;
+		uint32 hp;
+		uint16 attack;
+
+		br >> id >> hp >> attack;
+
+		cout << "ID :" << id << " HP :" << hp << " ATT:" << attack << endl;
+
+		// 이제 recvBuffer에 남은 데이터를 복사해줘야 하는데 이 부분이 지금은 지저분합니다. 
 		char recvBuffer[4096];
-		::memcpy(recvBuffer, &buffer[4], header.size - sizeof(PacketHeader));
+		br.Read(recvBuffer, header.size - sizeof(PacketHeader) - 8 - 4 - 2);
+		// 왜 이렇게 지저분 하냐면 이미 받은 패킷에서 PacketHeader와 id, hp, attck 만큼을 읽었기 때문입니다.
+		// 당연히 이렇게 처리하는게 옳은 방법은 아니고 나중에 수정할것입니다. 
+		// 결론적으로는 이렇게 가변이 되는 데이터의 길이를 따로 보내주는것입니다. 
+		// 지금은 일단 이렇게 넘어갑니다.
 		
 		cout << "Recv Data = " << recvBuffer << endl;
 
@@ -41,22 +53,18 @@ public:
 
 	virtual void OnSend(int32 len) override
 	{
-		//cout << "OnSend Len = " << len << endl;
 	}
 
 	virtual void OnDisconnected() override
 	{
-		//cout << "Disconnected" << endl;
 	}
 };
 
 
 int main()
 {
-	// 서버가 먼저 실행될때 까지 1초를 기다립니다. 
 	this_thread::sleep_for(1s);
 	
-	// ClientService 생성자의 마지막 인자인 최대 동시 접속수를 5개로 늘려서 테스트 해보겠습니다.
 	ClientServiceRef service = MakeShared<ClientService>(
 		NetAddress(L"127.0.0.1", 7777),
 		MakeShared<IocpCore>(),

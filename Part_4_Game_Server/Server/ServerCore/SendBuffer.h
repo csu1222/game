@@ -12,25 +12,17 @@ class SendBufferChunk;
 class SendBuffer
 {
 public:
-	// 생성자가 받는 인자가 수정되었습니다. 
-	SendBuffer(SendBufferChunkRef owner, BYTE* buffer, int32 allocSize);
+	SendBuffer(SendBufferChunkRef owner, BYTE* buffer, uint32 allocSize);
 	~SendBuffer();
 
-	// _buffer가 더이상 Vector 가 아닌 포인터의 형태이기 때문에 그대로 반환
 	BYTE* Buffer() { return _buffer; }
-	int32 WriteSize() { return _writeSize; }
+	// BufferWriter 생성할 때 _allocSize가 필요해서 함수를 열어줬습니다. 
+	uint32 AllocSize() { return _allocSize; }
+	uint32 WriteSize() { return _writeSize; }
 	void Close(uint32 writeSize);
 
-	// Capacity(), CopyData() 는 더이상 사용하지 않습니다. 
-	//int32 Capacity() { return static_cast<int32>(_buffer.size()); }
-	//void CopyData(void* data, int32 len);
 
-private:
-	// SendBufferChunk를 도입하면서 SendBuffer 자체에서는 _buffer를 Vector로 
-	// 들고 있지 않고 시작주소인 BYTE* 와 얼만큼 할당받았는지 allocSize로 범위를 
-	// 가지고 있을것입니다. 
-	// 또 SendBufferChunk로 부터 가져온 버퍼를 사용하는 중에 먼저 SendBufferChunk가
-	// 삭제 되면 안되기 때문에 자신의 owner를 참조 하고 있도록 하겠습니다. 
+private: 
 	BYTE*				_buffer;
 	uint32				_allocSize = 0;
 	uint32				_writeSize = 0;

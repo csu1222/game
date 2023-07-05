@@ -1,0 +1,382 @@
+
+
+
+        Buffer Helpers
+
+
+지금까지 네트워크 라이브러리들을 만들어 주었습니다. 이어서 알아볼 내용은 패킷들을 주고 받을때의 정책들에 대해 알아볼것입니다. 
+소위 '패킷 직렬화'라고 합니다. 
+
+잠시만 이전 시간 까지 작업했던 네트워크 라이브러리는 보통 프로젝트에서 맨처음 한번만 만들고 나서 부터는 거의 건드리지 않는다고 합니다. 
+회사에 들어가도 이 네트워크 라이브러리에 대한 내용을 모르는 사람도 많다고 합니다.
+이것은 딱히 실력이 없는 사람들 이라기 보다는 회사에서도 한 프로젝트를 진행하면서 맨 처음 만든 네트워크 라이브러리를 굳이 모든 팀원이 같이 만들어야 하는것도 아니고
+프로젝트 중간 인원이 오가며 직접 만든 사람이 없어지기 때문일것입니다. 
+
+근데 정작 포트폴리오나 회사에서 많은 시간을 컨텐츠단 우리 프로젝트에서는 GameServer 나 DummyClient 쪽에서 작업을 많이 할것입니다. 
+이때 특히나 중요한 부분이 패킷을 어떻게 만들어 주고 전송할것인가가 핵심이 됩니다. 
+
+이번 시간은 간단하게 지난시간 GameServer에서 모든 클라이언트에 뿌렸던 코드를 수정해볼것입니다. 
+
+	while (true)
+	{
+		// 메인스레드의 TLS에 SendBuffer를 할당받습니다.
+		SendBufferRef sendBuffer = GSendBufferManager->Open(4096);
+
+		BYTE* buffer = sendBuffer->Buffer();
+		(reinterpret_cast<PacketHeader*>(buffer)->size) = (sizeof(sendData) + sizeof(PacketHeader));
+		(reinterpret_cast<PacketHeader*>(buffer)->id) = 1;	// 1번 id가 Hello World! 라고 정해둡시다.
+
+		// 이제 버퍼에 데이터를 넣어줍니다. 
+		::memcpy(&buffer[4], sendData, sizeof(sendData));
+		sendBuffer->Close((sizeof(sendData) + sizeof(PacketHeader)));
+		
+		// 데이터를 받았으면 자신 연결되 있는 클라뿐만 아니라 세션 매니저의 모든 세션에 Send
+		GSessionManager.Broadcast(sendBuffer);
+
+		this_thread::sleep_for(250ms);
+	}
+
+이런 부분이었습니다. 
+
+PacketHeader를 적용해 SendBuffer 를 만드는 과정이 지저분합니다. GSendBufferManager로 부터 SendBufferChunk를 받고 그 시작 주소인 buffer를 또 만들고 
+buffer를 PacketHeader* 로 캐스팅해 size, id를 직접 적어줍니다. 또 실제 데이터를 memcpy하기 위해서 PacketHeader의 크기인 4바이트 뒤에서부터 
+memcpy를 해야한다고 외우고 있어야하기도 했습니다. 
+
+당연히 이렇게 직접 손을 많이 대야 하고 기억에 의존하는 부분도 있다보니 위험한코드입니다. 
+그래서 이 버퍼를 읽거나 쓸때 도움을 주는 클래스를 만들어 놓고 그걸사용해 볼것입니다. 
+
+ServerCore 프로젝트 -> Utils 필터 아래로 BufferReader, BufferWriter 라는 이름의 헤더, cpp 파일들을 만들었습니다. 
+
+*** 
+-- BufferReader
+
+먼저 버퍼 리더 입니다. 
+
+/*
+---------------------------
+	BufferReader 선언부 
+---------------------------
+*/
+
+// BufferReader의 역할은 버퍼의 시작주소와 그 버퍼의 크기를 받아 관리하는 역할
+class BufferReader
+{
+public:
+	BufferReader();
+	BufferReader(BYTE* buffer, uint32 size, uint32 pos = 0);
+	~BufferReader();
+
+	BYTE*				Buffer() { return _buffer; }
+	uint32				Size() { return _size; }
+	uint32				ReadSize() { return _pos; }
+	uint32				FreeSize() { return _size - _pos; }
+	
+	// Peek을 좀 더 사용하기 쉽게 
+	template<typename T>
+	bool				Peek(T* dest) { return Peek(dest, sizeof(T)); }
+	// Peek은 커서를 옮기지는 않고 잠깐 엿보고만 싶을때 
+	bool				Peek(void* dest, uint32 len);
+
+	// 내용도 확인하고 커서도 앞으로 옮깁니다. 
+	template<typename T>
+	bool				Read(T* dest) { return Read(dest, sizeof(T)); }
+	bool				Read(void* dest, uint32 len);
+
+	// 자주 사용하던 cout << 의 << 도 연산자 오버로딩 대상이었습니다.
+	template<typename T>
+	BufferReader&		operator>>(OUT T& dest);
+
+private:
+	BYTE*				_buffer = nullptr;	// 버퍼의 시작주소 
+	uint32				_size = 0;			// 버퍼의 사이즈
+	uint32				_pos = 0;			// 지금 어디까지 읽었는가
+};
+
+template<typename T>
+inline BufferReader& BufferReader::operator>>(OUT T& dest)
+{
+	// >> 연산자는 BufferReader에서 지금까지 읽은 위치에서 내용물을꺼내 
+	// dest에 담아 준다는 의미 
+
+	// _buffer[_pos]의 위치의 데이터를 T타입으로 캐스팅해서 dest에 담습니다. 
+	dest = *reinterpret_cast<T*>(&_buffer[_pos]);
+	// dest에 담긴 데이터만큼을 읽었다고 치고 커서를 옮깁니다. 
+	_pos += sizeof(T);
+	return *this;
+}
+
+/*
+---------------------------
+	BufferReader 정의부
+---------------------------
+*/
+
+BufferReader::BufferReader()
+{
+}
+
+BufferReader::BufferReader(BYTE* buffer, uint32 size, uint32 pos)
+	: _buffer(buffer), _size(size), _pos(pos)
+{
+}
+
+BufferReader::~BufferReader()
+{
+}
+
+bool BufferReader::Peek(void* dest, uint32 len)
+{
+	// 내가 읽고 싶은 데이터양 보다 여유공간이 적으면 실패
+	if (FreeSize() < len)
+		return false;
+
+	// 원본은 건드리지 않고 인자로 준 dest에 복사합니다. 
+	::memcpy(dest, &_buffer[_pos], len);
+
+	return true;
+}
+
+bool BufferReader::Read(void* dest, uint32 len)
+{
+	// Peek 처럼 dest 위치에 현재 커서부털 len 만큼의 데이터를 읽을것입니다. 
+	if (Peek(dest, len) == false)
+		return false;
+
+	// 읽었다면 그만큼 커서도 옯깁니다. 
+	_pos += len;
+
+	return true;
+}
+
+BufferReader는 버퍼의 시작 주소 _buffer와 버퍼의 크기 _size, 버퍼의 어디까지를 읽었는지 커서역할을 하는 _pos 라는 멤버 변수들을 들고 있습니다. 
+그리고 생성자에서 각각을 인자로 받는 생성자로 초기화 합니다. 
+
+멤버 함수로는 >> 연산자, Peek, Read 함수들이 있습니다. 모두 버퍼에서 데이터를 꺼내 사용하는 용도입니다. 
+>> 연산자는 템플릿으로 T 라는 타입을 받습니다. 버퍼에서 시작주소를 참조 값으로 돌려주고 T 타입의 크기만큼 _pos를 옮깁니다. 
+
+Peek 함수, Read 함수는 둘이 비슷한데 먼저 Peek에서는 >> 연산자와 달리 참조값으로 받는게 아니라 복사 값으로 인자로 준 dest 라는 포인터에 어느 정도의 데이터를 복사합니다. 
+그리고 _pos를 건드리지 않고 그냥 둡니다. 용도는 버퍼의 어떤 내용을 잠시만 확인하는 용도이고 우리 프로젝트에서는 PacketSession::OnRecv() 함수에서 
+지금 받은 버퍼가 온전한 패킷이 왔는지를 확인할때 버퍼의 맨앞에 있는 PacketHeader를 잠시 확인해 체크 했던 부분이 해당합니다. 
+Read는 Peek과 거의 비슷한데 다만 _pos를 복사한 크기 만큼 옮깁니다. 함수이름처럼 읽기용 사용할것이기 때문에 버퍼를 사용하기는 하되 원본을 건드리지는 않고 복사 값을 받아옵니다. 
+
+
+-- BufferWriter
+
+/*
+---------------------------
+	BufferWriter 선언부
+---------------------------
+*/
+
+// BufferReader 와 비슷한 부분이 많습니다. 
+class BufferWriter
+{
+public:
+	BufferWriter();
+	BufferWriter(BYTE* buffer, uint32 size, uint32 pos = 0);
+	~BufferWriter();
+
+	BYTE*				Buffer() { return _buffer; }
+	uint32				Size() { return _size; }
+	uint32				WriteSize() { return _pos; }
+	uint32				FreeSize() { return _size - _pos; }
+
+
+	// 버퍼에 소스(src)를 작성합니다. 
+	template<typename T>
+	bool				Write(T* src) { return Read(src, sizeof(T)); }
+	bool				Write(void* src, uint32 len);
+
+	// 버퍼를 작성할때 헤더를 가장 마직막에 작성할때가 있는데 그때 사용할 함수
+	template<typename T>
+	T*					Reserve();
+
+	// 데이터를 밀어 넣는다는 뜻의 << 연산자 
+	// 두가지 버전을 만들어 줄것입니다. 
+	// 왼값 참조 버전
+	template<typename T>
+	BufferWriter& operator<<(const T& src);
+	// 오른값 참조 버전
+	template<typename T>
+	BufferWriter& operator<<(T&& src);
+
+private:
+	// 멤버 변수는 BufferReader와 똑같습니다. 
+	BYTE*				_buffer = nullptr;	// 버퍼의 시작주소 
+	uint32				_size = 0;			// 버퍼의 사이즈
+	uint32				_pos = 0;			// 어디까지 썻는가
+};
+
+template<typename T>
+T* BufferWriter::Reserve()
+{
+	// 예약할 T타입 만큼도 여유가 없다면 실패
+	if (FreeSize() < sizeof(T))
+		return nullptr;
+
+	// 여유가 있다면 현재위치의 포인터를 ret 에 담아 반환 할것
+	T* ret = reinterpret_cast<T*>(&_buffer[_pos]);
+	// 다만 T 만큼 커서는 당겨줄것
+	_pos += sizeof(T);
+
+	return ret;
+}
+
+template<typename T>
+BufferWriter& BufferWriter::operator<<(const T& src)
+{
+	// memcpy로 해도 똑같은 의미 
+	*reinterpret_cast<T*>(&_buffer[_pos]) = src;
+	_pos += sizeof(T);
+	return *this;
+}
+
+template<typename T>
+BufferWriter& BufferWriter::operator<<(T&& src)
+{
+	// 오른값 참조이니 복사가 아닌 std::move
+	*reinterpret_cast<T*>(&_buffer[_pos]) = std::move(src);
+	_pos += sizeof(T);
+	return *this;
+}
+
+/*
+---------------------------
+	BufferWriter 정의부
+---------------------------
+*/
+
+BufferWriter::BufferWriter()
+{
+}
+
+BufferWriter::BufferWriter(BYTE* buffer, uint32 size, uint32 pos)
+	: _buffer(buffer), _size(size), _pos(pos)
+{
+}
+
+BufferWriter::~BufferWriter()
+{
+}
+
+bool BufferWriter::Write(void* src, uint32 len)
+{
+	// 남은 공간이 len 보다 작으면 작성할 공간이 없는것
+	if (FreeSize() < len)
+		return false;
+
+	::memcpy(&_buffer[_pos], src, len);
+	_pos += len;
+	return true;
+}
+
+BufferWriter도 BufferReader와 거의 대칭적입니다. 멤버 변수는 똑같은 이름으로 들고 있을것인데 BufferReader에서 _pos의 의미는 읽기 커서 였고 
+BufferWriter에서 _pos는 쓰기 커서라는 것이 조금 다릅니다. 
+
+멤버 함수는 생성자나 Buffer(), Size(), ReadSize(), FreeSize() 등은 똑같습니다. 
+Peek() 함수는 Writer 에서는 사용하지 않습니다. Peek 은 잠깐 살펴보는 함수였는데 Writer에서는 말 그대로 쓰기를 위한 클래스입니다. 
+Read() 함수 대신 Write() 함수가 생겼고 Reserve 라는 함수도 생겼습니다. 
+또 operator 오버로딩은 >> 라는 꺼내는 기호 대신 밀어 넣겠다는 << 기호를 사용합니다. 또 밀어넣는 데이터가 왼값인지 오른값인지에 따라 
+인자의 형태가 달라집니다. 왼값이면 그 데이터가 다음줄로 넘어가도 유지되는 값이기 때문에 const T& 로 넘길수 있고 
+오른값은 그 줄이 달라지면 바로 유효하지 않는 임시값들을 말하는데 그래서 인자로 넘겨줄때 std::move로 그 값을 이동 시키는것입니다. 
+
+std::move는 말그대로 변수의 값을 이동 시켜주는 것입니다. 이것을 왼값끼리 사용하면 넘겨준 변수에는 값이 사라지는데 
+오른값에 사용하게 되면 어짜피 다음줄이 되면 사라질 오른값을 왼값에 넘겨줄 수 있습니다. 
+
+
+*** 
+이렇게 해서 버퍼를 Read, Write 기능을 하는 헬퍼 클래스 들을 만들어 봤습니다. 
+어떤 식으로 사용해야 하는지 실습해보겠습니다. 
+
+이번 강의 시작하면서 GameServer나 DummyClient 에서 지저분하다고 했던부분을 수정할 수 있습니다.
+
+-- GameServer
+
+	char sendData[1000] = "Hello World!";
+
+	while (true)
+	{
+		SendBufferRef sendBuffer = GSendBufferManager->Open(4096);
+
+		// BufferWriter 객체로 sendBuffer의 영역을 찝어 줍니다. 
+		BufferWriter bw(sendBuffer->Buffer(), sendBuffer->AllocSize());
+
+		// PacketHeader가 들어갈 자리를 Reserve 합니다. 반환 값으로 바로 헤더의 시작주소를 반환 합니다.
+		PacketHeader* header = bw.Reserve<PacketHeader>();
+
+		// 이번에는 넣어줄 데이터를 좀 다르게 해보겠습니다.
+		// id(uint64), 체력(uint32), 공격력(uint16) 라고 해보겠습니다. 
+		bw << (uint64)1001 << (uint32)100 << (uint16)10;
+		// << 연산자를 사용해 캐스팅한 데이터를 넣어준 다음은 그 타입 만큼 _pos를 옯기니까 
+		// 연속해서 데이터를 넣을 수 있습니다. 그리고 << 연산자의 반환이 
+		// 데이터를 넣고 난 다음의 자신의 포인터다 보니 연속해서 사용할 수 있습니다.
+
+		// << 연산자와 비슷하게 Write() 함수도 사용할 수 있는데 다른점은 
+		// << 연산자는 버퍼의 남은 공간인 FreeSize()를 따로 체크하지 않고
+		// Write()함수는 남은 공간을 체크한다는 점입니다. 
+		// 꼭 <<연산자라고 해서 공간체크를 하면 안된다는것도 아니니 본인 구현하기 나름입니다.
+		bw.Write(sendData, sizeof(sendData));
+		
+		// buffer를 굳이 캐스팅 하지 않아도 bw.Reserve로 받아놓은 header에 값을 넣어줍니다.
+		// 그리고 미리 자리를 예약해 뒀기 때문에 값을 넣어주는 시점이 더 자유로워집니다. 
+		header->size = bw.WriteSize();
+		header->id = 1;
+		
+		// size를 계산하는걸 이제는 직접 하지 않아도 됩니다. 
+		sendBuffer->Close(bw.WriteSize());
+		
+		GSessionManager.Broadcast(sendBuffer);
+
+		this_thread::sleep_for(250ms);
+	}
+
+데이터를 뿌리던 GameServer 이니 BufferWriter를 적용하였습니다. 버퍼의 헤더가 맨앞에 오기 위해 항상 가장 먼저 memcpy를 해야 한다거나,
+버퍼의 내용도 memcpy로 넣어야 된다거나. 버퍼의 사이즈를 직접 계산하는 것을 이제는 좀더 간편히 할 수 있습니다. 
+
+
+-- DummyClient
+이제 BufferReader를 적용해볼 DummyClient로 가보겠습니다. DummyClient에서 사용하는 ServerSession의 OnRecvPacket 함수를 봐야합니다.
+
+	virtual int32 OnRecvPacket(BYTE* buffer, int32 len) override
+	{
+		// BufferReader 도 읽을 버퍼의 영역을 찝어 줍니다. 
+		BufferReader br(buffer, len);
+
+		// header 변수에 받은 패킷에 PacketHeader 만큼의 데이터를 넘겨주고 그 만큼 _pos를 땡겨놓습니다.
+		PacketHeader header;
+		br >> header;
+
+		// 데이터를 읽을때 조심해야하는것이 데이터를 쓴 순서 그대로 읽어야 합니다. 
+		// id(uint64), 체력(uint32), 공격력(uint16)
+		uint64 id;
+		uint32 hp;
+		uint16 attack;
+
+		br >> id >> hp >> attack;
+
+		cout << "ID :" << id << " HP :" << hp << " ATT:" << attack << endl;
+
+		// 이제 recvBuffer에 남은 데이터를 복사해줘야 하는데 이 부분이 지금은 지저분합니다. 
+		char recvBuffer[4096];
+		br.Read(recvBuffer, header.size - sizeof(PacketHeader) - 8 - 4 - 2);
+		// 왜 이렇게 지저분 하냐면 이미 받은 패킷에서 PacketHeader와 id, hp, attck 만큼을 읽었기 때문입니다.
+		// 당연히 이렇게 처리하는게 옳은 방법은 아니고 나중에 수정할것입니다. 
+		// 결론적으로는 이렇게 가변이 되는 데이터의 길이를 따로 보내주는것입니다. 
+		// 지금은 일단 이렇게 넘어갑니다.
+		
+		cout << "Recv Data = " << recvBuffer << endl;
+
+		return len;
+	}
+
+
+*** 
+이렇게 실습까지 해봤습니다. 
+
+여기서 중요한 부분은 우리가 데이터 전송을할때 
+uint64 짜리 id, uint32 짜리 hp, uint16 짜리 attack  순으로 데이터를 밀어 넣는다는 약속을 하였습니다. 
+이걸 규약 Protocol 이라고 합니다.
+데이터를 받을때도 마찬가지 순서로 꺼내야 하는데 
+이것이 프로토콜 설계의 기초라고 할 수 있습니다. 지금처럼 간단하지는 않을것이고 온갖 타입의 데이터들을 순서에 맞춰 주고 받을 것입니다. 
+
+이런 내용들을 다음 시간에 점차 알아 가겠습니다. 
