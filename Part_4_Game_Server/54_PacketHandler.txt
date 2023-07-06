@@ -1,0 +1,500 @@
+
+
+
+            Packet Handler
+
+
+
+지난 시간까지 버퍼를 쓰고 읽는걸 도와주는 헬퍼 클래스들을 만들었습니다. 
+
+오늘할 내용을 보자면 이전 시간의 테스트 코드를 복기하면서 무엇이 불편한지 보겠습니다. 
+GameServer 에서 BufferWriter 로 SendBuffer에 데이터를 집어 넣을때 id(uint64), hp(uint32), attack(uint16) 을 순서대로 넣어주었다면 
+받는쪽인 DummyClient에서는 넣은 순서 그대로 꺼내야 했습니다. 만약 중간에 hp같은걸 누락하거나 아니면 attack만 필요하다고 그것만 꺼내려고하면 
+엉뚱한 값들이 나오게 될겁니다.
+그리고 이 버그는 찾기가 힘들고 버그발생 후 한참뒤에 발견할수도 있습니다. 
+
+이 상태에서 온라인게임을 만든다고 했을때 아쉬운 점은 패킷을 처리할때 패킷 별로 구분이 안되어 있다는것입니다. 
+지금이야 패킷 한가지로만 테스트를 하고 있는데 실제 게임은 패킷의 id에 따라 여러 종류가 될겁니다. 
+
+일반적 포트폴리오를 만들때는 10개에서 20개 정도 패킷종류면 충분하다고 하고 실제 서비스하는 온라인게임은 100 ~ 200 개 정도 된다고 합니다.
+많다고 하면 많고 적다고 하면 적은 갯수입니다.
+
+어찌 됐건 패킷id에 따라 어떤 역할을 할건지 나눠줄 필요는 있다는것입니다. 
+현재 테스트 코드는 DummyClient 안에 ServerSession::OnRecvPacket 에서 패킷을 처리해 주고 있었습니다.
+이 ServerSession이라는 클래스는 나중에는 많은 역할을 맡게 될겁니다. 그래서 안에서 직접적으로 패킷을 파싱하는 역할을 하기 보다는 외부에 새로 
+클래스를 만들어 일을 나눠하는게 좋습니다. 
+
+VS로 클래스 추가를 할것입니다. DummyClient프로젝트에는 ClientPacketHandler, GameServer프로젝트에는 ServerPacketHandler 라는 이름으로 추가했습니다.
+
+*** 
+
+ClientPacketHandler에서 ServerSession::OnRecvPacket에서 해주던 일을 대신 해줄것입니다. 
+
+	virtual void ServerSession::OnRecvPacket(BYTE* buffer, int32 len) override
+	{
+		// 이제는 OnRecvPacket이 굳이 처리한 패킷의 크기를 반환할 필요가 없습니다. 
+		// 이미 OnRecv에서 패킷이 온전히 온걸 보장하기 때문입니다. 
+
+		// 저번 시간에 패킷을 처리하던 코드를 모두 아래쪽에서 처리합니다.
+		ClientPacketHandler::HandlePacket(buffer, len);
+	}
+
+여기서 자잘한 수정점이 있는데 PacketSession 클래스 부터 OnRecvPacket의 반환 타입을 int32를 반환 하도록 했었는데 
+왜 그랬냐면 OnRecv로 직접 받은 버퍼를 처리하던 시절에는 무조건 들어온 버퍼가 온전한 패킷인것처럼 취급 했고 그 크기를 확인하기 위해서였습니다. 
+지금은 OnRecv에서는 패킷 헤더를 통해 패킷이 온전히 넘어온 다음에야 그것을 OnRecvPacket에게 넘겨주기 때문에 굳이 반환 타입을 사용할 이유가 없어졌습니다. 
+
+
+-- ClientPacketHandler
+
+
+/*
+---------------------------
+	ClientPacketHandler
+---------------------------
+*/
+enum
+{
+	// 서버에서 클라로 보내는 패킷은 S_ 를 붙힙니다. 
+	S_TEST = 1,
+};
+
+// ServerSession::OnRecvPacket에서 패킷을 처리하던걸 여기서 대신 합니다.
+class ClientPacketHandler
+{
+public:
+	static void HandlePacket(BYTE* buffer, int32 len);
+
+	static void Handle_S_TEST(BYTE* buffer, int32 len);
+};
+
+
+/*
+---------------------------
+	ClientPacketHandler
+---------------------------
+*/
+void ClientPacketHandler::HandlePacket(BYTE* buffer, int32 len)
+{
+	BufferReader br(buffer, len);
+
+	PacketHeader header;
+	br >> header;
+
+	// 패킷 id에 따라 처리를 해줍니다. 
+	// 경우에 따라 진짜 패킷종류에 따라 수백개의 switch 문을 사용하기도 한답니다.
+
+	switch (header.id)
+	{
+	case S_TEST:
+		Handle_S_TEST(buffer, len);
+		break;
+	}
+}
+
+// 패킷 설계 TEMP
+struct S_TEST
+{
+	uint64 id;
+	uint32 hp;
+	uint16 attack;
+};
+
+void ClientPacketHandler::Handle_S_TEST(BYTE* buffer, int32 len)
+{
+	// 패킷을 처리만 하는 함수이긴하지만 header 까지 꺼내줘야 순서가 맞습니다. 
+	BufferReader br(buffer, len);
+
+	PacketHeader header;
+	br >> header;
+
+	uint64 id;
+	uint32 hp;
+	uint16 attack;
+
+	br >> id >> hp >> attack;
+
+	cout << "ID :" << id << " HP :" << hp << " ATT:" << attack << endl;
+
+
+	// 일단 아래의 부분은 나중에 다시 다룰것입니다. 
+
+	//char recvBuffer[4096];
+	//br.Read(recvBuffer, header.size - sizeof(PacketHeader) - 8 - 4 - 2);
+	//cout << "Recv Data = " << recvBuffer << endl;
+}
+
+
+기존 패킷을 처리하던걸 그대로 가져왔기떄문에 BufferReader 클래스와 Session 클래스가 필요합니다. include 해줘야 하는데 
+Session은 생각보다 이곳저곳에서 사용할거 같기 때문에 공용 헤더인 CorePch에 추가 했습니다. 
+
+OnRecvPacket에서 호출하던 ClientPacketHandler::HandlePacket 은 패킷의 헤더를 추출해 그 id를 가지고 switch문으로 분류하고 있습니다. 
+즉 사용할 id의 종류에 따라 switch 문이 그만큼 길어지게 되어있는데 실제로 어떤 프로젝트에서는 그냥 수백개의 switch문을 그냥 사용하기도 하고 
+좀더 id에 따라 바로 바로 분류되도록 정리 할 수도 있다고 합니다. 
+우선 지금은 id가 1 밖에 없으니 이것을 S_TEST 라는 이름의 enum으로 관리하겠습니다. 
+또 switch 문안에 id,hp,attack을 추출하는 코드를 넣기에는 너무 지저분 해지니 해당 기능을 따로 함수로 뺐습니다. 
+
+위에서 S_TEST 라고 이름 붙힌 이유는 Server 쪽에서 Client로 넘어온 패킷에는 S_ 를 붙히고 
+Client에서 Server로 넘어간 패킷은 C_ 를 붙히는 컨밴션을 사용할 것이기 때문입니다. 
+
+
+-- GameSession
+GameServer 쪽에서 사용하는 GameSession도 OnRecvPacket의 반환 타입을 void로 바꿔주고 OnRecvPacket의 내용도 수정해줍니다. 
+
+void GameSession::OnRecvPacket(BYTE* buffer, int32 len)
+{
+	ServerPacketHandler::HandlePacket(buffer, len);
+}
+
+아주 간단해졌습니다. 
+
+
+-- ServerPacketHandler
+
+/*
+--------------------------
+	ServerPacketHandler
+--------------------------
+*/
+enum
+{
+	S_TEST = 1,
+};
+
+class ServerPacketHandler
+{
+public:
+	static void HandlePacket(BYTE* buffer, int32 len);
+
+};
+
+
+/*
+--------------------------
+	ServerPacketHandler
+--------------------------
+*/
+void ServerPacketHandler::HandlePacket(BYTE* buffer, int32 len)
+{
+	BufferReader br(buffer, len);
+
+	PacketHeader header;
+	// ClientPacketHandler 에서는 >> 연산자로 그냥 꺼냈었는데 
+	// 사실 header의 id만 살펴보고 판별하면 되니까 Peek() 을 사용해도 됩니다.
+	br.Peek(&header);
+
+	// 현재는 클라이언트에서 패킷을 받도록 설계한적이 없기 때문에 딱히 해줄게 없습니다. 
+	switch (header.id)
+	{
+	default:
+		break;
+	}
+}
+
+ServerPacketHandler는 코드가 더 간단한데 BufferReader로 영역을 집어준 다음 header를 직접 꺼내는게 아닌 확인한 하는 용도의 함수
+Peek() 을 사용해 봤습니다. 
+switch 문에서는 아직 클라이언트에서 서버로 패킷을 보내지 않는 관계로 그냥 비워 뒀습니다. 
+
+
+*** 
+
+여기까지 한것은 이제 버퍼를 받는 입장에서의 내용들이었습니다. 
+
+이제는 보내는 것을 작업해보겠습니다. 
+보내는 것도 꽤 난잡하게 되어있었습니다. 이 코드 뭉치를 그냥 복사 붙여넣기를 하는것은 알아보기도 힘들것입니다. 
+물론 그냥 복붙을 한다고 해서 동작하지 않는다는것은 아니지만 개발이라는것은 혼자서만 하는게 아니라 다른 사람과의 협업도 신경을 써야 하기 때문에 정리를 하고 
+아니면 이 내용중 수정해야 할 부분이 생겼다면 복붙한 코드를 다 따라 다니면서 수정 사항을 적용 시켜줘야 합니다. 
+그래서 동일한 기능을 하는 부분은 무조건 함수로 묶어서 관리하는게 정석적입니다. 
+
+패킷을 만들어 주는 것도 PacketHandler 쪽에서 해주면 좋을듯합니다. 
+
+/*
+--------------------------
+	ServerPacketHandler
+--------------------------
+*/
+enum
+{
+	S_TEST = 1,
+};
+
+class ServerPacketHandler
+{
+public:
+	static void HandlePacket(BYTE* buffer, int32 len);
+
+	static SendBufferRef Make_S_TEST(uint64 id, uint32 hp, uint16 attack);
+};
+
+
+/*
+--------------------------
+	ServerPacketHandler
+--------------------------
+*/
+SendBufferRef ServerPacketHandler::Make_S_TEST(uint64 id, uint32 hp, uint16 attack)
+{
+	SendBufferRef sendBuffer = GSendBufferManager->Open(4096);
+
+	BufferWriter bw(sendBuffer->Buffer(), sendBuffer->AllocSize());
+	PacketHeader* header = bw.Reserve<PacketHeader>();
+	// 인자로 데이터를 밀어넣습니다.
+	bw << id << hp << attack;
+	header->size = bw.WriteSize();
+	header->id = S_TEST;
+
+	sendBuffer->Close(bw.WriteSize());
+
+	return sendBuffer;
+}
+
+이렇게 이전 시간 GameServer.cpp 에서 직접 만들어 주던 부분을 따로 만들었습니다. 
+
+GameServer쪽 코드는 이렇게 간편해집니다. 
+
+
+	while (true)
+	{
+		// 패킷 핸들러에서 패킷을 만들어주는 기능을 추가 했습니다. 
+		SendBufferRef sendBuffer = ServerPacketHandler::Make_S_TEST(1001, 100, 10);
+
+		GSessionManager.Broadcast(sendBuffer);
+
+		this_thread::sleep_for(250ms);
+	}
+
+
+***
+
+이제 다 된것 같아 빌드를 해보면 에러가 발생합니다. BufferWriter 쪽 에러인데 
+연산자 오버로딩 << 을 만들때 왼값, 오른값이라면서 만들었던부분이 문제입니다. 
+
+
+	// 왼값 참조 버전
+	template<typename T>
+	BufferWriter& operator<<(const T& src);
+	// 오른값 참조 버전
+	template<typename T>
+	BufferWriter& operator<<(T&& src);
+
+
+그런데 오른값 참조라고 만든 T&& 부분이 사실 템플릿을 사용하는 경우에는 오른값 참조가 아닌 보편참조가 됩니다. 
+보편참도는 들어오는 값이 왼값이면 const T&, 오른값이면 T&& 로 알아서 변환해줍니다. 
+
+그러다 보니 사실 왼값 참조라고 만들었던 부분은 필요가 없어져 버렸습니다. 삭제 해주었습니다. 
+
+남은 코드의 정의부를 보겠습니다. 
+
+template<typename T>
+BufferWriter& BufferWriter::operator<<(T&& src)
+{
+	// 오른값 참조이니 복사가 아닌 std::move
+	*reinterpret_cast<T*>(&_buffer[_pos]) = std::move(src);
+	_pos += sizeof(T);
+	return *this;
+}
+
+
+여기서 잠깐 에러코드를 보면 ServerPacketHandler::Make_S_TEST() 를 호출할때 인자들이 uint64 id, uint32 hp, uint16 attack 으로 다 왼값들입니다. 
+
+그러면 id는 위 코드에서는 타입 T는 const uint64& 가 됩니다. 
+즉 캐스팅을 할때 
+
+	*reinterpret_cast<const uint64&*>(&_buffer[_pos]) = std::move(src);
+
+이렇게 const uint64 의 참조값의 포인터로 캐스팅 하려다 보니까 문제가 일어난겁니다. 
+
+이걸 어떻게 해결해야 하냐면 T 가 const uint64& 라면 여기서 &을 땐 const uint64 의 포인터로 캐스팅 하도록 하면됩니다.
+
+템플릿 문법중 remove_reference_t<T> 라는 문법이 있는데 이름 그대로 T에서 reference를 제거 한다는 의미입니다. 
+
+template<typename T>
+BufferWriter& BufferWriter::operator<<(T&& src)
+{
+	using DataType = std::remove_reference_t<T>;
+	*reinterpret_cast<DataType*>(&_buffer[_pos]) = std::forward< DataType>(src);
+	_pos += sizeof(T);
+	return *this;
+}
+
+이렇게 수정하면 되는데 src를 넣어줄때 오른값이 아닌 보편참조이기때문에 move 대신 forward를 사용합니다. 
+
+
+이제 빌드 후 실행해보면 잘 동작합니다. 
+
+*** 
+
+제가 포트폴리오만들 목적이면 여기까지만 해도 충분하다고 합니다.
+
+그래도 추가적으로 몇가지 더 알아보자면 
+
+패킷에 밀어넣는 데이터가 일반적인 uint, float, bool 이라면 지금처럼 넣어줘도 될것입니다. 
+하지만 가변적인 데이터가 들어가는 순간 어려워집니다. 
+
+예를 들어 지금 패킷 설계가 이렇게 된다고 해보겠습니다.
+
+struct BuffData
+{
+    uint64 buffId;
+    float remainTime;
+}
+
+// 패킷 설계 TEMP
+struct S_TEST
+{
+	uint64 id;
+	uint32 hp;
+	uint16 attack;
+    // 가변데이터 
+    vector<BuffData> buffs;
+};
+
+패킷이 가리키는 객체의 id, 체력, 공격력에 더해 지금 이 객체가 받고 있는 버프, 디버프들의 정보를 담은 구조체들을 받고 있다고 하겠습니다. 
+그런데 버프는 그때 그때 갯수가 바뀔겁니다. 
+
+정석적인 방법은 가변적인 데이터의 갯수를 보내주고 실제 데이터도 같이 보내주는 방법입니다. 
+말이 어려습니다. 
+Server쪽에서 이 가변 데이터를 보내보는 실습을 해보겠습니다.
+
+
+/*
+--------------------------
+	ServerPacketHandler
+--------------------------
+*/
+enum
+{
+	S_TEST = 1,
+};
+
+// 가변 데이터 예시 
+struct BuffData
+{
+	uint64 buffId;
+	float remainTime;
+};
+
+class ServerPacketHandler
+{
+public:
+	static void HandlePacket(BYTE* buffer, int32 len);
+
+	static SendBufferRef Make_S_TEST(uint64 id, uint32 hp, uint16 attack, /*가변데이터 실습*/vector<BuffData> buffs);
+};
+
+Make_S_TEST의 인자를 하나 더 늘렸습니다. 
+
+SendBufferRef ServerPacketHandler::Make_S_TEST(uint64 id, uint32 hp, uint16 attack, vector<BuffData> buffs)
+{
+	SendBufferRef sendBuffer = GSendBufferManager->Open(4096);
+
+	BufferWriter bw(sendBuffer->Buffer(), sendBuffer->AllocSize());
+	PacketHeader* header = bw.Reserve<PacketHeader>();
+	// 인자로 데이터를 밀어넣습니다.
+	bw << id << hp << attack;
+
+	// 가변 데이터 
+	// 먼저 가변데이터의 사이즈를 밀어 넣습니다. 메모리가 아까우니 uint16으로 캐스팅합니다.
+	bw << (uint16)buffs.size();
+
+	// 이제 가변 데이터의 내용물들을 하나씩 넣어줍니다. 
+	for (BuffData& buff : buffs)
+	{
+		bw << buff.buffId << buff.remainTime;
+	}
+
+	header->size = bw.WriteSize();
+	header->id = S_TEST;
+
+	sendBuffer->Close(bw.WriteSize());
+
+	return sendBuffer;
+}
+
+중간에 추가된 코드를 보면 아까 말했던 그대로 먼저 받은 가변 데이터의 갯수를 밀어넣습니다. 그리고 가변 데이터를 순회하면서 그 내용물을 차례대로 하나씩 
+밀어 넣어 줍니다. 
+나머지 코드는 알아서 값이 바뀔것입니다. 
+
+또 테스트를 하려면 GameServer 코드도 수정해야 합니다. 
+
+	while (true)
+	{
+		// 가변데이터를 만듭니다.
+		vector<BuffData> buffs{ BuffData{100, 1.5f}, BuffData{200, 2.3f} , BuffData{300, 0.7f} };
+
+		// 패킷 핸들러에서 패킷을 만들어주는 기능을 추가 했습니다. 
+		SendBufferRef sendBuffer = ServerPacketHandler::Make_S_TEST(1001, 100, 10, buffs);
+
+		GSessionManager.Broadcast(sendBuffer);
+
+		this_thread::sleep_for(250ms);
+	}
+
+임의로 buffs에 3개의 BuffData를 넣어 봤습니다. Make_S_TEST의 인자로도 넘겨주었습니다. 
+
+
+그러면 이제 이 패킷을 파싱하는쪽 ClientPacketHandler 에서도 이 프로토콜을 잘 맞춰주면됩니다. 
+
+
+void ClientPacketHandler::Handle_S_TEST(BYTE* buffer, int32 len)
+{
+	// 패킷을 처리만 하는 함수이긴하지만 header 까지 꺼내줘야 순서가 맞습니다. 
+	BufferReader br(buffer, len);
+
+	PacketHeader header;
+	br >> header;
+
+	uint64 id;
+	uint32 hp;
+	uint16 attack;
+
+	br >> id >> hp >> attack;
+
+	cout << "ID :" << id << " HP :" << hp << " ATT:" << attack << endl;
+
+
+	// 가변데이터 파싱
+	// 추출할 그릇
+	vector<BuffData> buffs; 
+
+	uint16 buffCount;
+
+	// 패킷에 담았던 순서 그대로 꺼냅니다.
+	br >> buffCount;
+
+	buffs.resize(buffCount);
+	for (int32 i = 0; i < buffCount; i++)
+	{
+		br >> buffs[i].buffId >> buffs[i].remainTime;
+	}
+
+	cout << "BuffCount : " << buffCount << endl;
+	for (int32 i = 0; i < buffCount; i++)
+	{
+		cout << "Buff Info : " << buffs[i].buffId << " " << buffs[i].remainTime << endl;
+	}
+}
+
+***
+
+이대로 프로그램을 실행해보면 정상적으로 잘 동작한다는것을 알 수 있습니다. 
+
+
+그런데 가변 데이터라는게 지금처럼 vector 같은 컨테이너 일 수 도 있고 
+혹은 문자열(ex. 이름)이라거나 그냥 일반적인 바이트 배열(ex. 길드 이미지) 등이 올 수도 있을겁니다. 
+
+
+여기서 주의해야할 점이 있습니다. 가변데이터 뿐만 아니라 패킷 설계를 할때 항상 조심해야하는 점인데
+우리가 온라인 게임을 만들때는 꼭 기억해야 하는 말이 있습니다. 
+"클라는 절대 신용할 수 없다" 
+이 문장을 꼭 유념해야합니다. 언제든지 클라는 해킹될 위험이 있습니다. 저번에 PacketHeader도 마찬가지로 해킹이 될 것을 염두해 두라고 말했었습니다. 
+이런 해킹 시도들도 인지하고 걸러내는것도 서버의 임무입니다. 
+
+가변 데이터에서 이 말을 꺼낸 이유가 고정된 크기의 데이터를 조작하기 보다는 가변 데이터를 조작해 놓은것이 더 알아채기 어렵습니다. 
+예를 들어 해킹으로 인해 가변 데이터가 엄청 큰게 들어왔다. 6만개의 BuffData가 들어왔다 라고 한다면 우리 코드에서는 6만번의 루프를 돌아야 하고 
+또 << 연산자를 만들면서 딱히 버퍼의 범위 체크를 하지 않았기 때문에 최대 버퍼 크기를 넘어서 까지 건드리게 될 수도 있습니다. 
+
+그래서 언젠가는 결국 그런 해킹 시도를 걸러 낼 수 있는 기능을 만들어야 합니다.
+
+
+추가로 가변데이터중 문자열을 보낼때 마찬가지로 문자열의 길이와 각 문자열을 패킷에 넣어주면 될것인데 
+문제는 문자열은 인코딩 이슈가 있습니다. 많이 어려운 내용은 아니지만 한번쯤은 꼭 다루고 넘어야가 하기 때문에 다음 시간내용으로 다뤄보겠습니다. 

@@ -29,11 +29,7 @@ public:
 	T*					Reserve();
 
 	// 데이터를 밀어 넣는다는 뜻의 << 연산자 
-	// 두가지 버전을 만들어 줄것입니다. 
-	// 왼값 참조 버전
-	template<typename T>
-	BufferWriter& operator<<(const T& src);
-	// 오른값 참조 버전
+	// 템플릿을 사용하면 보편 참조 버전이었습니다. 
 	template<typename T>
 	BufferWriter& operator<<(T&& src);
 
@@ -59,20 +55,12 @@ T* BufferWriter::Reserve()
 	return ret;
 }
 
-template<typename T>
-BufferWriter& BufferWriter::operator<<(const T& src)
-{
-	// memcpy로 해도 똑같은 의미 
-	*reinterpret_cast<T*>(&_buffer[_pos]) = src;
-	_pos += sizeof(T);
-	return *this;
-}
 
 template<typename T>
 BufferWriter& BufferWriter::operator<<(T&& src)
 {
-	// 오른값 참조이니 복사가 아닌 std::move
-	*reinterpret_cast<T*>(&_buffer[_pos]) = std::move(src);
+	using DataType = std::remove_reference_t<T>;
+	*reinterpret_cast<DataType*>(&_buffer[_pos]) = std::forward< DataType>(src);
 	_pos += sizeof(T);
 	return *this;
 }

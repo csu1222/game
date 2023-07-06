@@ -166,6 +166,7 @@ public:
 protected:
 	// OnRecv뒤에 sealed를 붙힘으로써 앞으로는 OnRecv는 사용하지 못하게 막았습니다. 
 	virtual int32		OnRecv(BYTE* buffer, int32 len) sealed;
-	// 대신 OnRecvPacket을 사용하게 하고 abstract 키워드로 반드시 재정의해 사용하도록 합니다. 
-	virtual int32		OnRecvPacket(BYTE* buffer, int32 len) abstract;
+
+	// 이제는 OnRecvPacket이 굳이 처리한 패킷의 크기를 반환할 필요가 없습니다. 
+	virtual void		OnRecvPacket(BYTE* buffer, int32 len) abstract;
 };
