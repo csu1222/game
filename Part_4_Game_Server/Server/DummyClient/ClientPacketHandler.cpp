@@ -41,6 +41,9 @@ struct S_TEST
 	uint16 attack;
 	// 가변데이터 
 	vector<BuffData> buffs;
+
+	// UTF-16 사용 문자열 
+	wstring name;
 };
 
 void ClientPacketHandler::Handle_S_TEST(BYTE* buffer, int32 len)
@@ -80,4 +83,17 @@ void ClientPacketHandler::Handle_S_TEST(BYTE* buffer, int32 len)
 	{
 		cout << "Buff Info : " << buffs[i].buffId << " " << buffs[i].remainTime << endl;
 	}
+
+	// 문자열을 받아줄 그릇
+	// Make_S_Test에서와 똑같은 순서로 데이터를 꺼냈습니다. 
+	wstring name;
+	uint16 nameLen;
+	br >> nameLen;
+	name.resize(nameLen);
+
+	br.Read((void*)name.data(), nameLen * sizeof(WCHAR));
+	
+	// wstring 을 사용하면서 wcout 을 사용해야 한다거나 추가 설정을 해야하는것이 있습니다
+	wcout.imbue(std::locale("kor"));
+	wcout << name << endl;
 }
