@@ -28,15 +28,28 @@ void ServerPacketHandler::HandlePacket(BYTE* buffer, int32 len)
 SendBufferRef ServerPacketHandler::Make_S_TEST(uint64 id, uint32 hp, uint16 attack, vector<BuffData> buffs, wstring name)
 {
 	SendBufferRef sendBuffer = GSendBufferManager->Open(4096);
-
+	
+	// 고정 데이터를 넣어주는 부분까지는 똑같습니다. 
 	BufferWriter bw(sendBuffer->Buffer(), sendBuffer->AllocSize());
 	PacketHeader* header = bw.Reserve<PacketHeader>();
-	// 인자로 데이터를 밀어넣습니다.
 	bw << id << hp << attack;
 
-	// 가변 데이터 
-	// 먼저 가변데이터의 사이즈를 밀어 넣습니다. 메모리가 아까우니 uint16으로 캐스팅합니다.
-	bw << (uint16)buffs.size();
+	// 가변 데이터 부터 수정이 들어갑니다. 
+
+	// 설계했던대로 가변데이터의 헤더는 offset과 count를 들고 있을건데 구조체로 다뤄주겠습니다.
+	struct ListHeader
+	{
+		uint16 offset;
+		uint16 count;
+	};
+	// buffs의 헤더를 입력할 자리를 예약해 놓습니다. 
+	ListHeader* buffsHeader = bw.Reserve<ListHeader>();
+	
+	// buffsHeader의 내용은 고정데이터가 다 들어오고 난 후, Close전까지만 채워주면 됩니다. 
+	// offset은 가변 데이터가 담길 시작 위치를 넣어주면 되는데 현재 상황은 
+	// 고정데이터도 다 들어 왔고 가변데이터 헤더도 자리를 만들었으니 바로 이어서 가변데이터가 올겁니다.
+	buffsHeader->offset = bw.WriteSize();
+	buffsHeader->count = buffs.size();
 
 	// 이제 가변 데이터의 내용물들을 하나씩 넣어줍니다. 
 	for (BuffData& buff : buffs)
@@ -44,16 +57,7 @@ SendBufferRef ServerPacketHandler::Make_S_TEST(uint64 id, uint32 hp, uint16 atta
 		bw << buff.buffId << buff.remainTime;
 	}
 
-	// 가변 데이터 2탄 wstring 문자열 
-	// 위쪽 가변데이터와 똑같은 방식을 사용합니다.
-	// 먼저 문자열의 크기를 밀어 넣습니다. 
-	// UTF-16 기준으로 size()를 사용하면 마지막에 null종단문자는 사이즈에 포함되지 않습니다. 
-	// 어짜피 UTF-16을 사용한다고 알고 있으면 받는쪽에서 처리해줘도 됩니다. 
-	bw << (uint16)name.size();
-
-	// BufferWrite.Write 함수는 void* 타입으로 src를 받아주고 있엇습니다. 
-	// 사이즈는 문자열의 갯수에 문자 한개당 크기(sizeof(WCHAR))를 곱해주었습니다. 
-	bw.Write((void*)name.data(), name.size() * sizeof(WCHAR));
+	// 문자열은 생략 
 
 	header->size = bw.WriteSize();
 	header->id = S_TEST;

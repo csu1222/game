@@ -11,12 +11,27 @@
 // TCHAR 사용할때 필요
 #include <tchar.h>
 
-/*
-GameServer 메인 스레드에서 직접 접속한 모든 클라이언트에 Send를 뿌립니다. 
-*/
+
+#pragma pack(1)
+struct PKT_S_TEST
+{
+	uint32 hp;
+	uint64 id;
+	uint16 attack;
+};
+#pragma pack()
+
 
 int main()
 {	
+	// -----------------------
+	
+	PKT_S_TEST pkt;
+	pkt.hp = 1;
+	pkt.id = 2;
+	pkt.attack = 3;
+
+	// -----------------------
 	ServerServiceRef service = MakeShared<ServerService>(
 		NetAddress(L"127.0.0.1", 7777),
 		 MakeShared<IocpCore>(),

@@ -1,0 +1,485 @@
+
+
+
+        패킷 직렬화 
+
+
+지난시간까지 가변데이터를 보내는 방법에 대한 어느정도의 방법을 배웠습니다. 
+
+이번 시간부터 본격적인 패킷 직렬화에 대한 내용을 알아볼것입니다. 다양한 방법이 있고 또 깊이 들어가면 어려운 내용이기도합니다. 
+내용이 많다 보니 패킷 직렬화에 대한 내용을 쪼개서 부분부분 알아볼것입니다. 
+
+나중에 ProtoBuf, FlatBuffer 의 차이에 대해서도 알아봐야 하는 등 이해도의 측면에서 여러 방법의 패킷 직렬화를 알아 둬야 합니다. 
+
+본격적인 내용에 앞서 먼저 용어를 정리하고 시작하는게 좋을것 같습니다.
+
+'패킷 직렬화' 란 무엇일까요?
+온라인게임뿐만 아니라 다양한 분야에서 많이 나오는 용어 입니다. 
+
+
+-- 패킷 직렬화 Serialization
+
+직렬화라는 단어가 무언가를 납작하고 일렬로 늘어놓은거 같은 어감입니다. 
+
+먼저 패킷으로 데이터 통신을 할때 그냥 메모리에있는 데이터를 한번에 다 보낼 수 없는 이유부터 알아 봐야 할것입니다. 
+
+
+
+패킷으로 통신을 할때 왜 데이터를 메모리 통채로 보내지 못하는가?
+예시
+class Player
+{
+public:
+	int32 hp = 0;
+	int32 attack = 0;
+	Player* target = nullptr;
+	vector<int32> buffs;
+};
+
+
+Player를 동적할당 할것인데 그 동적할당한 객체를 그대로 전송하면 안될까?
+이 의문은 네트워크 통신뿐만아니라 파일 입/출력 에서도 똑같은 내용입니다. 
+	
+Player* player = new Player();
+
+파일 입/출력에도 똑같이 적용된다는 말의 예시로서 위의 코드를 세이브 파일로 작성하고 나중에 로드 하려고 하면 크래시가 납니다. 
+왜냐하면 동적할당한 주소도 그대로 파일에 저장이 되었다가 다시 불러올텐데 그 주소자체가 실제 컴퓨터의 메모리 주소가 아닌 가상 주소를 사용하기 때문입니다. 
+가상주소는 프로그램이 다시 실행 될때 마다 그 주소값이 달라지기 때문에 변동된 주소를 파일에 그대로 복사하는 방법으로는 대처할 수 없기 때문입니다. 
+
+가상주소를 사용하는건 Player 클래스 내부에 target이나 buffs, 그리고 Player 자체를 동적 할당한 player 객체가 있습니다. 
+
+마찬가지로 이 Player 라는 코드를 Client에게 전송한다고 해도 주소를 사용하는 정보들을 그대로 전송하는것은 아무런 쓸모가 없습니다. 
+
+그래서 직렬화 한다는 것은 보낼 데이터들을 납작하게 눌러 BYTE 배열같이 정렬한다는 것입니다. 
+hp나 attack이라는 정보는 그대로 BYTE배열에 옮길 수 있겠지만 target, buffs 같은것은 다른 메모리 공간을 가리키고 있습니다. 
+다른메모리에 위치한 데이터를 패킷 직렬화라는 과정을 통해 실제 메모리에서 데이터들을 BYTE배열에 복사하는것입니다. 
+반대로 패킷을 받은쪽에서는 받은 BYTE 배열을 원래 형태대로 복원하는걸 역 직렬화 라고 합니다. 
+
+그리고 이전시간에 PacketHandler 에서 가변 데이터를 넣으려고 count와 데이터 하나씩 일일히 넣어주던것도 이 패킷직렬화를 위한 일이었습니다.
+
+말 나온김에 지금 까지 만들었던 기초적인 직렬화를 하고 있던 함수들은 ServerPacketHandler::Make_S_TEST, ClientPacketHandler::Handle_S_TEST 를 보겠습니다. 
+사실 지금까지 만들었던 형태로만 만들어도 프로그래밍 지망생의 포트폴리오에는 충분합니다.
+포트폴리오 정도 규모에서 다루는 패킷의 종류는 10 ~ 20 개정도 밖에 안되기때문입니다. 
+
+하지만 좀 더 진지하게 대규모의 게임을 만들려고 하면 다루게 되는 패킷의 종류는 100 ~ 200개 정도가 되고 그럴 경우에는 지금 처럼 함수로 하나씩 빼서 관리하는것은 
+너무 반복적이고 관리하기가 힘들어 질것입니다. 
+그렇기 때문에 나중에 실무로 가면 이런 작업들을 자동화 처리합니다.
+
+자동화로 만들때는 패킷원본 설계가 중요해 집니다. 
+우리 코드에서는 이게 패킷 설계라고 만들었었습니다.
+
+// 패킷 설계 TEMP
+struct S_TEST
+{
+	uint64 id;
+	uint32 hp;
+	uint16 attack;
+	// 가변데이터 
+	vector<BuffData> buffs;
+
+	// UTF-16 사용 문자열 
+	wstring name;
+};
+
+이 설계는 조금 아쉬운 점이 있는데 서버는 C++로 만든다고 해도 클라이언트는 C#의 유니티와 붙히면 C#에서는 vector나 wstring은 C++에서만 사용하기 떄문에 
+환경을 타는 설계법입니다. 
+
+그래서 ProtoBuf 같은 구글에서 정의한 데이터 교환 프로토콜을 사용하는게 아니라면 XML이나 JSON 둘 중 하나를 골라 사용합니다.
+
+XML, JSON 둘 다 어플리케이션 간의 데이터 교환에 사용되는 데이터 표현입니다. 
+XML은 html 과 비슷한 형태를 하고 있고 JSON은 javascript에서 파생된 형태를 하고 있습니다. 
+두 방식에는 각자의 장단점이 있어서 상황에 따라 뭘 사용할지 골라서 사용하게 됩니다. 
+
+XML
+<users>
+    <user>
+        <name>John</name>
+        <age>22</age>
+    </user>
+    <user>
+        <name>Mary</name>
+        <age>21</age>
+    </user>
+</users>
+
+XML은 이렇게 유저들을 묶어서 관리할때 각 계층에 이름을 붙혀서 관리하다보니 좀 더 복잡한 형태의 구조에서는 사람이 읽기에 더 구별이 잘 갑니다. 
+
+JSON
+var users = [
+                {
+                    name = "John",
+                    age = 22
+                },
+                {
+                    name = "Mary",
+                    age = 21
+                }
+            ]
+
+JSON은 이렇게 일일히 계층에 이름을 붙혀 관리하지 않아 컴퓨터에서 읽기에 좀 더 빠른 속도가 나는 특징이 있습니다. 
+
+
+개인적인 방식으로 직렬화를 하려면 위 두가지 방법중 한가지를 골라 데이터를 표현하고 원본 패킷에 대한 정의를 관리하고 받는쪽에서는 그 패킷을 파싱해 
+자신의 환경에 맞춰 코드로 복원합니다. 이런 부분들을 자동화하면 혹여 오타를 낼까 걱정하지 않아도 되는것입니다.
+
+-- XML 실습
+간단하게 XML을 만드는 실습을 해보겠습니다. 
+DummyClient에만 예시로 하나 만들어 보겠습니다. 새 항목추가로 xml 파일을 만들었습니다. 
+
+<?xml version="1.0" encoding="utf-8"?>
+<PDL>
+	<Packet name="S_TEST" desc="테스트 용도">
+		<Field name="id" type="uint64" desc=""></Field>
+		<Field name="hp" type="uint32" desc=""></Field>
+		<Field name="attack" type="uint16" desc=""></Field>
+		<List name="buffs" desc="">
+			<Field name="buffId" type="uint64" desc=""></Field>
+			<Field name="remainTime" type="float" desc=""></Field>
+		</List>
+	</Packet>
+</PDL>
+
+이 코드를 살펴보자면 가장 윗줄은 이 xml파일에 대한 설명이고 가장 상위에 PDL 이라는 틀을 만들었습니다. Packet Description List 의 약자로 만들어 봤습니다. 
+그 안에 Packet 태그이면서 이름은 S_TEST 태그를 만들고 이 S_TEST의 내용물 설명을 안에 채워넣었습니다. 
+이 태그들의 이름이나 설명하는 내용물은 딱히 문법이 있어서 그대로 작성한것이 아니고 임의적으로 적어둔 값들입니다.
+나중에 이것을 파싱하는쪽에서 잘 알아 들으면 됩니다. 
+
+
+그러면 이걸 자동화 할 수 있다고 가정을 하고 다음 단계에 대해 알아보겠습니다. 
+진지하게 게임을 만든다고 했을때 이후 처리해야할 부분이 무엇인지 고민해봅시다.
+이전에도 언급했던적이 있는데 나중에 가면 서버쪽은 보안이 중요하다고 했었습니다. 패킷을 주고 받을때 패킷헤더에 적혀있는 패킷사이즈를 가지고 이 패킷이 어느정도의 
+크기인지를 받고 있었습니다. 
+
+하지만 이 패킷헤더에 적혀있는 사이즈는 100% 신용할 수는 없다고 했습니다. 그래서 패킷을 해석하는 Handle_S_TEST 같은 곳에서 이 패킷이 정상적인 패킷인지를 
+걸러줄 수 있어야 한다 했습니다. 그러면 어떤 방법으로 그런 오염된 패킷을 어떻게 걸러야 할지 생각해보겠습니다. 
+
+사실은 뚜렷한 방법이 없습니다. 만약 패킷에 가변데이터가 없다면 이 패킷의 사이즈가 얼마인지 한번에 계산이 딱 될것입니다. 
+우리의 패킷설계에서 id, hp, attack만 있다고 치면 
+id (uint64 = 8byte) + hp (uint32 = 4byte) + attack(uint16 = 2byte) = 14byte 
+라고 딱 나오고 if 문으로 한번 걸르면 끝나지만
+가변길이 데이터가 등장하는 순간 바로 애매해집니다. 
+그때그때 데이터 하나하나씩 파싱해보는 수 밖에 없습니다. 이전 시간 내용을 예시로 보면 id, hp, attack 이후 buffs의 buffCount를 파싱해야지만 buffs의 크기가 얼마인지 알수 있고 
+또 buffs를 다 파싱한 다음에서야 nameLen을 파싱해 문자열의 크기를 알 수 있습니다. 
+
+그래서 지금 BufferWriter, BufferReader 에서 사용하는 방법이 간단하고 직관적인것은 맞지만 패킷변조를 잘 구별할 수 없다는 단점이 있습니다. 
+>>, << 연산자 오버로딩에서는 따로 버퍼의 남은 크기 FreeSize를 체크하지 않고 데이터를 밀어넣고 있는데 이걸 체크하도록 만들수도 있을겁니다. 
+하지만 데이터를 패킷에 밀어넣고 파싱하는것은 온라인게임에서 정말정말 자주 일어나는 동작일건데 그 하나하나마다 사이즈를 체크하는것은 너무나 성능적으로 낭비가 될겁니다. 
+
+오늘의 주제 패킷 직렬화는 위와 같은 경우에 패킷들을 직렬화, 파싱할 수 있고 또 패킷 변조에 대해서도 대응할수 있는 기법들을 알아보는것입니다. 
+
+
+***
+
+일단 패킷 설계에서 가변 데이터는 없다고 생각하고 기초부터 다시 생각해보겠습니다. 
+
+이전 처럼 패킷에서 데이터 한가지를 꺼낼 때 마다 그 사이즈를 세는 것도 가능하지만 고정 길이 데이터는 아예 처음에 총 데이터 사이즈를 알 수도 있을것입니다.
+그래서 한번에 합친 사이즈를 가지고 버퍼의 남은 공간에 담을수 있는지 없는지를 확인 할 수 있지 않을까 생각도 듭니다. 
+또 데이터를 하나씩 넣고 빼는것 말고 통째로 넣고 뺄 수도 있을것 같습니다. 
+
+// 패킷 설계 TEMP
+struct PKT_S_TEST
+{
+	uint64 id;
+	uint32 hp;
+	uint16 attack;
+	
+	//vector<BuffData> buffs;
+	//wstring name;
+};
+
+ClientPacketHandler::Handle_S_TEST(BYTE* buffer, int32 len)
+{
+    // BufferReader에게 영역 집어주기
+    BufferReader br(buffer, len);
+
+    PacketHeader header;
+    br >> header;
+
+	// 패킷에서 구조체 덩어리로 데이터를 꺼낼 수 있지 않을까
+    PKT_S_TEST pkt;
+    br >> pkt;
+
+}
+
+그런데 여기서 한가지 조심해야 할 부분이 있습니다. 만약 PKT_S_TEST 같은 구조체가 있는데 코드상으로는 사이즈가 8, 4, 2 바이트씩 해서 14 바이트를 차지하고 있을지가 
+궁금합니다. 
+한가지 더 가정을 추가해서 순서가 꼬여 있다고 해보겠습니다. 
+
+struct PKT_S_TEST
+{
+	uint32 hp;
+	uint64 id;
+	uint16 attack;
+};
+이 상황에서 객체를 만들어 값들을 임의로 채워 줬습니다. 
+코드 밑에 중단점을 잡고 디버깅을 해보겠습니다. 
+
+int main()
+{
+	PKT_S_TEST pkt;
+	pkt.hp = 1;
+	pkt.id = 2;
+	pkt.attack = 3;
+}
+
+디버깅 도구중 메모리를 확인하는 창에서 pkt의 주소로 메모리를 확인하면 
+맨 앞 4바이트 공간에 1이라는 값이 있고 바로 이어서 8바이트 짜리 id 값이 오는게 아니라 4바이트는 cc 라는 쓰레기 값들이 채워져 있습니다. 
+
+또 디버깅중 조사식 창에서 sizeof(pkt) 를 찾아보면 사이즈가 24 바이트로 나오는걸 알 수 있습니다.
+분명 14바이트로 되어있어야 되는데 순서나 크기가 안맞습니다. 
+
+이것은 바이트 정렬과 관계가 있습니다. 컴퓨터가 64비트 환경에서 실행할때는 8바이트 배수의 주소로 접근을 해야 데이터를 빠르게 찾아올 수 있습니다.
+그래서 구조체의 가장 큰 타입의 변수를 기준으로 정렬해주기 때문에 실질적으로 8바이트 3개로 메모리가 잡히게 된겁니다. 
+빈공간은 더미 데이터가 위치하게 되는데 그걸 코드로 표현하면 이렇습니다. 
+
+struct PKT_S_TEST
+{
+    uint32 hp;
+    uint32 dummy;
+    uint64 id;
+    uint16 attack;
+    uint16 dummy;
+    uint32 dummy;
+}
+
+그러다 보니 예상한대로의 사이즈가 아닐 수 있습니다. 네트워크상으로 데이터를 밀어넣어주게 되면 처음 우리가 설계한대로 4, 8 ,2 바이트 순으로 데이터가 들어가야하는데 
+그렇지 못합니다. 
+그래도 이것은 큰 문제가 되지 않는데 #pragma pack 이라는 명령어로 몇바이트 기준으로 정렬할건지 정할 수 있습니다. 
+
+#pragma pack(1)
+struct PKT_S_TEST
+{
+	uint32 hp;
+	uint64 id;
+	uint16 attack;
+};
+#pragma pack()
+
+이 상태에서 다시 디버깅으로 확인해보면 sizeof(PKT_S_TEST) 는 정상적으로 14 인것을 확인 할 수 있습니다. 
+
+그래서 패킷을 만들때는 #pragma pack(1) 이라는 명령어를 사용하면 메모리가 설계한 대로 잡히게 될겁니다.
+
+여기서 패킷 설계에 이전에 만들었던 PacketHeader의 내용도 추가해보겠습니다. 
+
+
+#pragma pack(1)
+struct PKT_S_TEST
+{
+	uint16 packetSize;
+	uint16 packetId;
+	uint64 id;
+	uint32 hp;
+	uint16 attack;
+};
+#pragma pack()
+
+이렇게 하면 Handle_S_TEST 에서 헤더 따로 PKT_S_TEST 따로 꺼낼 필요없이 한번에 꺼낼 수 있습니다. 또 이렇게 되면 사이즈 체크도 한번만 하면되는데
+
+받은 버퍼의 크기인 len 과 PKT_S_TEST 의 사이즈를 비교하면 됩니다. 
+
+if(len < sizeof(PKT_S_TEST))
+	return;
+
+여기서 len 은 PacketSession::OnRecv 를 통과한 후의 버퍼크기입니다. 이때는 packetSize 의 값과 Recv한 버퍼의 크기를 비교해 통과시키는 것이었다 보니까 
+위의 조건문에서 통과 하지 못한다는것은 실제 패킷 사이즈와 PacketHeader 에 적힌 사이즈가 일치 하지 않는 다는 말이 됩니다.
+
+여기까지는 크게 어려운 부분이 없었습니다. 
+이제는 가변길이 버퍼를 다시 추가해 보겠습니다. 
+
+-- 가변길이 데이터 
+이전시간 까지는 가변길이 데이터는 그 갯수를 먼저 밀어 넣고 그 원소들을 하나씩 밀어 넣었습니다. 이 방법으로는 패킷의 사이즈가 한번에 계산이 되지 않습니다. 
+
+가변길이 데이터를 관리하는 재미있는 아이디어가 있습니다.
+
+우선 아까 처럼 패킷 설계에 고정길이 데이터들을 먼저 넣습니다. 그리고 이후 가변길이 데이터 자체가 아닌 가변길이 데이터를 묘사하는 고정길이 데이터를 또 넣습니다. 
+어떤 형상이냐하면 
+
+// 패킷 설계 TEMP
+struct PKT_S_TEST
+{
+	uint16 packetSize;
+	uint16 packetId;
+	uint64 id;
+	uint32 hp;
+	uint16 attack;
+	// 가변길이 데이터를 묘사하는 데이터 
+	uint16 buffOffset;
+	uint16 buffCount;
+	//vector<BuffData> buffs;
+	//wstring name;
+};
+
+이런식입니다. 앞으로 PKT_S_TEST 에는 고정길이의 데이터만을 담고 그 뒤에 가변길이 데이터들을 넣어주게 될겁니다. 
+
+[ PKT_S_TEST ][ 가변 길이 데이터... ]
+
+이렇게 되면 먼저 아까 처럼 PKT_S_TEST 에 해당하는 부분까지는 한번에 사이즈를 알 수 있으니 체크할 수 있고 그 뒤로 따라오는 가변길이 데이터는 
+PKT_S_TEST 의 buffOffset, buffCount를 가지고 총 사이즈를 계산해 실제로 들어온 데이터와 크기가 맞는지 체크할 수 있게 됩니다. 
+
+
+#pragma pack(1)
+// 패킷 설계 TEMP
+struct PKT_S_TEST
+{
+	// 가변길이 데이터의 사이즈 계산에 필요합니다.
+	struct BuffsListItem
+	{
+		uint64 buffId;
+		float remainTime;
+	};
+
+	uint16 packetSize;
+	uint16 packetId;
+	uint64 id;
+	uint32 hp;
+	uint16 attack;
+	// 가변길이 데이터를 묘사하는 데이터 
+	uint16 buffOffset; // 가변길이 데이터가 시작하는 인덱스
+	uint16 buffCount;
+	//vector<BuffData> buffs;
+	//wstring name;
+	
+	// 패킷의 내용이 정상적으로 처리되고 있는지를 확인하는 함수 
+	bool Validate()
+	{
+		// 길이 테스트를 하면됩니다. 
+		uint32 size = 0;
+
+		// 먼저 PKT_S_TEST의 사이즈를 더합니다.
+		size += sizeof(PKT_S_TEST);
+
+		// 가변길이 데이터의 사이즈를 더합니다. 
+		size += buffCount * sizeof(BuffsListItem);
+
+		// 이렇게 더한 사이즈가 헤더의 packetSize와 다르다고 하면 문제가 있습니다.
+		if (size != packetSize)
+			return false;
+
+		// 가변길이 데이터의 시작 인덱스인 buffOffset의 값이 문제 없는지 다시 체크
+		if (buffOffset + buffCount * sizeof(BuffsListItem) > packetSize)
+			return false;
+
+		return true;
+
+	}
+};
+#pragma pack()
+
+이런 형태로 패킷을 설계하면 고정 길이 데이터, 가변 길이 데이터 모두 패킷에 직렬화 할 수 있고 또 그 사이즈를 헤더에 적힌 사이즈와 비교해 
+체크도 할 수 있습니다. 
+
+이 아이디어를 이해하고 넘어가야 합니다. 패킷을 직렬화하면서 총크기를 계산하기 용이한 고정데이터들을 먼저 넣고 그 뒤로 이어질 가변 데이터들의 
+헤더(Offset, count)를 넣는것입니다. 헤더자체는 고정 크기이다 보니 역시 사이즈 계산이 용이합니다. 
+그 후 가변 데이터들의 사이즈를 헤더에 있는 count 와 가변데이터를 이루는 데이터 하나의 크기를 곱하면 사이즈가 나오고 각 가변데이터가 시작하는 위치를
+Offset에 담아 관리하는것이 이 아이디어입니다. 
+
+이제 실제 사용하는 흐름을 보겠습니다. 
+
+패킷을 읽는 함수인 ClientPacketHandler::Handle_S_TEST 의 수정된 코드입니다. 
+
+void ClientPacketHandler::Handle_S_TEST(BYTE* buffer, int32 len)
+{
+	// 패킷을 처리만 하는 함수이긴하지만 header 까지 꺼내줘야 순서가 맞습니다. 
+	BufferReader br(buffer, len);
+
+	// 패킷안에 header에 해당하는 내용을 넣었습니다.
+	//PacketHeader header;
+	//br >> header;
+
+	// 받은 데이터크기가 적어도 고정데이터는 들어 있는지 체크합니다. 
+	if (len < sizeof(PKT_S_TEST))
+		return;
+
+	// 패킷에서 구조체 덩어리로 데이터를 꺼낼 수 있지 않을까
+	PKT_S_TEST pkt;
+	br >> pkt;
+
+	// pkt가 문제없이 검증되었는지 체크 합니다. 
+	if (pkt.Validate() == false)
+		return;
+
+	// 가변데이터 파싱
+	// 추출할 그릇
+	vector<PKT_S_TEST::BuffsListItem> buffs; 
+
+	// 따로 buffCount를 꺼내는게 아닌 pkt에서 한번에 관리함
+	buffs.resize(pkt.buffCount);
+
+	// 가변데이터를 꺼낼때 PKT_S_TEST 에 미리 알려준 BuffsListItem 구조체만큼씩을 꺼낼수 있습니다.
+	for (int32 i = 0; i < pkt.buffCount; i++)
+		br >> buffs[i];
+
+	cout << "BuffCount : " << pkt.buffCount << endl;
+	for (int32 i = 0; i < pkt.buffCount; i++)
+	{
+		cout << "Buff Info : " << buffs[i].buffId << " " << buffs[i].remainTime << endl;
+	}
+
+	// 문자열은 아직 실습하지 않겠습니다.
+}
+
+여기서는 위에서 설계했던대로 먼저 BufferReader로 범위를 집고 바로 pkt 를 꺼냅니다. 이전에는 PacketHeader를 먼저 꺼내고 다른 고정 데이터들을 꺼냈는데
+지금은 pkt 안에 다 넣어놨기 때문에 한번에 꺼낼수 있습니다. 다음은 이 패킷이 가변 데이터 까지 제대로 왔는지 체크하는 Validate 함수를 호출합니다.
+통과했다면 가변데이터 들을 꺼낼것입니다. 
+꺼낼 데이터의 타입이 PKT_S_TEST::BuffsListItem 로 바뀌었었습니다. 그리고 이 타입의 vector 이름이 buffs 인데 buffs.resize할때 필요한 데이터 갯수도 
+pkt에 담아놨어습니다. 데이터를 패킷에서 buffs로 꺼낼 때 PKT_S_TEST::BuffsListItem 구조체 하나만큼씩을 그냥 꺼낼 수 있습니다. 왜냐면 
+#pragma pack(1) 으로 PKT_S_TEST 안에 있는 BuffsListItem도 메모리에서 1바이트씩 관리되도록 해서 더미 데이터 없이 꺼낼 수 있게 되었기 때문입니다. 
+
+그리고 이번 시간에는 문자열 데이터는 다루지 않고 vector 형 만 다뤄 볼겁니다. 
+
+
+이제는 패킷을 만드는쪽인 ServerPacketHandler::Make_S_TEST 도 수정해보겠습니다. 
+
+SendBufferRef ServerPacketHandler::Make_S_TEST(uint64 id, uint32 hp, uint16 attack, vector<BuffData> buffs, wstring name)
+{
+	SendBufferRef sendBuffer = GSendBufferManager->Open(4096);
+	
+	// 고정 데이터를 넣어주는 부분까지는 똑같습니다. 
+	BufferWriter bw(sendBuffer->Buffer(), sendBuffer->AllocSize());
+	PacketHeader* header = bw.Reserve<PacketHeader>();
+	bw << id << hp << attack;
+
+	// 가변 데이터 부터 수정이 들어갑니다. 
+
+	// 설계했던대로 가변데이터의 헤더는 offset과 count를 들고 있을건데 구조체로 다뤄주겠습니다.
+	struct ListHeader
+	{
+		uint16 offset;
+		uint16 count;
+	};
+	// buffs의 헤더를 입력할 자리를 예약해 놓습니다. 
+	ListHeader* buffsHeader = bw.Reserve<ListHeader>();
+	
+	// buffsHeader의 내용은 고정데이터가 다 들어오고 난 후, Close전까지만 채워주면 됩니다. 
+	// offset은 가변 데이터가 담길 시작 위치를 넣어주면 되는데 현재 상황은 
+	// 고정데이터도 다 들어 왔고 가변데이터 헤더도 자리를 만들었으니 바로 이어서 가변데이터가 올겁니다.
+	buffsHeader->offset = bw.WriteSize();
+	buffsHeader->count = buffs.size();
+
+	// 이제 가변 데이터의 내용물들을 하나씩 넣어줍니다. 
+	for (BuffData& buff : buffs)
+	{
+		bw << buff.buffId << buff.remainTime;
+	}
+
+	// 문자열은 생략 
+
+	header->size = bw.WriteSize();
+	header->id = S_TEST;
+
+	sendBuffer->Close(bw.WriteSize());
+
+	return sendBuffer;
+}
+
+Make_S_TEST 의 코드를 보면 지금은 그냥 vector 하나만 가변데이터를 넣는다 치고 테스트를 하다보니 buffsHeader의 offset을 buffs 넣기전 WriteSize() 로 설정하기도 하고 
+buffs를 넣을때도 따로 ServerPacketHandler에 만들어 둔 BuffData 라는 구조체를 가져다 넣고 있습니다. 이 부분들은 결국 수정해야 하지만 오늘 실습은 데이터를 받는쪽 위주로 
+할것이기 때문에 그냥 넘어갑니다. 
+
+
+*** 
+
+이렇게 패킷 직렬화에 대한 첫번째 아이디어를 알아봤습니다. 
+
+그리고 이 아이디어가 이어서 진행할 아이디어에 중요한 내용이고 또 구글 플랫버퍼가 만들어 지는 원리이기도 합니다. 
+
