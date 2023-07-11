@@ -16,9 +16,6 @@ void ClientPacketHandler::HandlePacket(BYTE* buffer, int32 len)
 	PacketHeader header;
 	br >> header;
 
-	// 패킷 id에 따라 처리를 해줍니다. 
-	// 경우에 따라 진짜 패킷종류에 따라 수백개의 switch 문을 사용하기도 한답니다.
-
 	switch (header.id)
 	{
 	case S_TEST:
@@ -28,10 +25,8 @@ void ClientPacketHandler::HandlePacket(BYTE* buffer, int32 len)
 }
 
 #pragma pack(1)
-// 패킷 설계 TEMP
 struct PKT_S_TEST
 {
-	// 가변길이 데이터의 사이즈 계산에 필요합니다.
 	struct BuffsListItem
 	{
 		uint64 buffId;
@@ -46,72 +41,83 @@ struct PKT_S_TEST
 	// 가변길이 데이터를 묘사하는 데이터 
 	uint16 buffOffset; // 가변길이 데이터가 시작하는 인덱스
 	uint16 buffCount;
-	//vector<BuffData> buffs;
-	//wstring name;
 	
 	// 패킷의 내용이 정상적으로 처리되고 있는지를 확인하는 함수 
 	bool Validate()
 	{
-		// 길이 테스트를 하면됩니다. 
 		uint32 size = 0;
-
-		// 먼저 PKT_S_TEST의 사이즈를 더합니다.
 		size += sizeof(PKT_S_TEST);
-
-		// 가변길이 데이터의 사이즈를 더합니다. 
+		// 이 체크는 적어도 고정데이터들은 들어와 있는지를 확인
+		if (packetSize < size)
+			return false;
+		
 		size += buffCount * sizeof(BuffsListItem);
 
-		// 이렇게 더한 사이즈가 헤더의 packetSize와 다르다고 하면 문제가 있습니다.
 		if (size != packetSize)
 			return false;
 
-		// 가변길이 데이터의 시작 인덱스인 buffOffset의 값이 문제 없는지 다시 체크
 		if (buffOffset + buffCount * sizeof(BuffsListItem) > packetSize)
 			return false;
 
 		return true;
+	}
 
+	// BuffsList를 BuffsListItem을 타입으로 는 PacketList 라고 정의 합니다. 
+	using BuffsList = PacketList<PKT_S_TEST::BuffsListItem>;
+
+	// BuffsList를 꺼내는 함수
+	BuffsList GetBuffsList()
+	{
+		// PKT_S_TEST의 시작주소에 buffOffset 만큼을 더하면 가변데이터의 시작 주소입니다. 
+		// BYTE* 가 1바이트짜리니까 uint16인 buffOffset을 더하면 주소가 나옵니다.
+		BYTE* data = reinterpret_cast<BYTE*>(this);
+		data += buffOffset;
+
+		// 반환할때는 다시 PKT_S_TEST::BuffsListItem*로 캐스팅해서 PakcetList의 생성자에 넘겨줍니다.
+		return BuffsList(reinterpret_cast<PKT_S_TEST::BuffsListItem*>(data), buffCount);
 	}
 };
 #pragma pack()
 
 void ClientPacketHandler::Handle_S_TEST(BYTE* buffer, int32 len)
 {
-	// 패킷을 처리만 하는 함수이긴하지만 header 까지 꺼내줘야 순서가 맞습니다. 
 	BufferReader br(buffer, len);
 
-	// 패킷안에 header에 해당하는 내용을 넣었습니다.
-	//PacketHeader header;
-	//br >> header;
+	// 버퍼의 데이터를 굳이 임시 객체에 복사하지 않아도 되지 않을까?
 
-	// 받은 데이터크기가 적어도 고정데이터는 들어 있는지 체크합니다. 
-	if (len < sizeof(PKT_S_TEST))
+	// BYTE 배열인 buffer를 바로 캐스팅해서 PKT_S_TEST로 해석을 합니다.
+	PKT_S_TEST* pkt = reinterpret_cast<PKT_S_TEST*>(buffer);
+
+	// PacketSession::OnRecv를 지나오면서 일단 PacketHeader 만큼은 들어 있다고 보장할 수 있습니다. 
+	// 그 헤더에 적힌 사이즈와 버퍼크기를 비교하기는 했는데 그게 오염되어 있는지는 확인해봐야합니다. 
+
+	// Validate 에서 순서대로 고정데이터까지는 들어왔는지 들어왔다면 그 내용들을 가지고 가변데이터들 까지 제대로 들어왔는지를 
+	// 확인합니다. 
+	if (pkt->Validate() == false)
 		return;
 
-	// 패킷에서 구조체 덩어리로 데이터를 꺼낼 수 있지 않을까
-	PKT_S_TEST pkt;
-	br >> pkt;
+	// 여기까지 왔다면 일단 pkt 라는 포인터가 buffer에 있는 데이터들을 PKT_S_TEST로 해석합니다.
 
-	// pkt가 문제없이 검증되었는지 체크 합니다. 
-	if (pkt.Validate() == false)
-		return;
+	// 그렇다면 이전처럼 가변데이터들도 굳이 새로 객체를 만들어 받아줄 필요없이 
+	// 데이터들의 주소를 알수 있기때문에 곧바로 접근 할 수 있을겁니다. 
+	// 데이터에 접근하기 편하게 헬퍼 클래스를 만들었습니다.
 
-	// 가변데이터 파싱
-	// 추출할 그릇
-	vector<PKT_S_TEST::BuffsListItem> buffs; 
+	// 가변데이터를 PacketList로 관리해 줍니다. 
 
-	// 따로 buffCount를 꺼내는게 아닌 pkt에서 한번에 관리함
-	buffs.resize(pkt.buffCount);
+	PKT_S_TEST::BuffsList buffs = pkt->GetBuffsList();
 
-	// 가변데이터를 꺼낼때 PKT_S_TEST 에 미리 알려준 BuffsListItem 구조체만큼씩을 꺼낼수 있습니다.
-	for (int32 i = 0; i < pkt.buffCount; i++)
-		br >> buffs[i];
+	// buffs는 buffer의 데이터를 복사한게 아닌 그냥 포인터로 가리키고 있는것입니다. 
 
-	cout << "BuffCount : " << pkt.buffCount << endl;
-	for (int32 i = 0; i < pkt.buffCount; i++)
+	// 따로 꺼내 저장하는게 아닌 PacketList에 만들어둔 [] 연산자로 직접 접근할수 있게 됩니다. 
+	cout << "BuffCount : " << buffs.Count() << endl;
+	for (int32 i = 0; i < buffs.Count(); i++)
 	{
 		cout << "Buff Info : " << buffs[i].buffId << " " << buffs[i].remainTime << endl;
 	}
 
-	// 문자열은 아직 실습하지 않겠습니다.
+	for (auto it = buffs.begin(); it != buffs.end(); ++it)
+		cout << "Buff Info : " << it->buffId << " " << it->remainTime << endl;
+
+	for (auto& buff : buffs)
+		cout << "Buff Info : " << buff.buffId << " " << buff.remainTime << endl;
 }
