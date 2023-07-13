@@ -31,6 +31,23 @@ struct PKT_S_TEST
 	{
 		uint64 buffId;
 		float remainTime;
+
+		// 다중 리스트 
+		uint16 victimsOffset;
+		uint16 victimsCount;
+
+		// BuffsListItem 내부에서도 사이즈 비교를 하고 잘왔는지를 bool로 반환하고 인자인 size에다가
+		// 확인한 데이터 크기를 더해줄겁니다. 
+		bool Validate(BYTE* packetStart, uint16 packetSize, OUT uint32& size)
+		{
+			// victims 까지 합한 데이터 사이즈가 packetSize보다 크다면 문제가 있습니다.
+			if (victimsOffset + victimsCount * sizeof(uint64) > packetSize)
+				return false;
+
+			// 통과했다면 패킷의 사이즈에 더해줍니다.
+			size += victimsCount * sizeof(uint64);
+			return true;			
+		}
 	};
 
 	uint16 packetSize;
@@ -50,20 +67,31 @@ struct PKT_S_TEST
 		// 이 체크는 적어도 고정데이터들은 들어와 있는지를 확인
 		if (packetSize < size)
 			return false;
+
+		// Buffs 가변데이터 크기 추가 
+		if (buffOffset + buffCount * sizeof(BuffsListItem) > packetSize)
+			return false;
 		
 		size += buffCount * sizeof(BuffsListItem);
 
+		// BuffsList를 순회하면서 victims 데이터의 크기를 확인합니다. 
+		BuffsList buffsList = GetBuffsList();
+		for (int32 i = 0; i < buffsList.Count(); i++)
+		{
+			if (buffsList[i].Validate((BYTE*)this, packetSize, OUT size) == false)
+				return false;
+		}
+
+		// 최종 크기 비교
 		if (size != packetSize)
 			return false;
 
-		if (buffOffset + buffCount * sizeof(BuffsListItem) > packetSize)
-			return false;
 
 		return true;
 	}
 
-	// BuffsList를 BuffsListItem을 타입으로 는 PacketList 라고 정의 합니다. 
 	using BuffsList = PacketList<PKT_S_TEST::BuffsListItem>;
+	using BuffsVictimsList = PacketList<uint64>;
 
 	// BuffsList를 꺼내는 함수
 	BuffsList GetBuffsList()
@@ -75,6 +103,14 @@ struct PKT_S_TEST
 
 		// 반환할때는 다시 PKT_S_TEST::BuffsListItem*로 캐스팅해서 PakcetList의 생성자에 넘겨줍니다.
 		return BuffsList(reinterpret_cast<PKT_S_TEST::BuffsListItem*>(data), buffCount);
+	}
+
+	BuffsVictimsList GetBuffsVictimsList(BuffsListItem* buffsItem)
+	{
+		BYTE* data = reinterpret_cast<BYTE*>(this);
+		data += buffsItem->victimsOffset;
+
+		return BuffsVictimsList(reinterpret_cast<uint64*>(data), buffsItem->victimsCount);
 	}
 };
 #pragma pack()
@@ -110,14 +146,16 @@ void ClientPacketHandler::Handle_S_TEST(BYTE* buffer, int32 len)
 
 	// 따로 꺼내 저장하는게 아닌 PacketList에 만들어둔 [] 연산자로 직접 접근할수 있게 됩니다. 
 	cout << "BuffCount : " << buffs.Count() << endl;
-	for (int32 i = 0; i < buffs.Count(); i++)
-	{
-		cout << "Buff Info : " << buffs[i].buffId << " " << buffs[i].remainTime << endl;
-	}
-
-	for (auto it = buffs.begin(); it != buffs.end(); ++it)
-		cout << "Buff Info : " << it->buffId << " " << it->remainTime << endl;
 
 	for (auto& buff : buffs)
+	{
 		cout << "Buff Info : " << buff.buffId << " " << buff.remainTime << endl;
+
+		PKT_S_TEST::BuffsVictimsList victims =  pkt->GetBuffsVictimsList(&buff);
+		cout << "Victims Count : " << victims.Count() << endl;
+		for (auto& victim : victims)
+		{
+			cout << "Victim : " << victim << endl;
+		}
+	}
 }

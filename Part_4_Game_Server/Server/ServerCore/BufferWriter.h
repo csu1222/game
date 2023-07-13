@@ -26,7 +26,7 @@ public:
 
 	// 버퍼를 작성할때 헤더를 가장 마직막에 작성할때가 있는데 그때 사용할 함수
 	template<typename T>
-	T*					Reserve();
+	T*					Reserve(uint16 count = 1);
 
 	// 데이터를 밀어 넣는다는 뜻의 << 연산자 
 	// 템플릿을 사용하면 보편 참조 버전이었습니다. 
@@ -41,16 +41,16 @@ private:
 };
 
 template<typename T>
-T* BufferWriter::Reserve()
+T* BufferWriter::Reserve(uint16 count)
 {
 	// 예약할 T타입 만큼도 여유가 없다면 실패
-	if (FreeSize() < sizeof(T))
+	if (FreeSize() < (sizeof(T) * count))
 		return nullptr;
 
 	// 여유가 있다면 현재위치의 포인터를 ret 에 담아 반환 할것
 	T* ret = reinterpret_cast<T*>(&_buffer[_pos]);
 	// 다만 T 만큼 커서는 당겨줄것
-	_pos += sizeof(T);
+	_pos += (sizeof(T) * count);
 
 	return ret;
 }

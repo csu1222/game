@@ -12,16 +12,6 @@
 #include <tchar.h>
 
 
-#pragma pack(1)
-struct PKT_S_TEST
-{
-	uint32 hp;
-	uint64 id;
-	uint16 attack;
-};
-#pragma pack()
-
-
 int main()
 {	
 	// -----------------------
@@ -60,11 +50,36 @@ int main()
 
 	while (true)
 	{
-		// 가변데이터를 만듭니다.
-		vector<BuffData> buffs{ BuffData{100, 1.5f}, BuffData{200, 2.3f} , BuffData{300, 0.7f} };
+		// PKT_S_TEST_WRITE 객체를 만들어서 버퍼를 채웁니다. 
+		PKT_S_TEST_WRITE pktWriter(1001, 100, 10);
+		
+		PKT_S_TEST_WRITE::BuffsList buffsList = pktWriter.ReserveBuffsList(3);
 
-		// 패킷 핸들러에서 패킷을 만들어주는 기능을 추가 했습니다. 
-		SendBufferRef sendBuffer = ServerPacketHandler::Make_S_TEST(1001, 100, 10, buffs, L"안녕하세요");
+		buffsList[0] = { 100, 1.5f };
+		buffsList[1] = { 200, 2.3f };
+		buffsList[2] = { 300, 0.7f };
+
+		// BuffsList를 하나씩 순회하면서 그 뒤에 victims의 가변길이 데이터를 만들어 줍니다.
+		PKT_S_TEST_WRITE::BuffsVictimsList vic0 = pktWriter.ReserveBuffsVictimsList(&buffsList[0], 3);
+		{
+			vic0[0] = 1000;
+			vic0[1] = 2000;
+			vic0[2] = 3000;
+		}
+		PKT_S_TEST_WRITE::BuffsVictimsList vic1 = pktWriter.ReserveBuffsVictimsList(&buffsList[1], 1);
+		{
+			vic1[0] = 1000;
+		}
+		PKT_S_TEST_WRITE::BuffsVictimsList vic2 = pktWriter.ReserveBuffsVictimsList(&buffsList[2], 2);
+		{
+			vic2[0] = 1000;
+			vic2[1] = 2000;
+		}
+		// 이런 식으로 리스트 안에 리스트를 만듭니다. 
+		// 물론 좀 더 편하게 관리하고 싶으면 계층적으로 관리해서 PKT_S_TEST_WRITE 안에서 다 관리하는게 아니라
+		// BuffsListItem 안에 Reserve 함수 같은걸 따로 만들어 주는게 좋을것입니다. 
+
+		SendBufferRef sendBuffer = pktWriter.CloseAndReturn();
 
 		GSessionManager.Broadcast(sendBuffer);
 
