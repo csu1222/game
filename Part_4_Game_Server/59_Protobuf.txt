@@ -1,0 +1,529 @@
+
+
+
+            Protobuf
+
+
+이전 몇시간에 걸쳐 패킷직렬화 Packet Serialization 기법 중 임시 객체를 사용하지 않고 버퍼에 직접 데이터를 쓰고 읽는 기법인 FlatBuffer에 대해 
+알아봤습니다. 
+
+이어서 이번시간에는 우리 실습 프로젝트에 진짜로 적용할 기법인 Protobuf에 대해 알아보고 연동해보겠습니다.
+오늘 내용이 조금 복잡할 수 있지만 한번만 연동해놓으면 되기 때문에 집중해서 따라가 보겠습니다. 
+
+Protobuf 는 유명한 구글에서 만든 패킷직렬화 라이브러리입니다. 그리고 리니지M 같은 유명한 게임들도 Protobuf를 채용해서 만들었다고 합니다.
+그렇기 때문에 포트폴리오를 만들거나 할때 그냥 Protobuf를 연동하는게 좋을것 같습니다. 
+
+어떻게 우리 프로젝트에 연동시킬것이냐 하면 그냥 인터넷 검색으로 google protobuf 를 검색하면 가장위에 노출이 될겁니다.
+사이트를 들어가면 어떻게 설치할지를 간단하게 설명하고 있는데 먼저 Google Protobuf Compiler 를 다운받으라고 합니다. 
+다운을 위한 링크가 있고 Protobuf 깃허브로 링크되어있습니다. 
+
+프로토버프 컴파일러는 C++언어를 사용하는 경우와 아닌경우가 나뉘어 집니다. 지금 우리 프로젝트는 C++로 사용하고 있지만 처음 해보는것이니 
+C++가 아닌 경우도 어떻게 하는지부터 보겠습니다.
+
+비 C++유저의 경우는 릴리즈 페이지로 들어가면되는데 페이지를 내리다 보면 protoc 라는 이름이 붙은 버전들이 있을겁니다. 
+이것이 Proto Compiler 라는 의미라고 합니다. 그 중 win64 버전을 다운 받겠습니다. 
+
+-- 컴파일러 
+다음으로 진행하기 전에 컴파일러가 무엇인지부터 알아보겠습니다. 
+
+우리가 우리만의 포멧으로 패킷을 정의 할때 xml 파일로 정의 하고 있었습니다. 이것을 나중에 가면 이 포멧을 읽어내는 툴을 만들어 
+이전 시간에 만든 코드로 변환시켜 사용해야합니다.
+그리고 이 툴이 바로 컴파일러입니다. 
+
+마찬가지로 Protobuf를 사용할때 자신만의 포멧으로 정의되어 있는데 그것을 ProtoFile 이라고 합니다. 
+필요한대로 이 ProtoFile을 작성한 다음 컴파일러를 돌리면 자동으로 각 프로그램언어로 변환이 되어 사용가능해집니다. 
+--
+
+다운받은 폴더를 우리 프로젝트 위치로 복사해줘야합니다. 
+
+.../Server/.
+
+이 위치에 복사해두었는데 이렇게만보면 어딘지 잘 모르겠습니다. 우리 프로젝트이름이 Server이고 이 폴더 아래로는 DummyClient, Binary, GameServer, ServerCore, Libraries 
+같은 큼직한 폴더들이 있습니다. 이 위치에 그냥 컴파일러 폴더 통째로 복사합니다. 
+
+컴파일러 폴더내용을 보면 readme.txt와 include 폴더, bin 폴더가 있습니다. 이 중 중요한것은 bin 폴더인데 안에있는 실행 파일이 실질적으로 나중에 우리가 만들
+ProtoFile 을 변환할 역할입니다.
+
+말이 나온김에 프로토 변환 실습을 한번해보겠습니다. 
+
+protoc 응용프로그램이 있는 폴더 내에 아무런 파일하나를 만들어 보겠습니다. txt 파일로 만들어 봤습니다. 
+이 파일이름을 Protocol.proto 로 바꿔 확장자도 proto 파일로 바꿉니다. 
+
+그리고 이 파일을 열어주는데 그냥 파일 탐색기에서 더블클릭으로는 열리지 않고 문서 편집기 같은걸로 열어야합니다. 그냥 지금 사용하고 있는 Visual Studio Code나
+Visual Studio에서 열어줍니다. 
+
+proto라는 확장자는 xml과 다른 포멧이 있습니다. Protobuf 문서를 보겠습니다. proto 3 버전을 보면됩니다. 2버전 3버전이 있는데 두 버전사이에 문법이 상당히 다르다고 합니다.
+이 문서를 한번 정독하면 도움이 많이 될것입니다. 이 proto3 문법이 생각보다 단순하게 만들어져 있다는걸 실습하면서 느낄것입니다. 
+
+-- Protocol.proto
+
+// 가장 첫줄에 사용할 proto 버전을 적습니다.
+syntax = "proto3";
+// namespace를 지어준 느낌
+package Protocol;
+
+// 지난 FlatBuffer실습하면서 PDL.xml 에 정의했던 포멧을 proto3 식으로 옮기겠습니다.
+
+// message 라는것이 C++에서 struct 와 비슷합니다. 
+
+message BuffData
+{
+    uint64 buffId = 1;
+    float remainTime = 2;
+    repeated uint64 victims = 3;
+}
+
+message S_TEST
+{
+    // 여기서 id = 1 은 id의 초기 값이 1이라는것이 아니라 S_TEST 안의 데이터순서중 첫번쨰 라는것입니다. 
+    // 순서를 적어주는것은 혹시라도 나중에 지금 만들고 있는 이 구조에서 나중에 내용이 추가될때 서로 내용이 꼬이지 않도록 하기위함
+    uint64 id = 1;
+    uint32 hp = 2;
+    uint16 attack = 3;
+    // repeated라는 키워드는 PDL.xml에서 List같은 가변 길이 데이터를 말합니다.
+    // 우리 설계상 BuffData 안에 또 victims라는 가변길이 데이터가 올것이기 때문에 위에 BuffData를 따로 정의 했습니다. 
+    repeated BuffData buffs =4;
+}
+
+이 코드들이 PDL.xml 에서 설계했던 포멧을 proto3 문법으로 옮겨적은 것입니다. 
+위의 코드에 기반해서 우리 프로젝트에 자동적으로 변환을 해주게 될것입니다. 
+
+여기에 enum이라던가 여러 문법을 사용할 수도 있습니다. 현재는 그냥 S_TEST 구조체만 만듭니다. 
+
+--
+
+이제 프로토 파일이 정의되었으면 변환기를 돌려서 우리가 원하는 내용으로 바꿔줘야합니다. 
+이떄 변환될수 있는언어가 C++, C#, java, javascripte등 다양한 언어로 변환할 수 있기 때문에 프로토 파일을 어떤 언어로 변환할지를 추가적으로 기입해줘야합니다. 
+
+그래서 protoc.exe 를 실행하면서 추가적인 인자를 넘겨줘야합니다. 이것도 protobuf 문서에 내용이 있습니다. 
+Generating your classes 라는 제목으로 되어있는데 예제같은것도 있습니다. 
+
+protoc --proto_path=IMPORT_PATH --cpp_out=DST_DIR --java_out=DST_DIR --python_out=DST_DIR --go_out=DST_DIR --ruby_out=DST_DIR --objc_out=DST_DIR --csharp_out=DST_DIR path/to/file.proto
+
+이런 코드인데 복사를 해두겠습니다. 
+다시 Protocol.proto를 만들었던 bin폴더로 와서 새로 파일을 하나 만들것이빈다. GenPacket.bat 라는 파일입니다. 
+Windows배치 파일이라는 확장자인데 이 파일을 실행시키면 우리가 원하는 명령어들과 같이 실행해주는 파일입니다.
+이파일도 마찬가지로 Visual Studio Code에서 열어주어 위에 클래스 생성 예제 코드를 붙여넣었습니다. 
+
+그리고 문서를 다시보면 어떤 언어로 변환 해줄지 명령어를 알수 있는데 
+
+--cpp_out
+
+C++ 은 위의 명령어를 사용하면 될것입니다. 
+
+이제 위의 예시 코드를 살펴보겠습니다. 
+
+처음 보이는 명령어인 proto_path 는 변환할 프로토 파일이 어디있는지를 뜻합니다. 이 명령어를 사용하기 위해서 proto_path도 되지만 _IMPORT_PATH_의 약자인 -I 라고 사용할 수도 있습니다. 
+그래서 프로토 파일의 경로를 알려줘야하는데 같은 경로에 있다는 의미로 ./ 를 입력합니다. 
+다음은 --cpp_out 명령어입니다. 우리가 C++로 변환할것이니 그대로 놔두고 = 뒤에 올 것은 변환후 출력된 파일이 어느경로로가면되는지입니다. 지금은 역시 같은 경로로 출력하라고 ./ 을 입력했습니다. 
+다른언어들은 변환할 필요없으니 그냥 지워줍니다. 그중 csharp_out 라고 C# 도 있는데 혹시 나중에 C# 도 연동할것이면 그때 다시 살려줄겁니다.
+
+맨 마지막에는 변환할 프로토 파일을 적어주면됩니다. 
+가장앞에 protoc 이라는 것은 뒤의 명령어를 넘겨주면서 실행할 프로그램을 뜻합니다. 즉 protoc.exe 를 적어줍니다. 
+
+추가로 배치 파일 문법중에 에러가 났을경우의 체크코드가 있습니다. 
+
+해서 결과물은 
+
+protoc.exe -I=./ --cpp_out=./ ./Protocol.proto
+IF ERRORLEVEL 1 PAUSE
+
+이런코드가 됩니다.  
+
+이제 작성한 GenPacket.bat 파일을 실행해주면 protoc.exe를 실행하면서 명령어를 받아 실행될겁니다. 
+
+현재 상태에서는 에러가 뜰것입니다. 프로토 파일에서 uint16 타입이 정의되지 않았다는 에러가 뜹니다. 
+
+왜 이런 에러가 뜨는지 다시 Protobuf 문서를 보겠습니다. 
+스칼라값 이라고 되어있는데 각종 수를 표현한 타입들의 설명을 보면 신기하게 
+int64, int32 같은데에 가변길이 인코딩을 한다고 되어있습니다. 각 타입의 최대 길이는 이름대로 int64, int32 이긴한데 인코딩될때 일종의 압축이 될수 있다는것입니다. 
+마찬가지로 정말 정확한 크기로 사용하고 싶다면 
+sfixed64 같은 타입을 쓰면 딱 그대로의 크기를 사용하다고 합니다. 
+
+그리고 우리 프로토 파일처럼 uint16을 사용하고 싶은데 문서를 보면 uint16이 없습니다. 그래서 이경우는 가장가까운 타입인 uint32로 그냥 만들면됩니다. 
+다시 Protocom.proto 를 수정하겠습니다. 
+
+  uint16 attack = 3; -> uint32 attack = 3; 
+
+다시 GenPacket.bat 를 실행해보면 폴더안에 새로 헤더파일과 cc라는 확장자의 파일이 생성됩니다. 
+
+나중에는 출력 경로를 우리 프로젝트안에 생성되도록 설정해주면 되는데 지금은 첫 실습이니까 거기까지는 하지 않고 직접 복사 붙여넣기로 우리 프로젝트로 옮겨보겠습니다. 
+
+Visual Studio에서 GameServer 프로젝트 우클릭 -> 파일 탐색기에 폴더 열기-> Protocol.pb.h, Protocol.pb.cc 파일을 GameServer경로에 붙여넣기 
+-> Visual Studio에서 GameServer 아래에 새로운 필터 'Protocol' 생성 -> GameServer 폴더 안에 있는 Protocol.pb.h, Protocol.pb.cc 파일을 Protocol 필터아래로 추가
+
+마찬가질로 DummyClient 도 해줍니다. 
+
+
+이제 프로젝트에 추가한 파일들을 열어보면 빨간줄이 엄청 많이 그어져 있을겁니다. 당연하게도 빌드를 하면 에러메세지가 산처럼 쌓입니다. 
+
+지금까지 우리가 한 작업이 무엇인지 예시를 들면 PDL이라는 것을 만들어 변환기로 우리가 자체적으로 만들었던 PKT_S_TEST를 만들어주게 된겁니다. 
+여기까지는 됐는데 세부적으로 이 Protobuf를 사용하기 위해서 추가될 온갖 기능들이 있을겁니다. 이전 시간의 코드로 예를 들면 PacketList 클래스나 PacketIterator 클래스 같은 것입니다. 
+이 코드들을 우리 프로젝트에서 아직 추가하지 않았기 때문에 에러가 나고 있습니다. 
+
+그래서 protoc.exe 로 컴파일 하는데서 끝나는게 아니라 컴파일 끝난 코드에서 사용하는 라이브러리들을 찾아와서 저장해야합니다. 
+
+다만 에러메세지중에 pch가 없다는 에러메세지는 지금 해결할수 있습니다. 
+Protocol.pb.cc 파일의 속성에서 미리 컴파일된 헤더를 사용안함으로 해주면 됩니다. GameServer와 DummyClient양쪽의 파일들 모두 해결합니다.
+
+다음은 Protobuf에 필요한 라이브러리들을 가지러 가야합니다. 
+인터넷에서 라이브러리를 제공하는 방법이 여러가지 있는데 그 헤더들과 lib 파일로 제공하는 경우도 있고 아니면 그냥 소스코드를 다 올려서 알아서 빌드해 사용하라는 경우도 있습니다. 
+불행하게도 Protobuf는 후자에 가깝습니다. 
+
+-- Protobuf 라이브러리 추가 
+
+먼저 선수 작업이 필요합니다. 지금 프로젝트에서 라이브러리들을 Libraries 라는 폴더에서 관리하고 있었습니다. 지금은 ServerCore하나만 사용하고 있었기 때문에 
+Libraries 밑에 Debug, Release 폴더안에 ServerCore 한가지 파일들만 들어있습니다.
+나중에 가면 여러가지 라이브러리들이 추가될 수 도 있습니다. 추가되는 라이브러리들을 위해 Libraries 밑으로 Include, Libs라는 폴더들을 추가해줍니다. 
+그 중 Libs폴더 아래에 다시 우리가 사용할 라이브러리인 ServerCore, Protobuf 각각 이름으로 폴더를 추가합니다. 
+
+다음은 Libraries 밑에 원래 있던 Debug, Release 폴더 안에는 사실 ServerCore에 대한 코드들이 들어 있습니다. 두 폴더를 잘라내기하고 
+Libs/ServerCore/ 안으로 이동시켜주겠습니다. 
+
+Protobuf도 나중에 마찬가지로 넣어주면 되겠습니다. 미리 Protobuf 밑으로 Debug, Release 폴더를 만들어 놔도 괜찮을것같습니다. 
+
+라이브러리들은 이렇게 관리해주게 될것입니다. 
+
+이제 헤더파일들을 관리해줘야 합니다. C++의 특징인데 라이브러리 파일뿐만 아니라 헤더 파일도 관리해줘야 합니다. 
+그런데 ServerCore라이브러리는 따로 Include 폴더에 넣어줄 필요가 없었고 그냥 우리 프로젝트에 ServerCore 경로에 헤더 파일들이 모여 있기때문에 이 경로를 바로 연결해주고 있었습니다. 
+이것을 다시 속성에서 확인해보자면 
+
+GameServer프로젝트 우클릭 + 속성 -> VC++ 디렉터리 창 -> 라이브러리 디렉터리 란에 $(SolutionDir)Libraries\ 로 설정이 되어있습니다. 이제는 ServerCore를 Libs 폴더 안으로 넣어놨기때문에 
+경로뒤에 추가로 Libs도 넣습니다. 
+
+(SolutionDir)Libraries\Libs\
+
+포함 디렉터리도 보면 $(SolutionDir)ServerCore\;$(IncludePath) 이렇게 되어있는데 ServerCore는 저 위치에 있기때문에 괜찮지만 앞으로 추가될수 있는 라이브러리들은 저위치에 있지 않을것이기 때문에
+줄 추가를 합니다
+
+$(SolutionDir)Libraries\Include\
+
+이 경로도 추가해 다른 외부 라이브러리 헤더 파일들도 읽을수 있게 합니다. 
+
+그리고 이것을 GameServer 뿐만 아니라 DummyClient 에서도 해줘야합니다. 
+이 설정작업은 프로젝트 컴파일을 할때 헤더 파일들을 이곳 저곳에서 끌어모아 빌드를 할건데 ServerCore라이브러리에서 필요한 기능을 사용하기 위해 DummyClient, GameServer 프로젝트마다 있는
+pch.h 에 _DEBUG 환경일때는 어느 경로의 라이브러리를 가져다 써라 라는 코드가 덜 지저분하게 해주는것입니다. 
+
+말이 나온김에 조금 수정해야합니다. 
+
+#ifdef _DEBUG
+#pragma comment(lib, "ServerCore\\Debug\\ServerCore.lib")
+#else
+#pragma comment(lib, "ServerCore\\Release\\ServerCore.lib")
+#endif 
+
+이렇게 앞에 ServerCore\\ 를 추가해야합니다. 
+
+
+
+여기까지 사전 준비를 했으면 이제 Protobuf 라이브러리를 다운받겠습니다. 
+검색창에 "google protobuf c++ library" 라고 검색하면 깃허브가 나옵니다. 들어가서 braches 를 보면 버전별로 다운받을 수 있습니다. 
+
+위에서 다운받은 protoc 버전이 23.xx 버전이었으니까 같은 버전의 라이브러리를 다운받아 보겠습니다. 
+이것도 압축풀고 프로젝트 어딘가에 넣어주면됩니다. 
+
+압축을 푼 폴더에 들어가보면 여러 파일들과 폴더들이 들어있습니다. 이 많은 코드들을 한번 빌드해서 우리 프로젝트에 가져가야 하는데 
+따로 솔루션 파일이 보이지 않습니다. 
+대신 cmake 라는 프로그램을 다운 받아서 그걸로 빌드를 해야합니다. 
+
+역시 인터넷에 cmake를 검색하면 cmake 홈페이지가 나오고 다운로드를 받아주면되는데 최신 버전 windows 64비트 용 인스톨 프로그램을 받아주었습니다.
+설치후 실행하면 빌드할 소스코드의 경로를 넣는 부분과 어디로 빌드한 binary를 출력할지를 골라줄 칸이 있습니다. 
+
+빌드할 소스코드는 말 그대로 아까 다운받은 protobuf library 폴더에 cmake 폴더를 넣어줍니다. 
+결과물은 바탕화면 어딘가에 만들어줘도 되고 protobuf library 폴더안에 새 폴더를 만들어 거기에 만들어주게끔 해도됩니다. 
+
+그리고 나서 하단에 Generate 버튼을 눌러주면 됩니다. 이때 Visual Studio 버전을 골라줘야합니다. 현재 사용하고 있는 2022 17 버전을 골라줍니다. 
+빌드 시작을하면 한번에 완료되지는 않고 중간에 멈출겁니다. 
+
+몇가지 항목과 그 체크박스들이 나올겁니다. 다른 항목들은 체크를 풀고 protoc binary, shared libs 항목들만 체크를해줍니다. 
+이중 protoc binary는 위에서 protoc라는 컴파일러를 의미하는데 이번 시간처럼 따로 다운받지 않고 그냥 소스코드를 빌드해서 사용해도 된다는것을 실습하기 위함입니다. 
+중요한것은 shared libs 항목입니다. 이게 진짜 사용할 라이브러리입니다. 이 항목들을 체크하고 다시 Generate를 눌러주겠습니다. 
+
+완료되면 cmake는 종료하고 결과물을 받아준 경로로 가보면 protobuf.sln , 솔루션이 만들어져 있습니다. 실행합니다.
+실행되면 DEBUG으로 한번 RELEASE로 한번 빌드해주면됩니다. 그냥 전체 빌드를 해주겠습니다. 
+
+/* 
+하지만 작성일 2023-7-14 기준으로는 protobuf를 빌드할때 많은 에러가 발생합니다. 버전이 맞지 않는다는 에러도 있고 
+Cmake에서 solution 만들때 Cmakelist.txt 가 없다는 에러도 나오고 그랬습니다. 
+해결은 protobuf 릴리즈 버전중에 cmake 폴더에 Cmakelist.txt가 있는 버전을 다운받고 같은 버전의 protoc 도 다운받습니다. 
+위에서 했던 컴파일을 이 버전으로 다시해 프로젝트에 적용시키고 이후 protobuf도 다시 Cmake로 solution을 만들어 주었습니다.  
+*/
+
+빌드후 Debug, Release라는 폴더들이 생겼을겁니다. 
+
+먼저 Debug 폴더에서 가져와야할 파일들은 libprotobufd 라는 이름이 붙은 파일들을 가져올겁니다. 끝에 d 는 Debug의 약자입니다. 
+우리 프로젝트의 Libraries/Libs/Protobuf/Debug 경로로 복사해줍니다.
+
+마찬가지로 Release 폴더에서는 앞에 libprotobuf 라고 붙어있는 파일들을 Libraries/Libs/Protbuf/Release 경로로 복사합니다. 
+
+가져온 파일들중 exe 확장자와 ilk 확장자인 파일들은 사실 필요없으니 삭제해줘도 됩니다.
+중요한것은 lib 파일들입니다. 
+
+아직 Include가 빠졌습니다. 여기로는 protobuf와 관련된 소스코드들을 다 가져와야합니다. 
+이 소스코드들이 어디있냐면 cmake로 설치한 protobuf 폴더밑으로 src라는 폴더가 있습니다. 또 그 밑으로 google이라는 폴더안에 소스코드들이 있습니다. 
+google 폴더를 복사해 우리 프로젝트 Libraries/Include/ 밑으로 넣어주면 됩니다. 
+
+가져온 파일들은 이름도 바꾸지 말고 가지고 있는걸 추천합니다. 코드 내부에서 서로 파일을 참조할때 그 이름으로 찾고 있을것입니다. 
+
+***
+
+굉장히 긴 과정이었습니다. 
+다시 우리 프로젝트로 돌아와 프로토 타입 컴파일러로 만들었던 코드들을 보니까 google 어쩌고 하면서 include 하고 있습니다. 그래서 Include 폴더에서 google폴더를 그대로 복사한것입니다.
+
+이제 다 됐는지 GameServer, DummyClient 빌드를 해보겠습니다. 링크에러메세지가 나오는데 이건 좋은 징조입니다. 
+서버 클라 각 pch.h 를 열어보면 lib 파일 경로 처리를 안했습니다. SeverCore의 lib만 가져오도록 되어있는데 protobuf의 lib도 가져오도록 경로를 추가해줍니다. 
+
+
+#ifdef _DEBUG
+#pragma comment(lib, "ServerCore\\Debug\\ServerCore.lib")
+#pragma comment(lib, "Protobuf\\Debug\\libprotobufd.lib")
+#else
+#pragma comment(lib, "ServerCore\\Release\\ServerCore.lib")
+#pragma comment(lib, "Protobuf\\Release\\libprotobuf.lib")
+#endif 
+
+GameServer의 pch.h 와 DummyClient의 pch.h 에 똑같이 추가합니다. 
+
+여기까지 왔으면 정말 Protobuf 연동이 끝난것입니다. 이제 이번 강의 초반에 만들었던 PDL.xml의 내용으로 만든 Protocol을 사용할 수 있을겁니다. 
+
+***
+
+이제 PacketHandler클래스들에 적용해보겠습니다 
+
+먼저 보내는쪽입니다. 
+
+-- ServerPacketHandler
+
+이제 PacketIterator, PacketList는 사용하지 않을겁니다. 다 protobuf에 기능이 있습니다. 
+또 pragma pack 안에 넣어놨던 PKT_S_TEST 구조체 와 PKT_S_TEST_WRITE 둘다 이제는 Protocol.pb.proto 에서 관리할것이니까 이것도 삭제합니다. 
+
+아주 깔끔해졌습니다. 
+
+이제 버퍼에 데이터를 넣었던 부분을 보겠습니다.
+
+-- GameServer
+
+
+	while (true)
+	{
+		// protobuf 는 그냥 임시객체를 만들어 내용을 채우고 임시객체를 통해 serialization을 때려주면 됩니다.
+		
+		// 앞에 namespace에 Protocol이 온 이유는 Protocol.proto에서 pakage Protocol 명령어를 적어 줬기 때문
+		Protocol::S_TEST pkt;
+
+		// protobuf 객체를 그냥 구조체처럼 생각하고 . 을 쩍어봐서 어떤 기능이 있는지를 알아갑니다. 
+		// id, hp, attack은 그냥 고정길이 데이터로 set 계열 함수를 호출했습니다.
+		pkt.set_id(1000);
+		pkt.set_hp(100);
+		pkt.set_attack(10);
+
+		// buffs 는 가변길이 데이터입니다. add 계열 함수로 내용물을 채울수 있을것 같습니다. 
+		// add_buffs() 를 찍어 보니 따로 인자를 받지는 않고 반환으로 포인터를 반환합니다. 
+		// 아마 반환된 포인터부터 내용물을 채워주면 될것같습니다. 
+
+		{
+			Protocol::BuffData* data = pkt.add_buffs();
+			// BuffData 에도 고정데이터와 가변데이터가 있었습니다 마찬가지로 값을 채웁니다. 
+			data->set_buffid(100);
+			data->set_remaintime(1.2f);
+			// add_victims는 위에 add_buffs와 다르게 uint64 인자를 받아주고 있습니다. 
+			// buffs는 message 즉, struct 같은 타입에 가변데이터이다보니 포인터를 반환하고
+			// victims는 uint64 타입이기때문에 곧바로 값을 넣어줄 수 있는것 같습니다. 
+			data->add_victims(4000);
+		}
+		{
+			Protocol::BuffData* data = pkt.add_buffs();
+			// 두번째 buffs
+			data->set_buffid(200);
+			data->set_remaintime(2.5f);
+			data->add_victims(1000);
+			data->add_victims(2000);
+		}
+
+		// 이렇게 데이터를 넣어주면 전에 배웠던대로 고정데이터를 넣고 난 뒤에 가변데이터를 밀어넣는것이 됩니다.
+
+		// 또 protobuf가 임시객체를 만들어 데이터를 집어넣는 방식이라고 했지만 
+		// 꼭 임시객체로만 사용해야하는것은아닙니다. pkt 같은 Protocol 객체를 Session에서 들고 있도록 해서 
+		// 재사용하도록 해도 된다는 말입니다. 
+
+		{
+			// 그리고 혹시 데이터를 넣을 때 vector에 담긴 데이터를 보내고 싶은데 매번 add_ 함수를 사용해야 하는가 싶습니다.
+			// mutable 계열의 함수가 있습니다.
+			auto m = pkt.mutable_buffs();
+			// m 이라는 객체에서 Add 계열만 봐도 그 위에 처럼 포인터를 반환하는 것도 있고,
+			// 이터레이터 begin, end를 받아서 그 범위안에 것들을 다 넣어주는 Add도 있고 
+			// rvalue를 받는 ADD도 있습니다. 
+			
+			vector<Protocol::BuffData> vecBuffs;
+			Protocol::BuffData buf1;
+			buf1.set_buffid(101);
+			buf1.set_remaintime(1.3f);
+			buf1.add_victims(1001);
+
+			vecBuffs.push_back(buf1);
+			m->Add(vecBuffs.begin(), vecBuffs.end());
+
+		}
+		
+		// ServerPacketHandler에서 만든 버퍼를 채우는 함수
+
+		SendBufferRef sendBuffer = ServerPacketHandler::MakeSendBuffer(pkt);
+
+		GSessionManager.Broadcast(sendBuffer);
+
+		this_thread::sleep_for(250ms);
+	}
+
+
+-- ServerPacketHandler
+
+GameServer에서 보낼 패킷에 데이터를 채워 줬으면 그 패킷을 버퍼로 옮기는 과정이 필요합니다. 
+이때 사용하는 Protobuf의 함수 계열이 Serialize 계열입니다. 직렬화 하면서 어떤 형태로 직렬화 할지를 골라줄 수 있는데 
+지금껏 패킷을 마치 배열처럼 직렬화 했으니 SerializeToArray 함수를 사용할겁니다. 
+
+그런데 이 직렬화하는 부분은 이번 한번만 사용할게 아니라 모든 패킷마다 사용할 것입니다. 그러면 공용으로 쓸수 있는 함수로 만들어 관리하면 편할것 같습니다. 
+
+
+class ServerPacketHandler
+{
+public:
+	static void HandlePacket(BYTE* buffer, int32 len);
+
+	// _MakeSendBuffer 함수를 S_TEST 타입으로 사용하는 래핑 함수입니다.
+	// 이 내용을 매번 패킷종류가 늘 때 마다 손수 만들어 주기 보다는 자동화를 하면 좋겠습니다.
+	static SendBufferRef MakeSendBuffer(Protocol::S_TEST& pkt);
+};
+
+SendBufferRef ServerPacketHandler::MakeSendBuffer(Protocol::S_TEST& pkt)
+{
+	return _MakeSendBuffer(pkt, S_TEST);
+}
+
+// Protocol로 데이터를 버퍼로 만드는 기능을 함수로 구현해보겠습니다. 
+// 이 함수는 거의 공용으로 사용될겁니다. 
+template<typename T>
+SendBufferRef _MakeSendBuffer(T& pkt, uint16 pktId)
+{
+	// 인자로 받은 객체의 사이즈를 가져옵니다. 
+	const uint16 dataSize = pkt.ByteSizeLong();
+	// 패킷 자체의 크기에는 데이터 뿐만아니라 패킷 헤더의 크기 까지 포함됩니다.
+	const uint16 packetSize = dataSize + sizeof(PacketHeader);
+
+	// SendBuffer를 open 해주겠습니다. 
+	// 이전에는 그냥 4096 이라는 큰사이즈를 할당한 다음 데이터를 채우고 close를 해줬습니다.
+	// 그런데 지금은 딱 할당받아야하는 packetSize를 계산할 수 있습니다.
+	SendBufferRef sendBuffer = GSendBufferManager->Open(packetSize);  
+
+	// 버퍼의 내용을 채웁니다. 
+	// 먼저 패킷헤더의 내용을 채웁니다. 
+	PacketHeader* header = reinterpret_cast<PacketHeader*>(sendBuffer->Buffer());
+	header->size = packetSize;
+	header->id = pktId;
+
+	// 헤더다음 4바이트 이후 부터 패킷을 serialize 해서 넣어주면 되었습니다. 
+	ASSERT_CRASH(pkt.SerializeToArray(&header[1], dataSize));
+
+	// sendBuffer를 닫고 리턴합니다. 
+	sendBuffer->Close(packetSize);
+	return sendBuffer;
+}
+
+내부적으로 사용한다는 의미에서 앞에 _을 붙힌 _MakeSendBuffer 를 보면 패킷의 사이즈와 패킷헤더의 사이즈, 또 패킷헤더의 값도 채워주고 
+패킷헤더 다음부터 패킷자체의 데이터도 넣어줍니다.그리고 SendBufferRef에 open과 close를 버퍼의 사이즈 낭비없이 바로 계산된 값만 꺼내 사용하고 있습니다.
+이런 과정들은 왠만한 패킷에는 다 적용될 수 있을 형태입니다. 그래서 공용으로 사용할것이고 
+
+우리 테스트에 사용하던 S_TEST 용 MakeSendBuffer를 보면 패킷의 타입 ID만 추가해 _MakeSendBuffer에 넘기는 형태입니다. 
+
+
+-- ClientPacketHandler
+
+이제 버퍼를 받는쪽도 작업해보겠습니다. 
+
+먼저 PDL.xml 파일은 삭제합니다. 
+
+그리고 ServerPacketHandler와 마찬가지로 PacketIterator, PacketList는 이제 사용하지 않으니 삭제합니다. 
+cpp 파일쪽에도 임시로 사용하던 PKT_S_TEST 같은 코드들도 날려주겠습니다. 
+
+그러면 결국 ClientPacketHandler::Handle_S_TEST로 들어오게 됩니다. 
+
+
+void ClientPacketHandler::Handle_S_TEST(BYTE* buffer, int32 len)
+{
+	// 여기서는 거꾸로 역직렬화 Deserialize를 합니다.
+	Protocol::S_TEST pkt;
+
+	// Parse 계열 함수가 아마 받은 버퍼를 읽는 기능 같습니다. 
+	// 버퍼에서 PacketHeader를 뺀부분을 pkt에 담습니다. 
+	ASSERT_CRASH(pkt.ParseFromArray(buffer + sizeof(PacketHeader), len - sizeof(PacketHeader)));
+
+	// 잘 파싱 되었는지 고정 데이터들을 출력해보겠습니다. 
+	cout << pkt.id() << " " << pkt.hp() << " " << pkt.attack() << endl;
+
+	// 가변 데이터인 buffs의 크기를 출력해보겠습니다. 
+
+	cout << "BUFF_SIZE : " << pkt.buffs_size() << endl;
+
+	// buffs를 꺼내 순회 문법이 먹히는지 보겠습니다. 
+	for (auto& buff : pkt.buffs())
+	{
+		cout << "BUFF_ID : " << buff.buffid() << " BUFF_REMAINTIME : " << buff.remaintime() << endl;
+		// victims 데이터도 확인하겠습니다. 
+		cout << "VICTIMS_SIZE : " << buff.victims_size() << endl;
+		for (auto& victim : buff.victims())
+		{
+			// victim은 uint64 타입이다 보니 바로 출력할 수 있습니다. 
+			cout << victim << " " << endl;
+		}
+		cout << endl;
+	}
+}
+
+위의 코드를 보면 이전에는 패킷직렬화 하던 순서대로 데이터를 꺼냈어야 합니다. 
+그런데 protobuf를 사용하면서 ParseFromArray 이라는 함수로 한번에 꺼낼 수 있게 되었습니다. 
+
+***
+
+완성된 코드를 한번 실행해보면 잘 실행되는걸 확인 할 수 있습니다. 
+
+만약 libprotobufd.dll 이 없다거나 비슷한 에러가 뜬다면 프로젝트 디렉터리를 열고 
+(SolutionDir)\Libraries\Libs\Protobuf\  위치에서 Debug, Release 양쪽에서 dll 파일을 다른 곳으로 옮겨 줘야합니다. 
+
+여기서 라이브러리 형식중 lib와 dll 의 차이를 복습해보자면 lib는 정적 라이브러리로 우리가 했던 작업중 라이브러리 경로를 설정해줘서 소스코드를 빌드할때 라이브러리가
+같이 묶여 빌드가 되는 방식입니다. 
+dll은 동적 라이브러리로써 빌드할때 묶이지 않고 매 프로그램 런타임에 같이 실행되어서 라이브러리 역할을 하게 됩니다. 
+
+둘다 장단점이 있는데 lib는 매 변경때마다 다시 빌드를 해야하지만 프로그램 배포시에 같이 주지 않아도 되는 특징이 있고 
+dll은 업데이트때 마다 그냥 dll 파일만 교체해주면 프로그램자체를 다시 빌드할 필요는 없지만, 프로그램 배포시 같이 넘겨줘야하는 특징이 있습니다. 
+
+이런 특징들에 의해 이번 에러가 발생하는것인데 dll은 프로그램 런타임에 같이 실행된다는 성질상 프로그램이 실행되는 경로에 같이 둬야합니다.
+(SolutionDir)\Binary\  경로 뒤에 Debug, Release 폴더가 각각 있는데 dll 파일도 각자에 맞는 버전의 폴더 안으로 이동시켜줘야합니다. 
+
+이 Binary라는것이 사실 코드를 빌드한 후 실행할때사용되는 것들입니다. 잘 아는 exe 응용 프로그램 파일도 이곳에 있습니다. 
+
+
+*** 
+마무리 
+
+Protobuf를 사용하는 첫번째 시간이었습니다. 
+
+Google이라는 거대한 회사에서 만든 라이브러리이다 보니 사용하기 편한 느낌입니다. 
+
+여러 언어를 지원하는 라이브러리다 보니 C++뿐만아니라 다른언어 예를들어 C#에서 사용할때도 Protobuf 객체뒤에 .을 찍어보면 대강 사용방법이 보인다고 합니다. 
+
+그리고 직접 임시로 패킷 직렬화 코드를 만들었던 때와 비교해 코드가 훨씬 깔끔해 졌고 
+패킷 타입마다 그 설계에 따라 직렬화, 역직렬화의 순서를 알아서 파싱해준다는점도 편하고 또 안전합니다. 
+
+또 한가지 장점으로 나중에 게임을 출시한 후 퍼블리셔에게 운영을 맞길경우 퍼블리셔와 이런저런 네트워크 통신을 하는경우가 있을 수 있습니다. 
+예를들어서 넥슨 해당 계정을 받아와서 제휴 가맹점 PC방에서 접속하면 어떤 보너스를 준다거나 하는 경우가 있을 수 있습니다. 
+
+이런 경우 만약 프로젝트에서 자체 제작한 프로토콜로 패킷 직렬화를 한다면 서로 통신하기 어려워집니다. 
+
+하지만 Protobuf 라는 유명한 프로토콜을 사용하면 대단히 많은 회사에서 같은 프로토콜을 쓸 확률이 높으니 서로 통신하기가 좋습니다. 
+
+
+추가로 아직 아쉬운점도 있습니다. ServerPacketHandler 에서 S_TEST에 해당하는 MakeSendBuffer함수를 직접 만들었습니다. 
+패킷의 종류가 많게는 200개 까지 사용한다고 햇는데 각 패킷 타입마다 손수 함수를 만들어주는것은 조금 꺼려집니다. 
+
+거기에 받은 패킷을 분류하는 코드도 switch case 문으로 관리하고 있는데 이것도 손수 하나하나 추가해줘야 하는것이 아쉽습니다. 
+
+이후 강의에서 좀 더 다듬어 볼것입니다. 
