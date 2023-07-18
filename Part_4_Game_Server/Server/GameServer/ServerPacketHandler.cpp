@@ -1,32 +1,24 @@
 #include "pch.h"
 #include "ServerPacketHandler.h"
-#include "BufferReader.h"
-#include "BufferWriter.h"
+
+PacketHandlerFunc GPacketHandler[UINT16_MAX];
 
 /*
 --------------------------
 	ServerPacketHandler
 --------------------------
 */
-void ServerPacketHandler::HandlePacket(BYTE* buffer, int32 len)
+
+bool Handle_INVALID(PacketSessionRef& session, BYTE* buffer, int32 len)
 {
-	BufferReader br(buffer, len);
+	PacketHeader* header = reinterpret_cast<PacketHeader*>(buffer);
+	// TODO : 실패 로그
 
-	PacketHeader header;
-	// ClientPacketHandler 에서는 >> 연산자로 그냥 꺼냈었는데 
-	// 사실 header의 id만 살펴보고 판별하면 되니까 Peek() 을 사용해도 됩니다.
-	br.Peek(&header);
-
-	// 현재는 클라이언트에서 패킷을 받도록 설계한적이 없기 때문에 딱히 해줄게 없습니다. 
-	switch (header.id)
-	{
-	default:
-		break;
-	}
+	return false;
 }
 
-SendBufferRef ServerPacketHandler::MakeSendBuffer(Protocol::S_TEST& pkt)
+bool Handle_S_TEST(PacketSessionRef& session, Protocol::S_TEST& pkt)
 {
-	return _MakeSendBuffer(pkt, S_TEST);
-}
 
+	return true;
+}
