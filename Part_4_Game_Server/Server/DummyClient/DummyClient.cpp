@@ -4,7 +4,7 @@
 #include "Service.h"
 #include "Session.h"
 #include "BufferReader.h"
-#include "ClientPacketHandler.h"
+#include "ServerPacketHandler.h"
 
 char sendData[] = "Hello World!";
 
@@ -18,15 +18,15 @@ public:
 
 	virtual void OnConnected() override
 	{
+		Protocol::C_MOVE movePacket;
+		auto sendBuffer = ServerPacketHandler::MakeSendBuffer(movePacket);
 	}
 	
 	virtual void OnRecvPacket(BYTE* buffer, int32 len) override
 	{
-		// 이제는 OnRecvPacket이 굳이 처리한 패킷의 크기를 반환할 필요가 없습니다. 
-		// 이미 OnRecv에서 패킷이 온전히 온걸 보장하기 때문입니다. 
-
-		// 저번 시간에 패킷을 처리하던 코드를 모두 아래쪽에서 처리합니다.
-		ClientPacketHandler::HandlePacket(buffer, len);
+		PacketSessionRef session = GetPacketsessionRef();
+		PacketHeader* header = reinterpret_cast<PacketHeader*>(buffer);
+		ServerPacketHandler::HandlePacket(session, buffer, len);
 	}
 
 	virtual void OnSend(int32 len) override
@@ -41,6 +41,8 @@ public:
 
 int main()
 {
+	ServerPacketHandler::Init();
+
 	this_thread::sleep_for(1s);
 	
 	ClientServiceRef service = MakeShared<ClientService>(

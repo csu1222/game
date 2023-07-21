@@ -1,0 +1,465 @@
+
+
+        패킷 자동화(2)
+
+
+
+패킷 직렬화에 대한 내용 그리고 그 직렬화를 자동화 시키는 내용중 마지막시간입니다. 
+
+지난시간까지 Protobuf를 적용하면서 어느부분을 자동화 하면 좋을지를 알아봤습니다. 
+
+원하는 결과물은 나중에 가서 proto 파일을 수정하면 알아서 파싱해서 이전 시간에 작업했던 ServerPacketHandler 같은 코드를 만들어 준다면 좋겠습니다. 
+
+시작전에 어떤 부분을 자동화 하면 좋을지 정확하게 알고 시작하는게 좋겠습니다. 
+먼저 패킷의 종류를 자동으로 추가 하면 좋겠는데 그때 enum 자체를 자동으로 만드는게 아니라 enum의 내용물을 추가하면 될것같습니다. 
+
+enum : uint16
+{
+	// TODO : 자동화 
+	PKT_S_TEST = 1,
+	PKT_S_LOGIN = 2,
+};
+
+그리고 받은 버퍼의 헤더에서 이 패킷이 어떤 패킷인지 판별해 컨텐츠단에서 작업할 함수인 Handle 계열 함수들을 패킷마다 만들어 줘야합니다. 
+
+// Custom Handler
+bool Handle_INVALID(PacketSessionRef& session, BYTE* buffer, int32 len);
+// TODO : 자동화 (선언까지만)
+bool Handle_S_TEST(PacketSessionRef& session, Protocol::S_TEST& pkt);
+
+마찬가지로 위 Handle 계열함수들을 관리하는 GPacketHandler 배열을 초기화하는 Init 도 자동으로 추가하면 좋겠습니다. 
+
+	static void Init()
+	{
+		for(int32 i = 0; i < UINT16_MAX; i++)
+			GPacketHandler[i] = Handle_INVALID;
+
+	    // TODO : 자동화 
+		GPacketHandler[PKT_S_TEST] = [](PacketSessionRef& session, BYTE* buffer, int32 len) { return HandlePacket<Protocol::S_TEST>(Handle_S_TEST, session, buffer, len); };
+	}
+
+이정도를 자동화 할겁니다. 
+
+추가로 지금은 서버쪽에 있는 패킷 핸들러를 ServerPacketHandler라고 이름짓기는 했는데 나중에 생각해보면 클라이언트와 서버간의 통신뿐만 아니라 서버와 서버간의 통신도 하게될겁니다. 
+그럴경우에는 서로 ServerPacketHandler를 사용하면 혼동이 될겁니다. 이름을 데이터를 받는쪽 이름이 아니라 보낸쪽의 이름으로 지어 보겠습니다. 
+이름을 클라, 서버 서로 뒤집는다는 말입니다. 
+
+
+***
+션에 새솔루션 파일 추가로 Tools를 추가합니다. 
+
+-- Python 으로 툴 만들기 
+
+이제는 툴을 만들어 볼겁니다. 
+
+보통 회사에서 툴을 만들때 언어통일을 위해 C# 이면 C#, C++ 이면 C++로 만드는 경우도 있겠지만 보통은 툴은 Python을 이용해 만든다고 합니다. 
+파이썬이 확실히 툴만드는데에는 이점이 있습니다. 
+
+솔루션 디렉토리를 보면 ServerCore, GameServer, DummyClient 폴더 등등이 있는 위치에 Tools 라는 폴더를 새로 만듭니다. 
+그리고 VS에서 최상위인 Server 솔루
+파이썬은 당연히 설치해야합니다. 구글에서 직접 검색해 다운 받을수도 있고 아니면 VisualStudio Installer 에서 파이썬 개발환경으로 다운 받을 수 있습니다. 
+
+다음으로 Tools 솔루션 폴더를 우클릭해서 추가-> 새 프로젝트 -> Python 어플리케이션 만들기 -> 경로는 솔루션 디렉토리 밑에 만들어준 Tools폴더로, 프로젝트 이름은 PacketGenerator
+이렇게 프로젝트를 파이썬으로 새로 만들어줍니다. 
+
+만들어진 프로젝트를 살펴보면 Python 환경이라는 항목이 있습니다. 열어보면 설치된 Python 버전이 적혀있는 어플리케이션을 확인할 수 있습니다. 이것이 현재 컴퓨터에 설치되어있는 Python의 실행파일입니다. 
+파일 탐색기에서 열기를 해보면 그 경로를 알수 있습니다. 이 경로가 컴퓨터 환경변수 Path에 추가 되어 있는지를 확인해야합니다. 
+보통 파이썬을 설치할때 옵션으로 paht 를 추가할것인지를 체크할 수 있습니다. 
+
+path가 추가 되어 있는 상태라면 명령프롬프트 를 실행해 python을 입력하면 설치한 파이썬 버전이 출력될것입니다. 이 상태까지 설정을 해줘야 합니다. 
+
+이어서 다음으로 명령프롬프트에서 하던지 아니면 VS에서 Python환경 밑의 python을 우클릭후 패키지 관리에서 하던지 할 수 있는데 
+그래서 jinja2 라는 패키지와 pyinstaller 라는 패키지를 설치해줍니다. 
+
+-- PacketGenerator.py
+import argparse
+import jinja2
+import ProtoParser
+
+# argparse 라이브러리는 프로그램을 시작할때 인자를 넘겨주게 될건데 인자를 편하게 
+# 파싱하기 위한 라이브러리입니다. 
+
+def main():
+    # 파이썬에서는 {} 를 기준으로 범위를 지정하는게 아닌 탭(띄어쓰기)를 통해 그 범위를 정합니다. 
+    # 또 변수의 타입을 일일히 지정해주지 않아도 적절한 타입으로 알아서 판단해줍니다. 
+    arg_parser = argparse.ArgumentParser(description='PacketGenerator')
+    # add_argument메소드로 사용할 인자들을 정해줄겁니다. 
+    # --path 명령어를 사용한다면 str 타입의 인자를 받아줄건데 아무것도 입력하지 않은며 ''라는 아무런값도 없는걸로 취급합니다. 그리고 --path 명령어가 뭘 의미하는지 알려주는 help를 치면 proto의 경로를 입력하라고 말해줍니다.
+    # --path의 기본값은 우리 프로젝트에서 패킷을 관리하는 Protocol.proto경로를 넣어줍니다. 
+    arg_parser.add_argument('--path', type=str, default='C:/Users/seonguk/Documents/myProject\c++_gameprograming/Part_4_Game_Server/Server/Common/Protobuf/bin/Protocol.proto', help='proto path')
+    # --output 에서는 default값이 만들어줄 클래스의 이름으로 지정합니다.
+    arg_parser.add_argument('--output', type=str, default='TestPacketHandler', help='output file')
+    # recv, send의 default 값은 네임 컨벤션을 정의 해줍니다. 만약 기본값말고 다른값을 사용하고 싶으면 직접 정의해주면 될것입니다. 
+    arg_parser.add_argument('--recv', type=str, default='C_', help='recv convention')
+    arg_parser.add_argument('--send', type=str, default='S_', help='send convention')
+
+    # parse_args 라는 함수를 호출하면 args 에서 위에서 설정한 인자를 파싱해 사용할 수 있게 됩니다.
+    args = arg_parser.parse_args()
+
+    # 이제 jinja2 를 사용하기 전에 Protocol.proto 파일의 내용을 해석해 볼겁니다. 쭉 읽어 내리다 보면 message라고하는 proto문법에서 struct 와 비슷하게 사용하는 message가 나오고 바로 이어서 recv나 send에서 default 값으로 준 C_ 나 S_가 나오면 그것을 패킷으로 인식하게끔 할것입니다. 
+
+    # 위의 내용을 실행할 새로운 파이썬 클래스 파일 ProtoParser 를 만들었습니다. 
+    # 아이디 대역폭을 1000번대로 시작했고 PacketGenerator의 인자로 받아준 recv와 send를 parser에 넘겨줍니다.
+    parser = ProtoParser.ProtoParser(1000, args.recv, args.send)
+    parser.parse_proto(args.path)
+
+    # jinja2
+    # 템플릿 엔진이라고 부릅니다. 우리가 하려는 자동화 작업이 알아서 여러 항목들이 생성되는것인데 이 기능이 jinja2에 있습니다
+    # Templates 폴더를 추가하고 그 밑에 PacketHandler.h 라는 헤더 파일을 추가 했습니다. 그 내용은 이전시간에 작업하던 ServerPacketHandler.h 의 내용을 모두 복사 붙여넣기 했습니다. 
+    # 이 PacketHandler의 내용이 우리 샘플이 되는것입니다. jinja2 의 장점이 이렇게 붙여넣은 C++ 코드에 파이썬 코드를 섞어 쓸 수 있다는것입니다.
+    # 초기화 하면서 어느 경로에서 어떤 파일을 읽을지 지정합니다.
+    file_loader = jinja2.FileSystemLoader('Templates', encoding='cp949') # 인코딩에러가 나서 cp949방식으로 지정
+    env = jinja2.Environment(loader=file_loader)
+    template = env.get_template('PacketHandler.h')
+
+    # 이부분 부터 자동화 작업이 들어갑니다. 
+    # render의 인자는 왼쪽이 자동화 할 파일에서 사용할 이름, 오른쪽이 지금 이 PacketGenerator에서 사용하는 변수의 이름입니다. 
+    output = template.render(parser=parser, output=args.output)
+
+    # 이제 render한 결과물을 파일에 작성합니다. 'w+' 라는 인자는 파일이 있다면 덮어 쓴다는 의미
+    f = open(args.output+'.h', 'w+')
+    f.write(output)
+    f.close()
+
+    print(output)
+
+    return
+
+if __name__ == '__main__':
+    main()
+
+
+한번 return 에서 중단점을 잡고 디버깅 해보면 parser 변수의 내용을 확인할 수 있습니다. 내용을 확인해보면 우리가 Protocol.proto에서 만들었던 코드대로 total_pkt에는 3개의 패킷이 들어가 있고 
+send_pkt에도 두개, recv_pkt 에는 한개가 들어가 있는걸 확인 할 수 있었습니다. 거기에 각각 1000번 부터 아이디를 발급해주기도 했습니다. 
+
+
+-- ProtoParser.pyw
+이번 파이썬 클래스 파일에서는 proto 파일의 경로를 여기로 넘겨주면 Protocol.proto 파일의 한줄 한줄씩 파싱을 해서 message로 시작하는 줄은 패킷을 의미 할것이니 
+total_pkt으로 추적해 패킷들의 목록과 그 인덱스를 패킷 타입 아이디로 사용할 수 있도록 하고 또 각 패킷의 앞에 붙어 있는 네임 컨벤션인 S_, C_ 를 가지고 분류해 
+send_pkt, recv_pkt 으로 나눠 들고 있게 합니다. 
+
+# C++의 클래스와 python의 클래스 간의 차이가 많이 납니다. C++에서는 클래스 안에서 public, private 같은 계층화를 해서 외부에서도 사용할 코드와 내부적으로만 사용할 코드를 구별 했습니다. 
+
+# 파이썬에서 클래스는 생성자에서 런타임에 접근 지정자들을 만든다고 합니다. 
+
+class ProtoParser:
+    def __init__(self, start_id, recv_prefix, send_prefix):
+        #파이썬에서 []은 동적배열
+        self.recv_pkt = [];     # 수신 패킷 목록
+        self.send_pkt = [];     # 송신 패킷 목록 
+        self.total_pkt = [];    # 모든 패킷 목록 
+        self.start_id = start_id
+        self.id = start_id
+        self.recv_prefix = recv_prefix
+        self.send_prefix = send_prefix
+    # 위의 생성자에서 클래스의 설계를 해주고 있는것입니다. 멤버 변수로 동적배열 3개를 가지고 있을것이고 또 인자로 받은 데이터도 저장해두고 있습니다. 
+
+    # 클래스안에서 사용할 함수를 정의 합니다. 인자중 self는 this의 의미였고 두번째 인자부터 실제 인자라고 볼수 있습니다.
+    def parse_proto(self, path):
+        f = open(path, 'r')     # open 함수는 경로를 인자로 받고 'r'이라는 읽기용도로 파일을 열어줍니다. 
+        lines = f.readlines( )  # readlines는 f에 열은 파일의 모든 라인의 코드를 lines에 저장합니다. 
+
+        # C++ 에서 for문  
+        for line in lines:
+            if line.startswith('message') == False:    #lines의 한줄 한줄마다 시작이 message인지를 체크
+                continue
+            # 위의 조건문을 통과 했다면 message 로 시작하는 줄일것입니다. 
+            # pkt_name 이라는 변수에 패킷 이름을 담아줄것인데 현재 줄인 line 에서 split 함수를 호출하면 단어 단위로 긁어 변수에 넣습니다. 이 줄에서 첫번째 단어는 message이고 다음 단어가 패킷 이름일것이기 때문에 1번 인덱스를 가져올것이고 혹시 패킷이름에 소문자가 있다면 upper함수로 대문자로 변환합니다. 
+            pkt_name = line.split()[1].upper()
+            if pkt_name.startswith(self.recv_prefix):  
+                # 만약 패킷이름이 초기화할때 저장한 recv_prefix와 같다면 recv_pkt에 Packet을 추가 해줘라 
+                self.recv_pkt.append(Packet(pkt_name, self.id))
+            elif pkt_name.startswith(self.send_prefix):
+                # 만약 send쪽 이름이라면 그쪽으로 넣는다 
+                self.send_pkt.append(Packet(pkt_name, self.id))
+            else:
+                # recv, send 양쪽다 아니면 일단 패킷은 아니라는것이므로 다음번 루프
+                continue
+
+            #여기까지 넘어왔으면 send건 recv건 간에 일단 패킷이므로 total_pkt에 추가 total_pkt를 수집하는 이유는 이전 패킷의 타입들을 enum으로 관리했었는데 이 enum에서는 패킷종류 상관없이 모두 관리했습니다 
+            self.total_pkt.append(Packet(pkt_name, self.id))
+            # 여기까지 왔으면 id를 1증가시켜주어서 다음 아이디를 할당
+            self.id += 1
+
+        # 이제 for문을 다 돌았으면 열었던 파일을 닫아줘야합니다. 
+        f.close()
+
+
+
+class Packet:
+    #__init__ 이 생성자입니다. 생성자의 인자중 self 라는 키워드가 C++에서 this 같은 역할을 합니다. 이어서 패킷의 이름 name, int형 아이디 id를 받아줍니다.  
+    def __init__(self, name, id):
+        self.name = name
+        self.id = id
+    # 위의 내용에서는 생성자를 호출하면서 멤버변수인 name과 id에 인자로 받은 각각의 값을 초기화 해주는 것입니다. 
+
+
+-- PacketHandler.h 
+jinja2 를 사용하면서 자동화가 되는 헤더 파일입니다. 
+#pragma once
+#include "Protocol.pb.h"
+
+
+using PacketHandlerFunc = std::function<bool(PacketSessionRef&, BYTE*, int32)>;
+extern PacketHandlerFunc GPacketHandler[UINT16_MAX];
+
+enum : uint16
+{
+	// jinja2 문법로 파이썬 코드인지 C++ 코드인지를 알려줍니다. 
+	// (%- %) 안에 있는 코드들을 파이썬으로 인식합니다. - 를 사용하는 것은 파이썬 문법에서 tab과 관련있습니다. 
+{%- for pkt in parser.total_pkt %}
+	PKT_{(pkt.name)} = {(pkt.id)},
+{%- endfor %}
+};
+
+// Custom Handler
+bool Handle_INVALID(PacketSessionRef& session, BYTE* buffer, int32 len);
+
+// 받는쪽 입장의 패킷만 자동화로 만들어 주면 될것입니다. 
+{%- for pkt in parser.recv_pkt %}
+bool Handle_{(pkt.name)}(PacketSessionRef& session, Protocol::{(pkt.name)}& pkt);
+{%- endfor %}
+
+
+class {(output)}
+{
+public:
+	static void Init()
+	{
+		for (int32 i = 0; i < UINT16_MAX; i++)
+			GPacketHandler[i] = Handle_INVALID;
+
+		// 여기도 recv 패킷 대상으로만 만들면 됩니다. 
+{%- for pkt in parser.recv_pkt %}
+		GPacketHandler[PKT_{(pkt.name)}] = [](PacketSessionRef& session, BYTE* buffer, int32 len) { return HandlePacket<Protocol::{(pkt.name)}>(Handle_{(pkt.name)}, session, buffer, len); };
+{%- endfor % }
+	}
+
+	static bool HandlePacket(PacketSessionRef& session, BYTE* buffer, int32 len)
+	{
+		PacketHeader* header = reinterpret_cast<PacketHeader*>(buffer);
+		return GPacketHandler[header->id](session, buffer, len);
+	}
+
+	// 여기서는 send할 버퍼를 만들기 때문에 send_pkt를 사용
+{%- for pkt in parser.send_pkt %}
+	static SendBufferRef MakeSendBuffer(Protocol::{(pkt.name)}& pkt) { return MakeSendBuffer(pkt, PKT_{(pkt.name)}); }
+{% endfor %}
+
+private:
+	template<typename PacketType, typename ProcessFunc>
+	static bool HandlePacket(ProcessFunc func, PacketSessionRef& session, BYTE* buffer, int32 len)
+	{
+		PacketType pkt;
+		if (pkt.ParseFromArray(buffer + sizeof(PacketHeader), len - sizeof(PacketHeader)) == false)
+			return false;
+
+		return func(session, pkt);
+	}
+
+	template<typename T>
+	static SendBufferRef MakeSendBuffer(T& pkt, uint16 pktId)
+	{
+		const uint16 dataSize = pkt.ByteSizeLong();
+		const uint16 packetSize = dataSize + sizeof(PacketHeader);
+
+		SendBufferRef sendBuffer = GSendBufferManager->Open(packetSize);
+
+		PacketHeader* header = reinterpret_cast<PacketHeader*>(sendBuffer->Buffer());
+		header->size = packetSize;
+		header->id = pktId;
+
+		ASSERT_CRASH(pkt.SerializeToArray(&header[1], dataSize));
+
+		sendBuffer->Close(packetSize);
+		return sendBuffer;
+	}
+};
+
+-- PacketGenerator 빌드를 자동화  pyinstaller
+PacketGenerator까지는 만들었는데 이것을 매번 직접 빌드하는것보다는 exe 파일로 만들어 주고 싶습니다. 
+
+파이썬에서는 기본적으로 VS에서 실행파일을 만드는 방법이 없다고 합니다. 
+다만 우리가 따로 별도의 라이브러리를 활용하는 방법이 있는데 그것이 아까 다운받은 pyinstaller 입니다. 
+
+(SolutionDir)\Tools\PacketGenerator  밑에 MakeExe.bat 라는 배치파일을 하나 만들어 줍니다. 
+
+--MakeExe.bat
+
+// 현재 경로를 저장합니다. 
+
+pushd %~dp0
+
+// pyinstaller를 실행하는데 onefile 이라는 옵션으로 하나의 파일로 만들어 달라고 합니다. 이것은 지금 PacketGenerator, ProtoParser 두개의 파일이 개입하고 있는데 
+// 그 중 PacketGenerator.py를 기준으로 exe 파일을 만들어 달라고 하고 있습니다. 
+
+pyinstaller --onefile PacketGenerator.py
+
+파일을 저장하고 한번 실행해봅니다. 
+약간의 시간이 걸리고 PacketGenerator폴더 아래로 dist, build등의 폴더가 생성되었을겁니다. 
+build 폴더에는 여러 파일들이 생성되고 dist 폴더에 진짜 exe 파일이 생성되었습니다. 
+
+* 여기서 pyinstaller가 제대로 실행되지 않아 해맸는데 경로와 py 파일들, PacketHandler.h 모두 한글을 사용하면 안되었습니다 utf-8 인코딩 에러 였습니다. 
+* 그리고 보안 프로그램에서 exe 파일을 악성 파일로 인식해버리는 경우도 있다고 합니다. 
+
+원하는 exe 파일 외에 build같은 필요없는 파일들을 없애는 작업을 해보겠습니다.
+다시 MakeExe.bat 파일의 코드를 수정합니다.
+
+pushd %~dp0
+pyinstaller --onefile PacketGenerator.py
+MOVE .\dist\PacketGenerator.exe .\GenPacket.exe
+@RD /S /Q .\build
+@RD /S /Q .\dist
+DEL /S /Q .\PacketGenerator.spec 
+PAUSE
+
+추가된 3줄 부터 어떤 의미인지 보면 dist 경로 안에 있는 PacketGenerator.exe 파일을 MakeExe.bat이 실행된 Tools/Protobuf경로 아래로 옮기고 이름을 GenPacket.exe로 
+변경합니다. 
+RD는 아마 Remove Directory 의 약자로 디렉터리 삭제를 build, dist 폴더에 대해 실행합니다. 
+DEL로 파일 삭제를 하는데 PacketGenerator.spec 이라는 파일도 삭제해주고 있습니다.
+PAUSE 로 콘솔창이 바로 종료하지 않고 켜져 있도록 합니다. 
+
+이제는 GenPacket.exe 를 실행해주면서 이번에 작업한 PacketGenerator.py, ProtoParser.py 를 가지고 ProtoHandler.h를 파싱하는 효과를 낼 수 있을겁니다. 
+실제로 PacketGenerator 를 실행하면 TestPacketHandler.h 가 생기는데 이것을 지우고 GenPacket.exe를 실행해보면 다시 TestPacketHandler.h 파일이 생성되는걸 확인 할 수 있습니다. 
+
+이렇게 exe로 패킷 핸들러 헤더를 자동화 해서 생성하는 준비가 끝났습니다. 
+당연하게도 이 과정을 하나하나 손수 실행하는것은 힘들기 때문에 외부에서 동작하도록 옮겨주겠습니다. 
+
+Tools에 있던 Templates 폴더와 GenPacket.exe 파일을 복사해 
+
+(SolutionDir)/Common/protobuf/bin 아래로 붙여 넣습니다. 
+
+
+-- (SolutionDir)/Common/protobuf/bin/GenPacket.bat
+
+여기서는 어떤일을 하고 있었냐면 GameServer와 DummyClient 프로젝트의 빌드 전 이벤트로 등록한 GenPacket.bat 가 있는데 
+이 경로에 있는 proto 파일들을 protoc.exe 로 컴파일해 .pb.cc, pb.h 파일들을 만들고 GameServer, DummyClient폴더에 덮어씌워주는 일을 하고 있습니다. 
+
+여기에 추가적으로 위에서 만든 GenPacket.exe도 실행해주도록 넣어주겠습니다. 
+
+pushd %~dp0
+
+protoc.exe -I=./ --cpp_out=./ ./Protocol.proto
+protoc.exe -I=./ --cpp_out=./ ./Struct.proto
+protoc.exe -I=./ --cpp_out=./ ./Enum.proto
+
+GenPacket.exe --path=./Protocol.proto --output=ClientPacketHandler --recv=C_ --send=S_  //추가된 코드
+GenPacket.exe --path=./Protocol.proto --output=ServerPacketHandler --recv=S_ --send=C_  //추가된 코드
+
+IF ERRORLEVEL 1 PAUSE
+
+XCOPY /Y Enum.pb.h "../../../GameServer"
+XCOPY /Y Enum.pb.cc "../../../GameServer"
+XCOPY /Y Struct.pb.h "../../../GameServer"
+XCOPY /Y Struct.pb.cc "../../../GameServer"
+XCOPY /Y Protocol.pb.h "../../../GameServer"
+XCOPY /Y Protocol.pb.cc "../../../GameServer"
+XCOPY /Y ClientPacketHandler.h "../../../GameServer"                                    //추가된 코드
+
+
+XCOPY /Y Enum.pb.h "../../../DummyClient"
+XCOPY /Y Enum.pb.cc "../../../DummyClient"
+XCOPY /Y Struct.pb.h "../../../DummyClient"
+XCOPY /Y Struct.pb.cc "../../../DummyClient"
+XCOPY /Y Protocol.pb.h "../../../DummyClient"
+XCOPY /Y Protocol.pb.cc "../../../DummyClient"
+XCOPY /Y ServerPacketHandler.h "../../../DummyClient"                                   //추가된 코드
+
+//추가된 코드
+DEL /Q /F *.pb.h                             
+DEL /Q /F *.pb.cc
+DEL /Q /F *.h
+
+PAUSE
+
+추가된 코드들을 보겠습니다. 실행프로그램을 호출하고 있고 그 인자로 path, output, recv, send 등을 넣어주고 있습니다. 이 인자들은 
+위의 PacketGenerator.py 의 인자들이었습니다. 
+그리고 생성된 ClientPacketHandler.h 는 GameServer로 ServerPacketHandler.h 는 DummyClient로 덮어쓰기 해주고 있습니다. 
+이것은 이제부터 PacketHandler의 이름을 보내는쪽 이름을 붙히자고 했었기 때문입니다. 
+
+GameServer프로젝트 쪽에서는 ClientPacketHandler의 헤더와 cpp 파일을 조금 수정해줘야합니다. ServerPacketHandler라고 써있는 부분을 ClientPacketHandler로 바꿔줘야 하고 
+거기에 cpp 파일쪽은 자동화를 하지 않았기 때문에 아직 컨텐츠 쪽에서 다룰 함수를 Handle_S_TEST 이름으로 가지고 있습니다. 이것도 Handle_C_TEST로 바꿔줍니다. 
+그리고 이 함수의 인자에서도 아직 S_TEST 패킷을 받아주고 있어서 헤더 쪽에서 Handle_C_TEST의 정의가 없다고 할 수 있는데 이부분도 수정해줍니다. 
+남은 수정점은 GameServer.cpp 의 코드입니다. 여기도 아직 
+#include "ServerPacketHandler.h" 를 받아주고 있는데 ClientPacketHandler로 바꿔주고 그에 맞춰 안의 코드도 수정해줍니다. 
+이렇게 GameServer프로젝트는 빌드를 통과 할 수 있을겁니다. 
+
+다음은 DummyClient프로젝트를 수정할 차례입니다. 
+여기서는 먼저 고쳐야 할점이 역시 include 한 파일명을 수정해줘야하고 컨텐츠단에서 사용할 Handle_계열 함수들의 정의를 만들어 줘야합니다. 
+이떄 유효하지 않은 아이디의 패킷을 뜻하는 Handle_INVALID의 정의부도 추가합니다. 
+그리고 ServerPacketHandler.cpp에는 이전에 HandlePacket이라는 이름의 함수의 정의부가 있습니다. 자동화를 도입할때 같은 이름의 함수를 만들었는데 이전 버전 HandlePacket 함수는 이제 
+사용하지 않을 것이기 때문에 날려줍니다. 
+이어서 수정할 부분은 DummyClient.cpp의 코드입니다. 이전 받은 데이터를 처리하고 있던 HandlePacket 함수는 이제 어느 세션에서 보낸건지 PacketSessionRef& 를 받아주고 있는데 
+이 인자를 채워줍니다. 
+		PacketSessionRef session = GetPacketsessionRef();
+		PacketHeader* header = reinterpret_cast<PacketHeader*>(buffer);
+		ServerPacketHandler::HandlePacket(session, buffer, len);
+다시 빌드해보면 아직 에러가 뜰 수 있는데 이유는 PacketHandler 함수들을 전역으로 관리하는 GPacketHandler 라는 배열을 선언만 하고 정의를 하지 않아서 입니다. 
+ServerPacketHandler.cpp 쪽에 정의를 추가합니다. 어렵진 않습니다.
+    PacketHandlerFunc GPacketHandler[UINT16_MAX];   이 코드를 cpp 파일위쪽에 추가해주면 됩니다. 
+
+
+
+*** 정리 
+
+저번시간에 이어서 패킷정리를 자동화 하는 작업을 해봤습니다. C++ 코드만 만지다 외부 라이브러리도 사요하고 파이썬도 사용하고 exe 파일, bat 파일들을 만지면서 
+갑자기 우왕좌왕할 수 있습니다. 하지만 이런 툴 작업은 처음 한번만 만들어 놓으면 이후로 컨텐츠를 만들면서는 많이 편해집니다. 
+
+오늘 작업으로 얼마나 편해졌는지 한번 실습해보겠습니다. 
+만약 클리이언트에서 서버로 캐릭터가 움직이는 패킷을 만든다고 해보겠습니다. 패킷은 Protocol.proto 에서 관리하고 있었습니다. 
+VS 상에서 Protocol.proto는 DummyClient, GameServer 양쪽에 각각 있는것 처럼 보이지만 사실은 Common에서 관리하고 있는 파일 하나이기 때문에 아무데서나 수정해주면 서버 클라 둘다 적용됩니다. 
+
+-- Protocol.proto
+syntax = "proto3";
+package Protocol;
+
+import "Enum.proto";
+import "Struct.proto";
+
+message C_TEST
+{
+    uint64 id = 1;
+}
+
+message C_MOVE
+{
+    uint64 id = 1;
+    uint32 pos = 2;
+}
+message S_TEST
+{
+    uint64 id = 1;
+    uint32 hp = 2;
+    uint32 attack = 3;
+    repeated BuffData buffs =4;
+
+    //enum PacketId { NONE = 0; PACKET_ID = 1; }
+}
+
+message S_LOGIN
+{
+    //enum PacketId { NONE = 0; PACKET_ID = 2; }
+}
+
+C_MOVE 라는 패킷을 만들었습니다. 자동화를 했으니 이제 한번 빌드를 해보겠습니다. 에러메세지가 우르르 뜨긴는 합니다만 괜찮습니다. 
+패킷 핸들러들의 헤더에는 C_MOVE 에 대응하는 코드가 생성되었지만 cpp 파일쪽은 직접 만들어 줘야 하기 때문에 생긴 에러 메세지 입니다. 
+ServerPacketHandler쪽이나 ClientPacketHandler 쪽이나 모두 total_pkt을 다루는 enum에는 C_MOVE가 등록되었지만 컨텐츠 단에서 다룰 Handle_C_MOVE는 
+ClientPacketHandler 쪽에만 생성 되었습니다. 이것은 GemPacket.bat 에서 각각 recv, send 컨벤션을 반대로 줘서 그렇습니다. 
+이제 Handle_C_MOVE의 정의부를 ClientPacketHandler.cpp 에 만들어 주면 GameServer 프로젝트는 빌드가 성공할 것 입니다.
+
+
+-- DummyClient  ServerSession
+C_MOVE 패킷을 받는 쪽인 GameServer는 그렇게 완료 되었고  반대로 DummyClient에서 C_MOVE 패킷을 보내고 싶다 하면 이렇게 될겁니다.
+
+	virtual void OnConnected() override
+	{
+		Protocol::C_MOVE movePacket;
+		auto sendBuffer = ServerPacketHandler::MakeSendBuffer(movePacket);
+	}
+
+만약 소켓이 연결됨과 동시에 C_MOVE 패킷을 보내려고 한다면 이렇게 movePacket을 만들고 그 내용을 채운다음 다시 이 패킷으로 sendBuffer를 만들고 
+Session::Send로 보낼수 있게 되는것입니다. 
+
+이전에 비해 패킷을 받고 보내는것이 굉장히 간단해 졌습니다. 
+
+자동화 툴을 도입하는 처음에만 고생하면 이후로 편하게 컨텐츠를 추가해 나갈수 있게 되는것입니다. 
