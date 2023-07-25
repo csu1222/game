@@ -1,0 +1,592 @@
+
+
+
+        채팅 실습
+
+
+지난시간까지 Protobuf 을 이식하고 파이썬으로 jinja2, pyinstaller 라이브러리도 도입해 자동화도 해주었습니다.
+
+사실은 포트 폴리오를 만드는데에는 여기까지만 만들어도 충분하다고 합니다. 
+그래도 이번 시간이후로 배울 JobQueue를 알아야 하는 이유는 진지하게 큰 온라인게임을 만들때 동시 접속자가 몇십명 단위가 아닌 몇백, 몇천면 단위의 접속을 경험해볼 수 있습니다.
+
+JobQueue라는 개념이 처음 배울때 직관적이지 않은 개념입니다. 그래서 이번시간에 체감하기 쉬운 예제인 채팅을 예로들어서 실습을 해보고자 합니다. 
+
+일종의 채팅프로그램을 만들어서 몇백명의 유저가 서로 Hello World같은 메세지를 뿌리는 것을 만들어 볼것입니다. 
+왜 게임을 만들지 않고 채팅프로그램을 만드는가는 사실 게임과 채팅프로그램은 종이 한장 차이라고 할 수 있습니다. 
+
+채팅이라는것 부터 사실 클라이언트가 서버쪽으로 채팅 패킷을 보내고 서버는 받은 패킷을 접속한 다른 모든 유저에게 broadcast를 해버리는걸 반복합니다. 
+여기서 채팅패킷을 바꿔서 이동패킷, 공격패킷, 아이템습득패킷 같은 게임에서 할법한 동작들로 만들어 보내고 그것을 서버쪽에서 로직 처리하고 다시 다른 클라이언트에게 전부 뿌리는것이 
+게임입니다. 
+그래서 사실 서버입장에서는 채팅이나 게임이나 컨텐츠쪽이 중요한게 아니고 패킷을 받고 또 뿌리는 이 과정이 중요하다고 할 수 있습니다. 
+
+*** 
+시작하기전 Protobuf의 버그를 하나 잡고 가야합니다. 
+별로 우리 코드의 문제라고 하기는 뭐하고 Protobuf의 특정 버전에서 발생하는 버그라고 합니다. 
+Protobuf를 우리 컴퓨터에 설치하기 위해 CMake로 솔루션을 만들고 다시 빌드해 lib 파일을 우리 프로젝트로 가져와 사용하였는데 
+CMake로 솔루션을 만들어 주는 과정에서 Shared LIbs, Protoc Binares 항목을 체크하고 빌드 했던것을 모두 체크 해제해서 Generator를 해야 한다고 합니다. 
+똑같이 다시 할 필요는 없고 이후에 Protobuf 버전이 올라가면서 문제가 해결되었을 수도 있습니다. 
+***
+
+오늘 내용인 채팅 실습을 하기 위해서 패킷을 다시 설계해보겠습니다. 새로운 마음으로 기존의 Protocol.proto의 내용을 다 날려주고 다시 시작하겠습니다. 
+
+일반적인 게임을 기준으로 생각해보겠습니다. 어떤 식으로 게임이 진행될것이냐면 가장먼저 클라이언트 쪽에서 로그인 요청을 할것입니다. 
+보통이 로그인때 아이디와 비밀번호를 주고 받으면서 인증을 해야 할것이지만 이번에는 인증은 생략하겠습니다. 
+
+로그인 요청을 받은 서버는 이 로그인에 대한 성공여부를 돌려줄것입니다. 그 다음에 DB에서 해당 유저와 관련된 데이터들을 가져와 보내줄것입니다. 
+사실은 로그인 패킷과 DB 패킷은 나눠서 관리하는게 좋지만 역시 이번에는 패킷갯수를 줄여서 실습하기 위해 함께 관리하겠습니다. 
+
+message C_LOGIN
+{
+        // TODO
+}
+
+message S_LOGIN
+{
+	bool success = 1;
+        // TODO 
+}
+
+서버측에서 돌려주는 플레이어 정보는 Protocol.proto 에서 직접 만드는것이 아니고 플레이어정보를 하나의 구조체로 관리할것입니다. 그 용도로 사용하는 proto 파일인
+Struct.proto 파일이 있었습니다. 
+
+
+-- Struct.proto
+syntax = "proto3";
+package Protocol;
+
+import "Enum.proto";
+
+message Player
+{
+	uint64 id = 1;
+	string name = 2;
+	PlayerType playertype = 3;
+
+	// TODO : Status, Skills ...
+}
+
+이전에 있던 BuffsData는 날리고 새로 Player 라는 구조체를 만들어 볼겁니다. 일단 첫번째로 가지고 있을 데이터는 id입니다. 여기서 id는 클라이언트쪽에서 로그인 요청을 할때,
+DB에 저장되어있는 그 id가 아닌 서버에 새로 접속할때 마다 각 클라이언트에 발급되는 uint64 타입의 id 입니다. 접속해 있는동안은 여기서 발급된 id를 가지고 대상이 되던지 뭘하던지
+판단할 것입니다.  
+그리고 문자열로 플레이어의 이름을 들고 있을것이고 또 PlayerType이라는 타입으로 플레이어의 직업이 무엇인지를 들고 있을건데 여기서 사용하는 타입은 마침 이전에 Enum.proto에서 만들었던 
+타입입니다. 일단 이렇게 실습을 할건데 나중에는 이 플레이어의 스텟이나 스킬, 인벤토리 같은 정보들을 가지고 있을것입니다. 
+
+-- Protocol.proto
+  
+message S_LOGIN
+{
+	bool success = 1;
+	repeated Player players = 2; 
+}
+
+위에서 만든 Player 구조체를 repeated 라는 키워드를 붙여 들고 있을겁니다. 배열형태로 가지고 있을거라는 이야기입니다. 한 클라이언트에서 생성한 플레이어캐릭터가 꼭 하나일 필요는 없습니다. 
+Player 구조체의 데이터중 id를 꼭 여기 로그인 요청을 할때 채워줄 필요는 없을겁니다. 
+
+다음은 뭘 해야 하는가 하면 로그인을 한 후 S_LOGIN의 players 를 봐서 캐릭터가 있는지 없는지를 봐서 하나도 없다면 캐릭터 생성창으로 가게끔 해주던가 있다면 
+캐릭터 선택창으로 간다던가 하면 될겁니다. 이 중 캐릭터 생성창으로 가는 작업은 생략하고 
+일단 캐릭이 하나 있고 그 캐릭으로 접속을 시도한다 가정해보겠습니다. 
+
+message C_ENTER_GAME
+{
+	uint64 playerIndex = 1;
+}
+
+message S_ENTER_GAME
+{
+	bool success = 1;
+}
+
+C_ENTER_GAME에서는 접속하려고 하는 캐릭터의 인덱스를 보내고 S_ENTER_GAME에서는 접속 가능여부를 다시 보내줄것입니다. 
+보통 게임에 입장하게 되면 필드에 있는 모든 유저의 정보같은것들을 같이 보내주는데 지금은 생략하겠습니다. 간단하게 접속 가능 여부만 보냅니다. 
+
+성공적으로 들어왔다고 치겠습니다. 
+채팅을 하기 시작할것인데 클라이언트쪽에서 하고 싶은 말을 패킷에 담아 보냅니다.  
+
+message C_CHAT
+{
+	string msg = 1;
+}
+
+그러면 서버쪽에서는 C_CHAT 패킷을 담아서 다른 모든 클라이언트에 받은 패킷의 주인이 누구인지 또 그 메세지도 다시 뿌릴것입니다. 
+
+message S_CHAT
+{
+	uint64 plyerId = 1;
+	string msg = 2;
+}
+
+S_CHAT 에서는 나중에 가면 id 뿐만이 아니라 플레이어의 이름같은것도 같이 보내서 말풍선을 띄울수도 있게 해줄 수 있습니다. 
+이런것은 나중에 추가 할 수 있는 옵션들이고 기본적인 틀은 위와 같은 형태가 될것입니다.
+
+
+-- 빌드 후 에러해결
+
+패킷설계를 하고 GameServer, DummyClient 를 빌드해보면 각 패킷 핸들러의 헤더는 자동적으로 생성이 되지만 cpp 코드는 자동화가 되지 않기 때문에 빌드를 실패 할겁니다. 
+이 것은 고치기 쉬운문제이기 때문에 금방 고쳐 보겠습니다. 
+
+- GameServer
+
+
+bool Handle_INVALID(PacketSessionRef& session, BYTE* buffer, int32 len)
+{
+	PacketHeader* header = reinterpret_cast<PacketHeader*>(buffer);
+	// TODO : 실패 로그
+
+	return false;
+}
+
+bool Handle_C_LOGIN(PacketSessionRef& session, Protocol::C_LOGIN& pkt)
+{
+	return true;
+}
+
+bool Handle_C_ENTER_GAME(PacketSessionRef& session, Protocol::C_ENTER_GAME& pkt)
+{
+	return true;
+}
+
+bool Handle_C_CHAT(PacketSessionRef& session, Protocol::C_CHAT& pkt)
+{
+	return true;
+}
+
+아무 내용도 없는 정의부이지만 빌드를 통과하기는 충분할것입니다. 
+
+다시 빌드를 해보니 다시 에러메세지가 뜨는데 GameServer.cpp 에서 이전에 테스트 하던 코드가 문제였습니다. C_TEST 같은 패킷을 다 삭제 했었는데 테스트 코드엔 남아 있어서 그랬습니다. 
+싹 날려주었습니다. 
+
+이렇게 해서 일단 서버쪽 버그는 다 잡았습니다. 
+
+- DummyClient
+
+클라쪽도 버그를 잡습니다. 빌드해서 패킷 함수들 정의부를 추가하고 이전 테스트때 사용하던 코드를 삭제하면 잘 빌드 됩니다. 
+
+
+-- 패킷 함수 작업 
+
+이제 Protocol.proto에서 설계했던 대로 패킷함수들을 만들어 주면 됩니다. 
+
+먼저 패킷 설계할때 부터 로그인을 하고 채팅을 하는 식으로 설계 했습니다. 
+
+로그인을 한다는 것은 일단 클라이언트 쪽에서 서버로 Connect를 건다는 것입니다. 
+
+- Protocol
+
+message C_LOGIN
+{
+
+}
+
+- DummyClient
+
+virtual void OnConnected() override
+{
+        Protocol::C_LOGIN pkt;
+
+        auto sendBuffer = ServerPacketHandler::MakeSendBuffer(pkt);
+
+        Send(sendBuffer);
+}
+
+지금은 C_LOGIN 패킷에 아무런 데이터가 없습니다. 원래라면 아이디와 비밀번호를 줘서 인증을 해야 할 것 같은 부분입니다. 
+
+보통은 게임서버에서 로그인 인증까지 도맡아 하지는 않고 인증 서버를 따로 만들어준다고 합니다. 실제로 다 만들려다 보면 내용이 너무 길어지기 때문에
+핵심적인 내용만 다뤄 볼겁니다. 
+
+아무런 내용이 없는 C_LOGIN을 보냈습니다. 흐름 순서상으로 보면 이제 서버에서 로그인 요청을 받는 부분입니다. 
+서버쪽에서 버퍼를 받게 되면 OnSend, OnSendPacket 등의 함수를 거치면서 버퍼, 패킷의 헤더를 확인해 사이즈가 같은지를 확인하는 부분을 거치고 
+OnSendPacket에서 HandlePacket 함수를 호출해주게 됩니다. 또 HandlePacket에서는 패킷의 아이디에 따른 패킷 함수들로 연결해줍니다. 
+
+그래서 이어서 볼 내용은 Handle_C_LOGIN 입니다. 인자로 PacketSessionRef& 를 받고 있는데 이것을 서버쪽에서 사용하는 GameSession으로 캐스팅할것입니다. 
+그런데 아직 shared_ptr<GameSession> 을 편하게 쓰는 매크로를 선언 하지 않았습니다. 
+GameServer 프로젝트에 있는 pch.h 에 선언해줍니다. 
+
+- pch.h (GameServer 프로젝트)
+
+using GameSessionRef = shared_ptr<class GameSession>;
+
+- ClientPacketHandler::Handle_C_LOGIN
+
+bool Handle_C_LOGIN(PacketSessionRef& session, Protocol::C_LOGIN& pkt)
+{
+	// 인자의 session 을 GameSession으로 캐스팅해 보겠습니다.
+	GameSessionRef gameSession = static_pointer_cast<GameSession>(session);
+
+	// TODO : Validation 체크 
+
+	// 입장 성공 회답
+	Protocol::S_LOGIN loginPkt;
+	loginPkt.set_success(true);
+
+	// TODO :  DB에서 플레이어 정보를 긁어온다 
+	// TODO :  플레이어 정보를 GameSession에 저장(메모리에 저장)
+
+	return true;
+}
+
+이때 플레이어 정보를 패킷에 담아주기 위해서 새로 Player 클래스를 만들어 줘야 할것 같습니다. 
+
+- GameServer Contents
+
+GameServer 프로젝트에 새로 필터를 추가합니다. 이름은 Contents 라고 하겠습니다. 그 밑으로 클래스파일 추가를 할건네 Player, Room 이라는 이름의 파일들 두가지를 추가합니다. 
+
+- Player 
+Plyer 클래스 내용을 채워줄건데 일단 간단하게 전부 public 으로 열어줍니다. 
+class Player
+{
+public:
+	uint64                  playerId = 0;
+	string                  name; 
+	Protocol::PlayerType    type = Protocol::PLAYER_TYPE_NONE;
+	GameSessionRef          ownerSession; // Cycle 문제 해결해야함
+};
+
+그런데 여기서 Protocol::PlayerType 부분에 빨간줄이 그어질겁니다. 아직 Enum.pb.h 가 추가 되어 있지 않기 때문입니다. 매 파일마다 include 해주는 것보다는 
+pch에 추가해주면 좋을것 같습니다.
+
+Enum.pb.h를 include 해주는 김에 Struct.pb.h, Protoco.pb.h를 include 해주면 어떨까요? 
+큰 프로젝트에서는 이렇게 모든 헤더를 추가하게 되면 조금만 수정이 되도 다시 빌드를 해야하는 일이 많아진다고 합니다. 지금 우리가 만드는 프로젝트는 학습용이다 보니 편한대로 해도 될것입니다. 
+
+- Room
+Player에 이어서 같이 만들어준 방이라는 개념인 Room을 미리 만들어 주겠습니다. Room이란 개념은 게임에서는 플레이어들이 들어와 실질적으로 게임을 즐기는 
+공간을 뜻합니다. 지금이야 채팅기능만 사용할것입니다. 
+
+헤더
+#pragma once
+
+class Room
+{
+public:
+	void Enter(PlayerRef player);
+	void Leave(PlayerRef player);
+	void Broadcast(SendBufferRef sendBuffer);
+private:
+	USE_LOCK;
+	map<uint64, PlayerRef> _players;
+};
+
+extern Room GRoom;
+
+cpp 파일
+#include "pch.h"
+#include "Room.h"
+#include "Player.h"
+#include "GameSession.h"
+
+Room GRoom;
+
+void Room::Enter(PlayerRef player)
+{
+	WRITE_LOCK;
+	_players[player->playerId] = player;
+}
+
+void Room::Leave(PlayerRef player)
+{
+	WRITE_LOCK;
+	_players.erase(player->playerId);
+}
+
+void Room::Broadcast(SendBufferRef sendBuffer)
+{
+	WRITE_LOCK;
+	for (auto& p : _players)
+	{
+		p.second->ownerSession->Send(sendBuffer);
+	}
+}
+
+이렇게 만들어 줬습니다. 여기서 사용하는 PlayerRef 도 pch에 Player 클래스의 shared_ptr을 정의 한겁니다. 
+따로 RoomManager를 만들기는 뭐하니 바로 전역으로 쓸 Room 을 만들었습니다. 이렇게 사용하는것은 실습이니까 그렇습니다. 
+
+- ClientPacketHandler::Handle_C_LOGIN
+다시 돌아가서 서버에서 클라로 보내는 로그인 패킷을 마저 만들겠습니다. 
+
+#include "Player.h"
+#include "Room.h"
+
+bool Handle_C_LOGIN(PacketSessionRef& session, Protocol::C_LOGIN& pkt)
+{
+	// 인자의 session 을 GameSession으로 캐스팅해 보겠습니다.
+	GameSessionRef gameSession = static_pointer_cast<GameSession>(session);
+
+	// TODO : Validation 체크 
+
+	// 입장 성공 회답
+	Protocol::S_LOGIN loginPkt;
+	loginPkt.set_success(true);
+
+	// TODO :  DB에서 플레이어 정보를 긁어온다 
+	// TODO :  플레이어 정보를 GameSession에 저장(메모리에 저장)
+
+	// ID 발급 (DB ID가 아닌 인게임 ID)
+	static Atomic<uint64> idGenerator = 1;
+
+	{
+		// 패킷에 줄 플레이어정보 채우기
+		auto player = loginPkt.add_players();
+		player->set_name(u8"DB에서긁어온이름1");
+		player->set_playertype(Protocol::PLAYER_TYPE_KNIGHT);
+
+		// 메모리상에서 들고 있을 플레이어정보
+		PlayerRef playerRef = MakeShared<Player>();
+		playerRef->playerId = idGenerator++;
+		playerRef->name = player->name();
+		playerRef->type = player->playertype();
+		playerRef->ownerSession = gameSession;
+	}
+
+	return true;
+}
+
+추가된 내용은 패킷으로 넘겨줄 플레이어정보와 서버쪽 메모리에서 가지고 있을 플레이어 정보를 만들었습니다. 
+그런데 playerRef 가 ownerSession 로 이 gameSession을 들고 있는데 반대로 gameSession쪽에서도 palyerRef를 들고 있어야 합니다. 
+
+- GameSession
+
+class GameSession : public PacketSession
+{
+public:
+	~GameSession()
+	{
+		cout << "~GameSession" << endl;
+	}
+
+	virtual void OnConnected() override;
+	virtual void OnDisconnected() override;
+	// OnRecv는 sealed로 잠궜고 대신 OnRecvPacket을 재정의해 사용합니다. 
+	virtual void OnRecvPacket(BYTE* buffer, int32 len) override;
+	virtual void OnSend(int32 len) override;
+
+public:
+	Vector<PlayerRef> players;
+};
+
+간단하게 public으로 열어서 playerRef를 Vector로 관리하겠습니다. 
+
+- Handle_C_LOGIN
+플레이어정보를 만들던 범위 안에 아래 코드를 추가합니다. 
+
+        gameSession->players.push_back(playerRef);
+
+이때 아마 또 GameSession 을 include 해줘야 할것입니다. 
+
+{
+        // 패킷에 줄 플레이어정보 채우기
+        auto player = loginPkt.add_players();
+        player->set_name(u8"DB에서긁어온이름1");
+        player->set_playertype(Protocol::PLAYER_TYPE_KNIGHT);
+
+        // 메모리상에서 들고 있을 플레이어정보
+        PlayerRef playerRef = MakeShared<Player>();
+        playerRef->playerId = idGenerator++;
+        playerRef->name = player->name();
+        playerRef->type = player->playertype();
+        playerRef->ownerSession = gameSession;
+
+        gameSession->players.push_back(playerRef);
+}
+
+즉 이 한 덩어리가 하나의 세트가 되는것입니다. 
+
+이 한 덩어리를 하나 더 복사해서 플레이어를 또 만들어 줍니다. 
+
+패킷의 내요을 다 추가 해줬다면 이제 버퍼에 담을 차례입니다. 
+
+auto sendBuffer = ClientPacketHandler::MakeSendBuffer(loginPkt);
+session->Send(sendBuffer);
+
+
+이제 Protocol 를 보면 다음순서는 클라이언트 쪽에서 S_LOGIN 패킷을 받아줄 차례입니다. 
+
+- DummyClient의 Handle_S_LOGIN
+
+bool Handle_S_LOGIN(PacketSessionRef& session, Protocol::S_LOGIN& pkt)
+{
+	// 받은 패킷 체크 
+	if (pkt.success() == false)
+		return true;
+
+	if (pkt.players().size() == 0)
+	{
+		// 캐릭터 생성창
+	}
+
+	// 입장 UI 버튼 눌러서 게임 입장 
+	Protocol::C_ENTER_GAME enterGamePkt;
+	enterGamePkt.set_playerindex(0);	// 첫번째 캐릭터로 입장 
+
+	auto sendBuffer = ServerPacketHandler::MakeSendBuffer(enterGamePkt);
+	session->Send(sendBuffer);
+
+	return true;
+}
+
+C_ENTER_GAME 패킷을 서버쪽에서 받는 부분을 만들어 줄것입니다. 이렇게 클라 서버 왔다 갔다 하면서 만드는 것입니다. 
+
+- GameServer Handle_C_ENTER_GAME
+
+받은 패킷의 플레이어 인덱스가 적절한 값인지를 체크 해줍니다. 그리고 나서 GameSession의 메모리에서 들고 있는 플레이어정보를 가져올겁니다. 
+이런 과정중에 서버프로그래밍을 하면서 가장 조심해야할 점이 있는데 항상 클라이언트는 어떤 수작을 부릴지 모른다는것입니다. 
+플레이어 인덱스가 적절한지를 체크하는것도 마찬가지이고 플레이어정보를 세션에서 가져올때 어짜피 플레이어정보를 수정하는것은 게임에 들어오기전 에만 
+할것이기 때문에 따로 락을 걸지 않아도 되지 않을까 싶은데 게임에 들어와서 다시 로그인을 시도하지 않을것이라는 안심은 하면안됩니다. 
+
+예를들어서 인게임중 사냥을 하고 있는 클라이언트가 갑자기 C_LOGIN 패킷을 보내 Handle_C_LOGIN 을 처리하게 되고 거기서 플레이어정보에 접근이 된다던가 할 수 있는겁니다. 
+이럴때는 따로 캐릭터 선택창에 있는지를 체크하는 status를 하나 둬서 그 것으로 체크해주는 방법등 이 외에도 어디서든지 구멍을 내면 안됩니다. 
+
+
+bool Handle_C_ENTER_GAME(PacketSessionRef& session, Protocol::C_ENTER_GAME& pkt)
+{
+	GameSessionRef gameSession = static_pointer_cast<GameSession>(session);
+
+	uint64 index = pkt.playerindex();
+	// TODO : Validate
+
+	PlayerRef player = gameSession->_players[index];	// READ_ONLY?
+	GRoom.Enter(player);
+
+	Protocol::S_ENTER_GAME enterGamePkt;
+	enterGamePkt.set_success(true);
+	auto sendBuffer = ClientPacketHandler::MakeSendBuffer(enterGamePkt);
+	player->ownerSession->Send(sendBuffer);
+
+	return true;
+}
+
+서버로부터 Room에 입장 성공했다는 패킷을 받은 클라이언트도 만들어 주겠습니다. 
+아까 Room과 Player 클래스를 서버쪽에만 만들어 줬는데 사실 클라와 서버 대칭적으로 둘 다 만들어 주는게 좋습니다.
+클라이언트 쪽에서도 플레이어들과 방의 정보를 가지고 있다면 나중에 그 데이터를 기반으로 게임엔진에서 렌더링을 할때 사용할 수 있을겁니다.
+일단 이 부분은 오늘은 넘어갈것입니다. 렌더링 쪽은 추후 포트 폴리오를 만들때나 다시 알아볼것입니다. 
+이번시간은 JobQueue의 개념을 쉽게 알기 위한 채팅 실습입니다. 
+제대로 매니저를 만들기 보다는 간단하게 비슷한 효과를 내도록 만들어 보겠습니다. 
+
+- DummyClient
+DummyClient.cpp에서 ClientService를 생성, start 를 한 후 워커 쓰레드들이 dispatch를 한 후 그 밑부분에 루프를 돌면서 일정한 메세지를 계속 뿌리도록 할것입니다. 
+
+
+	while (true)
+	{
+                // TODO : Broadcast
+		this_thread::sleep_for(1s);
+	}
+
+그런데 여러 클라이언트가 한번에 메세지를 뿌리는 것을 비슷하게 하기 위해서 다시 ClientService 를 타고 들어가봤습니다. 
+Service 클래스 까지 올라가면 서비스에서 관리하는 세션들을 Set 로 관리하고 있습니다. 
+이것을 재사용해서 여러 플레이어가 방에 입장한것처럼 할 수 있게끔 함수를 새로 파주겠습니다. 
+
+- Service
+
+void Service::Broadcast(SendBufferRef sendBuffer)
+{
+	WRITE_LOCK;
+	for (const auto& session : _sessions)
+	{
+		session->Send(sendBuffer);
+	}
+}
+
+이런 함수를 Service 클래스 멤버 함수로 추가해주었습니다. 따로 예외처리없이 간단하게 만들었습니다. 
+
+- DummyClient
+다시 클라이언트쪽으로 와서 마저 만들어 보겠습니다. 
+
+int main()
+{
+	ServerPacketHandler::Init();
+
+	this_thread::sleep_for(1s);
+	
+	ClientServiceRef service = MakeShared<ClientService>(
+		NetAddress(L"127.0.0.1", 7777),
+		MakeShared<IocpCore>(),
+		MakeShared<ServerSession>,
+		100);
+
+	ASSERT_CRASH(service->Start());
+
+
+	for (int32 i = 0; i < 2; i++)
+	{
+		GThreadManager->Launch([=]()
+			{
+				while (true)
+				{
+					service->GetIocpCore()->Dispatch();
+				}
+			});
+	}
+
+	Protocol::C_CHAT chatPkt;
+	chatPkt.set_msg(u8"Hello World!");
+	auto sendBuffer = ServerPacketHandler::MakeSendBuffer(chatPkt);
+
+	while (true)
+	{
+		service->Broadcast(sendBuffer);
+		this_thread::sleep_for(1s);
+	}
+
+	GThreadManager->Join();
+}
+
+관리하는 세션을 100개로 늘렸고 그냥 간단하게 Hello World! 라는 문자열을 UTF-8로 서비스가 관리하는 모든 세션이 한번에 서버로 전송하는 코드입니다. 
+
+이제 C_CHAT 패킷을 서버로 보낸 것입니다. 서버쪽에서는 패킷을 받아 처리해줄것입니다. 
+
+- ClientPacketHandler::Handle_C_CHAT
+
+bool Handle_C_CHAT(PacketSessionRef& session, Protocol::C_CHAT& pkt)
+{
+	// 서버 쪽에서 로그를 찍어 봅니다. 
+	cout << pkt.msg() << endl;
+
+	// 받은 메세지를 각 클라이언트에게 다시 전달 
+	Protocol::S_CHAT chatPkt;
+	chatPkt.set_msg(pkt.msg());
+	auto sendBuffer = ClientPacketHandler::MakeSendBuffer(chatPkt);
+
+	GRoom.Broadcast(sendBuffer);	// WRITE_LOCK
+
+	return true;
+}
+
+서버쪽에서도 시험 삼아 받은 패킷을 로그로 한번 찍어 보고 또 이 패킷을 서버에 접속한 모든 클라이언트에게로 다시 뿌립니다. 
+멀티스레드 환경에서 실행할것이다 보니 공용 메모리라고 볼 수 있는 GRoom 을 수정할때는 그 함수내에서 락을 걸어주고 있는걸 알 수 있습니다.
+
+- ServerPacketHandler::Handle_S_CHAT
+
+bool Handle_S_CHAT(PacketSessionRef& session, Protocol::S_CHAT& pkt)
+{
+	cout << pkt.msg() << endl;
+	return true;
+}
+
+간단하게 받은 메세지를 로드로 찍고 마무리하겠습니다. 
+
+***
+
+이제 서버 코어와 클라이언트, 서버를 다시 빌드해 실행해보면 양쪽으로 Hello World 가 왔다 갔다 하는걸 볼 수 있습니다. 
+아직은 플레이어 정보가 ownerSession를 참조하는것고 Session에서 또 플레이어 정보를 참조하는 순환 참조를 끊어 주지 않았지만 일단은 어찌 동작하고 있습니다. 
+
+그런데 이제는 SendBufferManager 에서 Open 하는 버퍼의 용량을 잘 조절해서 이전에 버퍼 풀에서 잘 꺼내사용하는지 확인하기 위해 넣었던 로그 찍는 코드들을 없애 줬습니다. 
+
+여기까지 채팅을 구현하면서 클라이언트와 서버 간의 데이터 주고 받는걸 구현할 수 있다면 이제는 포트 폴리오를 만들 준비가 끝났다고 할 수 있습니다. 
+
+
+이후로 배워볼 내용들은 지금 우리가 만든 방식에서 어떤 문제가 있는지를 생각해봐야 하는데 
+지금 ClientService 에서 100개의 세션을 만들어 테스트를 하고 있었는데 이 숫자가 더 늘어난다고 가정을 하고 또 게임도 점점 복잡해 지면서 단순히 메세지만 그대로 쏴주는게 아니라
+내부적으로 게임의 로직을 계산하는 과정이 같이 일어난다고 해보겠습니다. 
+게임에서 Room 안에는 플레이어와 몬스터 정도만 있는게 아니라 투사체나 아니면 물리 엔진을 표현하는 사물같은 것들도 다 계산해야 합니다. 
+
+이 상황에서 Room의 Broadcast나 다른 함수들을 보면 전부 락을 잡아가면서 동작하고 있습니다. 
+이것이 멀티스레드 환경에서 주의해야 할 점인데 멀티스레드 를 다루는 방법은 그냥 스레드들을 만들고 일감을 준 다음 공용 메모리를 수정하는 부분을 락을 잡아 두면 된다고 생각할 수 있습니다.
+서버 프로그래밍을 할때 그냥 락을 잘 잡으면 통과되지 않을까 생각할 수 있습니다. 물론 크래시는 안나고 동작하긴 할것이지만 
+동시에 치명적인 문제는 클라이언트에서 몇천명이 패킷을 보내는 상황에서 서버에서는 먼저 만들어 둔 워커 스레드가 IOCP코어에 Dispatch를 하게 되면 그 내부에서 
+GetQeueuedCompletionStatus 를 호출하고 각 세션들의 Dispatch가 이어서 호출될겁니다. 그러면 받은 IocpEvent의 종류에 따라 각 Connect, DisConnect, Send, Recv 의 Process 함수로 연결이
+될것입니다. 거기서는 만약 수십개의 클라이언트가 ProcessSend로 들어 갔으면 패킷헤더에 적혀있는 버퍼 사이즈를 체크하는 OnSend 그리고 컨텐츠에서 사용될 로직인 OnRecvPacket 여기서
+HandlePacket을 통해 오늘만든 Handle_C_CHAT 으로 들어오면 Room::Broadcast 오게 됩니다. 
+
+락을 잡는 Broadcast에서 수십개의 패킷이 한번에 걸리게 되면 병목현상이 일어날것인데 거기에다가 Broadcast의 코드를 보면 각 호출마다 방에 포함된 모든 플레이어를 for문으로 돌면서 Send를 
+하는 무거운 작업입니다. 그래서 운이 나쁘게 하나의 스레드로 일이 몰리게 되면 사실상하나의 cpu 코어를 가지고 일을 동작하게 되는겁니다. 
+
+이런 부분을 어떻게 해결해야 하는지를 알아보는 것이 다음시간부터 배울 JobQueue라는 개념입니다. 

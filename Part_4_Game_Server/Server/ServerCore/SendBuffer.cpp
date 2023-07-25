@@ -124,15 +124,11 @@ SendBufferRef SendBufferManager::Open(uint32 size)
 	// 여기까지 왔다면 이 스레드의 버퍼 청크는 원래 nullptr 이었으면 Pop,
 	// 남은공간이 충분치 않았다면 Pop, 이미 버퍼청크가 있고 남은공간도 충분하다면 그냥 그대로 반환합니다. 
 
-	cout << "FREE : " << LSendBufferChunk->FreeSize() << endl;
-
 	return LSendBufferChunk->Open(size);
 }
 
 SendBufferChunkRef SendBufferManager::Pop()
 {
-
-	cout << "Pop SendBufferChunk" << endl;
 	{
 		// 락의 영역을 조절하는 중괄호
 		WRITE_LOCK;

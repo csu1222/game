@@ -45,7 +45,9 @@ public:
 	// SetSessionFactory 는 생성자에서 넣어줬던 SessionFactory가 맘에 안들면 새로 설정해줍니다.
 	void			SetSessionFactory(SessionFactory func) { _sessionFactory = func; }
 
-	// 새로 세션을 만들어 줌과 동시에 IocpCore에 등록해줍니다. 
+	// 관리하는 모든 세션에게 버퍼를 전송
+	void			Broadcast(SendBufferRef sendBuffer);
+	// 새로 세션을 만들어 줌과 동시에 IocpCore에 등록해줍니다.
 	SessionRef		CreateSession();
 	// 이미 만들어진 세션을 추가하는 함수
 	void			AddSession(SessionRef session); 
