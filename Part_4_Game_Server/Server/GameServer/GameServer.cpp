@@ -9,12 +9,26 @@
 #include "BufferWriter.h"
 #include "ClientPacketHandler.h"
 #include <tchar.h>
-// protobuf
 #include "Protocol.pb.h"
-
+#include "Job.h"
+#include "Room.h"
 
 int main()
 {	
+	// Test Job
+	{
+		// [일감 의뢰 내용] : 1번 유저에게 10만큼 힐을 줘라
+		// 행동 : Heal
+		// 인자 : 1번 유저, 10이라는 힐량
+		HealJob healJob;
+		healJob._target = 1;
+		healJob._healValue = 10;
+
+		// 나중에
+		healJob.Execute();
+	}
+
+	
 	ClientPacketHandler::Init();
 
 	ServerServiceRef service = MakeShared<ServerService>(
@@ -36,6 +50,11 @@ int main()
 			});
 	}
 
+	while (true)
+	{
+		GRoom.FlushJob();
+		this_thread::sleep_for(1ms);
+	}
 
 	// 여러가지 버전의 문자열
 	char sendData[1000] = "가";			// CP949 = KS-X-1001(한글문자 2바이트) + KS-X-1003(로마문자 1바이트)
