@@ -13,19 +13,42 @@
 #include "Job.h"
 #include "Room.h"
 
+// 오늘의 목표 밑의 기능을 job으로 만들기
+static void HealByValue(int64 target, int32 value)
+{
+	cout << target << "한테 힐 " << value << "만큼 줌" << endl;
+}
+
+class Knight
+{
+public:
+	void HealMe(int32 value)
+	{
+		cout << "Heal Me!" << value << endl;
+	}
+private:
+
+};
+
 int main()
 {	
+	auto tup = std::tuple<int32, int32>(1, 2);
+	auto val0 = std::get<0>(tup);
+	auto val1 = std::get<1>(tup);
+
+	auto s = gen_seq<3>();
+
 	// Test Job
 	{
-		// [일감 의뢰 내용] : 1번 유저에게 10만큼 힐을 줘라
-		// 행동 : Heal
-		// 인자 : 1번 유저, 10이라는 힐량
-		HealJob healJob;
-		healJob._target = 1;
-		healJob._healValue = 10;
+		FuncJob<void, int64, int32> funcJob(HealByValue, 100, 10);
 
-		// 나중에
-		healJob.Execute();
+		funcJob.Execute();
+	}
+	{
+		Knight k1;
+		MemberJob job2(&k1, &Knight::HealMe, 10);
+		job2.Execute();
+
 	}
 
 	
