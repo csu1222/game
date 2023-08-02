@@ -29,6 +29,7 @@ using ServerServiceRef		= std::shared_ptr<class ServerService>;
 using ClientServiceRef		= std::shared_ptr<class ClientService>;
 using SendBufferRef			= std::shared_ptr<class SendBuffer>;
 using SendBufferChunkRef	= std::shared_ptr<class SendBufferChunk>;
+using JobRef				= std::shared_ptr<class Job>;
 
 // 자주 사용하게 될 정수 크기 변환 매크로
 #define size16(val) static_cast<int16>(sizeof(val))
