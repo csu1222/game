@@ -13,6 +13,7 @@ public:
 
 	T Pop()
 	{
+		WRITE_LOCK;
 		if (_items.empty())
 			return T();
 

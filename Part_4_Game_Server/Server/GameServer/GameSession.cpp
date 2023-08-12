@@ -2,6 +2,7 @@
 #include "GameSession.h"
 #include "GameSessionManager.h"
 #include "ClientPacketHandler.h"
+#include "Room.h"
 
 /*
 -------------------------
@@ -17,8 +18,17 @@ void GameSession::OnConnected()
 
 void GameSession::OnDisconnected()
 {
-	// 접속과 반대 
 	GSessionManager.Remove(static_pointer_cast<GameSession>(shared_from_this()));
+
+	if (_currentPlayer)
+	{
+		// _room.lock()을 통해 shared_ptr로 변환 
+		if (auto room = _room.lock())
+			room->DoAsync(&Room::Leave, _currentPlayer);
+	}
+
+	_currentPlayer = nullptr;
+	_players.clear();
 }
 
 void GameSession::OnRecvPacket(BYTE* buffer, int32 len)
