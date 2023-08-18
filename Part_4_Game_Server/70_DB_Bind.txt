@@ -1,0 +1,489 @@
+
+
+
+
+        DB Bind 
+
+
+
+지난시간 데이터베이스 연결에 이어서 데이터 연동에 대해 더 알아볼겁니다. 
+
+그런데 지난시간 만들었던 코드를 사용할때 사용하기에 어려울 수 있다는거 알 수 있습니다. Connect나 Execute, Fetch 는 내부적으로 알아서 동작할것인데 비해 
+BindParam, BindCol 함수들은 필요에 따라 내용을 추가해 사용할겁니다. 거기에 인자들이 많기 때문에 실수할 여지가 있습니다. 
+
+먼저 BindParam, BindCol, HandleError 함수들이 public: 으로 사용하고 있었는데 이걸 private로 바꾸고 
+
+각각 버전에 따라 래핑함수들을 만들어 주겠습니다. 
+
+우선 BindParam 입니다. 
+
+public:
+	bool			BindParam(int32 paramIndex, bool* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, float* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, double* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, int8* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, int16* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, int32* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, int64* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, TIMESTAMP_STRUCT* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, const WCHAR* str, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, const BYTE* bin, int32 size, SQLLEN* index);
+
+두번째 인자가 bind할 파라미터입니다. 파라미터가 어떤 타입이 올지 모르니까 하나씩 만들어둔겁니다. 
+
+이어서 BindCol도 만들어줍니다. 
+
+	bool			BindCol(int32 columnIndex, bool* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, float* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, double* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, int8* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, int16* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, int32* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, int64* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, TIMESTAMP_STRUCT* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, WCHAR* str, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, BYTE* value, int32 size, SQLLEN* index);
+
+이렇게 각 버전을 만들다 보니 함수가 많아졌습니다. 이렇게 많은 함수의 구현부를 하나씩 만드는 방법도 있지만 한번에 만들어 주는 방법도 있습니다. 
+
+클래스 이름을 클릭하고 VisualStudio 기본 단축키로 alt + shift + Q 입니다. 저의 경우는 이게 안되서 그냥 만들려는 함수 시그니쳐를 다 드래그 한다음 
+우클릭 -> 빠른 작업 리팩토링 -> 선언/정의 만들기로 만들었습니다. 
+
+이제 내용을 하나씩 채워줄겁니다. 
+예를들어서 BindParam 의 bool 타입 파라미터를 받는 건 이렇게 만듭니다.
+
+bool DBConnection::BindParam(int32 paramIndex, bool* value, SQLLEN* index)
+{
+	return BindParam(paramIndex, SQL_C_TINYINT, SQL_TINYINT, size32(bool), value, index);
+}
+
+이런 작업을 각 함수마다 반복해줍니다. 
+
+두번째 세번째 인자를 뭘로 해야하는지는 BindParam 문서를 보면 나와있습니다. 
+
+그중에서 좀 특이한 건 문자열을 받는 버전입니다. 
+
+bool DBConnection::BindParam(int32 paramIndex, const WCHAR* str, SQLLEN* index)
+{
+	SQLULEN size = static_cast<SQLULEN>((::wcslen(str) + 1) * 2);
+	*index = SQL_NTSL;
+
+	if (size > WVARCHAR_MAX)
+		return BindParam(paramIndex, SQL_C_WCHAR, SQL_WLONGVARCHAR, size, (SQLPOINTER)str, index);
+	else
+		return BindParam(paramIndex, SQL_C_WCHAR, SQL_WVARCHAR, size, (SQLPOINTER)str, index);
+}
+문자열을 받을때는 문자열의 길이를 조절해야합니다. str을 wcslen함수에 넣어 변환하고 null 종단문자 크기 인 1을 더한다음 wstring이니까 2를 곱합니다. 그 값을
+SQLULEN 으로 캐스팅한게 size입니다. 그리고 index의 값은 SQL_NTSL로 넣어줍니다. 
+
+그리고 문자열의 길이 size가 WVARCHAR_MAX라는 값보다 클때를 조건으로 걸고 있는데 DBConnection.h 쪽에 아래와 같은 enum을 추가합니다.
+
+enum
+{
+	WVARCHAR_MAX = 4000,
+	BINARY_MAX = 8000,
+};
+
+문자열의 길이가 4000보다 큰지 아닌지에 따라 사용하는 데이터 타입이 달라진다고 합니다. 
+
+그리고 그 다음으로 BYTE 배열을 받아서 이미지같은 버퍼를 파라미터로 받는 버전입니다. 
+
+bool DBConnection::BindParam(int32 paramIndex, const BYTE* bin, int32 size, SQLLEN* index)
+{
+	if (bin == nullptr)
+	{
+		*index = SQL_NULL_DATA;
+		size = 1;
+	}
+	else
+		*index = size;
+
+	if (size > BINARY_MAX)
+		return BindParam(paramIndex, SQL_C_BINARY, SQL_LONGVARBINARY, size, (BYTE*)bin, index);
+	else
+		return BindParam(paramIndex, SQL_C_BINARY, SQL_BINARY, size, (BYTE*)bin, index);
+}
+
+bin이 nullptr이면 빈 버퍼이므로 인덱스 값도 SQL_NULL_DATA로 넣어주고 size는 null종단문자 값 1 만 넣어줍니다. 
+아니라면 index값을 size로 넣어줍니다. 
+
+그리고 size가 BINARY_MAX보다 크다 즉 8000 보다 크다면 SQL_LONGVARBINARY 타입으로 받아주고 그정도 까지는 아니라면 SQL_BINARY로 받아주는 코드입니다. 
+
+이제 BindParam은 끝났고 BindCol에도 또 해주겟습니다. 
+이것도 bool 타입부터 TIMESTAMP_STRUCT 타입까지는 
+
+bool DBConnection::BindCol(int32 columnIndex, bool* value, SQLLEN* index)
+{
+	return BindCol(columnIndex, SQL_C_TINYINT, size32(bool), value,  index);
+}
+
+이런식으로 추가해주면 됩니다. 
+
+WCHAR* 타입부터 다시보면 
+
+bool DBConnection::BindCol(int32 columnIndex, WCHAR* str, int32 size, SQLLEN* index)
+{
+	return BindCol(columnIndex, SQL_C_WCHAR, size, str, index);
+}
+이런식으로 하기는 했는데 나중에 에러가 나면 다시 수정해주겠습니다. 
+
+버퍼를 받는 타입의 BindCol은 이렇습니다. 
+bool DBConnection::BindCol(int32 columnIndex, BYTE* bin, int32 size, SQLLEN* index)
+{
+	return BindCol(columnIndex, SQL_C_BINARY, size, bin, index);
+}
+
+이제 빌드를 한번 해서 통과된다면 이전시간에 비해서는 좀 더 편하게 사용할수 있는 준비가 된겁니다. 
+
+
+다시 GameServer 쪽으로 가서 수정을 해보겠습니다. 
+이미 GameServer의 코드에는 빨간줄이 그어져 있을겁니다. 이전 시간 버전의 BindParam, BindCol 은 이미 private 로 돌렸고 인자수를 줄인 버전을 사용해야합니다. 
+
+수정된 버전에서는 인자가 3개만 필요합니다. 파라미터나 컬럼의 인덱스, 넣을 데이터, 각종 옵션을 조절하는 인덱스입니다. 
+
+		ASSERT_CRASH(dbCon->BindParam(1, SQL_C_LONG, SQL_INTEGER, sizeof(gold), &gold, &len));
+
+이런식으로 사용하고 있던 BindParam을 아래와 같이 사용할수 있게 되는겁니다. 
+
+		ASSERT_CRASH(dbCon->BindParam(1, &gold, &len));
+
+마찬가지로 다른 함수들도 다 수정해줍니다. 다 수정한 다음 빌드를 해보면 잘 통과하는걸 확인 할 수 있습니다. 
+기왕이면 오늘만든 다른 버전들도 테스트 해보면 좋을것 같습니다. 시간과 이름을 넣어보는 테스트를 해보겠습니다. 
+
+이 테스트를 위해서 먼저 테이블에 시간과 이름을 추가 해줘야합니다. 
+
+		auto query = L"									\
+			DROP TABLE IF EXISTS[dbo].[Gold];			\
+			CREATE TABLE [dbo].[Gold]					\
+			(											\
+				[id] INT NOT NULL PRIMARY KEY IDENTITY, \
+				[gold] INT NULL,						\
+				[name] NVARCHAR(50) NULL,				\
+				[createDate] DATETIME NULL				\
+			);";
+
+
+이렇게 [gold] 뒤로[name], [createDate] 를 추가 했습니다.
+
+만든 테이블에 데이터를 만들어주는 곳에서는 지금 for문으로 3개를 만들어 주고 있습니다. gold만 입력하고 있는데 여기에 이름과 생성날짜를 추가하겠습니다. 
+
+	// Add Data
+	for (int32 i = 0; i < 3; i++)
+	{
+		DBConnection* dbCon = GDBConnectionPool->Pop();
+		// 기존에 바인딩 된 정보 날림
+		dbCon->Unbind();
+
+		// 넘길 인자 바인딩
+		int32 gold = 100;
+		SQLLEN len = 0;
+
+		WCHAR name[100] = L"천성욱";
+		SQLLEN nameLen = 0;
+		
+		TIMESTAMP_STRUCT ts = {};
+		ts.year = 2023;
+		ts.month = 8;
+		ts.day = 16;
+		SQLLEN tsLen = 0;
+
+		ASSERT_CRASH(dbCon->BindParam(1, &gold, &len));
+		ASSERT_CRASH(dbCon->BindParam(2, name, &nameLen));
+		ASSERT_CRASH(dbCon->BindParam(3, &ts, &tsLen));
+
+		ASSERT_CRASH(dbCon->Execute(L"INSERT INTO [dbo].[Gold]([gold], [name], [createDate]) VALUES(?, ?, ?)"));
+
+		GDBConnectionPool->Push(dbCon);
+	}
+
+name과 TIMESTAMP_STRUCT 파라미터를 각각 만들어주고  BindParam도 3개를 만들어 주었습니다. 
+Execute하는 쿼리도 수정이 있습니다. 
+
+	// Read
+	{
+		DBConnection* dbCon = GDBConnectionPool->Pop();
+		
+		dbCon->Unbind();
+
+		// 넘길 인자 바인딩
+		int32 gold = 100;
+		SQLLEN len = 0;
+
+		ASSERT_CRASH(dbCon->BindParam(1, &gold, &len));
+
+		int32 outId = 0;
+		SQLLEN outIdLen = 0;
+		ASSERT_CRASH(dbCon->BindCol(1, &outId, &outIdLen));
+
+		int32 outGold = 0;
+		SQLLEN outGoldLen = 0;
+		ASSERT_CRASH(dbCon->BindCol(2, &outGold, &outGoldLen));
+
+		WCHAR outName[100];
+		SQLLEN outNameLen = 0;
+		ASSERT_CRASH(dbCon->BindCol(3, outName, len32(outName), &outNameLen));
+
+		TIMESTAMP_STRUCT outDate = {};
+		SQLLEN outDateLen = 0;
+		ASSERT_CRASH(dbCon->BindCol(4, &outDate, &outDateLen));
+
+		ASSERT_CRASH(dbCon->Execute(L"SELECT id, gold, name, createDate FROM [dbo].[Gold] WHERE gold = (?)"));
+
+		wcout.imbue(locale("kor"));
+		while (dbCon->Fetch())
+		{
+			wcout << "id: " << outId << " Gold: " << outGold << " Name: " << outName << endl;
+		    wcout << "Date: " << outDate.year << "/" << outDate.month << "/" << outDate.day << endl;
+		}
+
+		GDBConnectionPool->Push(dbCon);
+	}
+
+마찬가지로 각각 받아줄 변수를 만들고 BindCol로 컬럼에 바인드 해줍니다. 
+
+테스트를 실행해보면 원하던대로 출력된다는걸 확인할수 있고 DB에서 직접 확인해도 잘 입력된것을 볼 수 있습니다. 
+
+노가다성 작업이긴했지만 한번만 만들어주면 이후가 편한한 작업이었습니다. 
+
+
+
+***
+
+
+그럼에도 아직 아쉬운 점이 있습니다. 
+바인딩을 할때 SQLLEN을 매번 같이 만들어 넣어주는게 반복되고 있습니다.  이게 하나 맘에 안들고 
+또 한가지는 우리가 만든 테이블에 따라 Execute할때 컬럼의 갯수를 맞춰줘야 실해야 될겁니다. 어짜피 실행할때 갯수가 안맞으면 크래시가 나긴할텐데 
+나중에는 Execute가 실패했다고 했을때 여러가지 이유로 실패할수 있습니다. 예를들면 id가 곂치게 바인딩되어서 실패했다던지 아니면 지금 처럼 테이블과 INSERT의 갯수가 맞지 않아서 
+실패했다던지 할겁니다.
+
+이런 다양한 이유를 매번 실패할때 마다 로그를 확인하면서 왜 실패했는지를 살피는것도 피곤한 일입니다. 
+이런저런 문제들은 다 하드코딩을 하면서 생기는 문제인데 이것을 좀 더 실수의 여지를 줄여보겠습니다. 
+
+새로운 클래스를 DB 필터 아래에 추가하겠습니다. 
+이름은 DBBind 라고 하고 템플릿을 사용할겁니다. 
+
+template<int32 ParamCount, int32 ColumnCount>
+class DBBind
+{
+};
+
+이렇게 시작할건데 템플릿이라고 무조건 typename으로 받아줘야하는건아니라서 int32 라고 지정해 줄 수 있습니다. 이때 받아주는 타입을 정해버리면 템플릿을 사용하는 의미가 뭔가 싶은데 
+
+만약 ParamCount, ColumnCount 에 0,0 을 넣어 클래스를 만들거나 1,1을 넣어 클래스를 만들면 각 객체는 서로 따로따로 별도의 클래스로 만들어 집니다. 
+
+public 영역과 protected 영역이 있을건데 왜 private가 아닌 protected냐면 이 DBBind 클래스를 다른 곳에서 상속해 사용할수도 있기 때문입니다. 
+protected에는 멤버 변수들이 있을겁니다. 
+
+protected:
+	DBConnection&		_dbConnection;
+	const WCHAR*			_query;
+	SQLLEN				_paramIndex[ParamCount > 0 ? ParamCount : 1];
+	SQLLEN				_columnIndex[ColumnCount > 0 ? ColumnCount : 1];
+	uint64				_paramFlag;
+	uint64				_columnFlag;
+
+DBConnection객체는 참조로 들고 있을것이고 쿼리도 여기서 관리해줄겁니다. 그리고 매번 새로 만들던 SQLLEN은 파라미터 컬럼 각각 만들었는데 딱 한개만 만드는게 아니라 파라미터가 몇개있을지에 따라 
+대응해서 늘어날것이기 때문에 배열로 만들었습니다. 하지만 배열의 크기를 정수가 아닌 조건문을 걸고 있습니다. 이렇게 조건을 걸수 있는 이유는 템플릿이 컴파일 단계에서 결정되기 때문에 
+여기도 런타임전에 배열 크기를 결정해줄수 있는겁니다. 
+그리고 Flag라고 되어있는 변수들은 어떤 용도냐면 파라미터와 컬럼의 갯수를 저장하기 위한 것입니다. 그냥 바인드할때마다 카운트를 증가시키는 방법도 있을것 같지만 
+평범한 카운트 증가로는 만약 바인드할때 인덱스가 곂쳐서 제대로 추가가 안된 상황도 카운트가 증가하면서 정확한 카운트가 안될 수 있기 때문입니다. 
+
+다음은 래핑함수들입니다. 먼저 어떤 함수들을 만들것이냐면 생성자에서 변수들을 받아 채워주고 초기화 까지 할것이고 유효한지 확인하는 Validate, Execute, Fetch 함수등을 만들어 주겠습니다. 
+이 셋중 가장 쉬운 함수인 Fetch입니다. 
+
+	bool Fetch()
+	{
+		return _dbConnection.Fetch();
+	}
+
+그냥 곧바로 Fetch를 호출해 반환하면됩니다. 
+다음은 Execute입니다. 
+
+	bool Execute()
+	{
+		ASSERT_CRASH(ValiDate());
+		return _dbConnection.Execute(_query);
+	}
+
+유효한지 체크한 다음에 유효하다면 들고 있는 쿼리로 Execute해줍니다. 
+
+그러면 이제 다음은 ValiDate 를 어떻게 할지 그리고 Bind 함수도 추가해줄 건데 이건 어떻게 해야할지를 생각해 봐야합니다. 
+바인딩하는 부분부터 만들겠습니다. 
+
+템플릿인자인 ParamCount와 ColumnCount 를 대상으로 어떻게 해줄건지를 설정해주겠습니다. 어떤 의미냐면 
+위에서 테스트한 내용에 따르면 데이터를 추가할때의 코드는 gold, name, createDate 라는 데이터 3개를 인풋하고 아웃풋은 없으니 ParamCount = 3, ColumnCount = 0 으로 만들어 주게 될겁니다. 
+
+대부분의 경우가 챙겨지는 BindParam입니다. 
+
+	template<typename T>
+	void BindParam(int32 idx, T& value)
+	{
+		_dbConnection.BindParam(idx + 1, &value, &_paramIndex[idx]);
+		_paramFlag |= (1LL << idx); 
+	}
+
+템플릿으로 커버되는 타입들은 여기로 들어오게될겁니다. idx 같은경우는 보통 프로그래밍에서는 0부터 시작하고 DB에서는 1부터 시작하는 것때문에 +1 을 해준겁니다.
+_paramFlag는 |= 라는 or 비트 플래그 연산자로 비트를 켜줍니다. 1LL 을 idx 만큼 << 로 움직여 비트를 키는건데 1LL 이라는 값은 정수 1인데 LongLong 타입 64비트의 정수로 처리해달라는것입니다. 
+
+이전시간에 대부분의 경우와 다른 몇가지 버전이 있었습니다. 먼저 문자열 파라미터를 받는 버전입니다. 
+
+	void BindParam(int32 idx, const WCHAR* value)
+	{
+		_dbConnection.BindParam(idx + 1, value, &_paramIndex[idx]);
+		_paramFlag |= (1LL << idx);
+	}
+
+이건 코드가 많이 다르진 않고 템플릿이 아닌 const WCHAR* 타입으로 value를 받아주고 있습니다. 
+
+다음은 일반적인 BYTE 배열을 넘겨줄때입니다. 
+
+	template<typename T, int32 N>
+	void BindParam(int32 idx, T(&value)[N])
+	{
+		_dbConnection.BindParam(idx + 1, (const BYTE*)value, size32(T) * N, &_paramIndex[idx]);
+		_paramFlag |= (1LL << idx);
+	}
+
+마지막으로 하나만 더 만들어 볼건데 이번엔 포인터, 갯수까지 지정해줄겁니다. 
+배열형태가 아니라 어떤 데이터 몇개짜리를 넣어주겠다고 하는 경우입니다. 
+
+	template<typename T>
+	void BindParam(int32 idx, T* value, int32 N)
+	{
+		_dbConnection.BindParam(idx + 1, (const BYTE*)value, size32(T) * N, &_paramIndex[idx]);
+		_paramFlag |= (1LL << idx);
+	}
+
+대부분의 상황에서는 첫번째 방식으로 다 처리가 될건데 예외가 되는 세가지를 추가하였습니다.
+
+이제는 이걸 BindCol도 똑같이 반복해줍니다.
+
+	template<typename T>
+	void BindCol(int32 idx, T& value)
+	{
+		_dbConnection.BindCol(idx + 1, &value, &_columnIndex[idx]);
+		_columnFlag |= (1LL < idx);
+	}
+
+	template<int32 N>
+	void BindCol(int32 idx, WCHAR(&value)[N])
+	{
+		_dbConnection.BindCol(idx + 1, value, N - 1, &_columnIndex[idx]);
+		_columnFlag |= (1LL < idx);
+	}
+
+	void BindCol(int32 idx, WCHAR* value, int32 len)
+	{
+		_dbConnection.BindCol(idx + 1, value, len - 1, &_columnIndex[idx]);
+		_columnFlag |= (1LL < idx);
+	}
+
+	template<typename T, int32 N>
+	void BincCol(int32 idx, T(&value)[N])
+	{
+		_dbConnection.BindCol(idx + 1, value, size32(T) * N, _columnIndex[idx]);
+		_columnFlag |= (1LL < idx);
+	}
+
+이렇게 해서 모든 경우의 수에 대해 BindParam, BindCol을 할 수 있도록 채워주었고 
+
+그러면 이제 비트 플레그가 제대로 채워져있는지를 ValiDate에서 테스트 해야합니다. 
+하지만 생각해봐야할게 비트 플레그가 다 채워졌다는걸 어떻게 체크할 수 있을까요 그냥 매번 바인트를 할때 추적해 저장한 비트 플레그와 비교를 해도 되지만 
+좀 더 재밌는 방식으로 해보겠습니다. 
+
+template<int32 C>
+struct FullBits { enum { value = (1 << (C - 1)) | FullBits<C-1>::value}; };
+
+이 코드만 봐서는 외계어 같습니다. 
+사용예를 들어보면 좀 더 이해가 쉬운에 
+
+FullBits<3> 을 만들면 
+
+(1 << 2) | (1 << 1) | FullBits<0> 
+
+이런식으로 계속 재귀적으로 비트를 전부 채워줍니다. 
+
+예외적인 케이스를 만들어 줘야합니다 .
+
+template<int32 C>
+struct FullBits { enum { value = (1 << (C - 1)) | FullBits<C-1>::value}; };
+
+template<>
+struct FullBits<1> { enum { value = 1 }; };
+
+template<>
+struct FullBits<0> { enum { value = 0 }; };
+
+재귀가 끝날 조건을 만들어 주는것입니다. 
+
+이제 ValiDate에서 체크를 해보겠습니다.  
+
+	bool Validate()
+	{
+		return _paramFlag == FullBits<ParamCount>::value && _columnFlag == FullBits<ColumnCount>::value;
+	}
+
+바인드를 하는 동안 만든 _paramFlag와 _columnFlag가 FullBits로 만든 ParamCount, ColumnCount 플레그와 같은지를 체크해 bool값을 반환할겁니다.
+
+(왠지 저는 DBBind 생성자가 빌드에서 에러가 떠서 지우고 다시 작성했습니다. 그리고 BindCol에서 템플릿으로 N을 받는 WCHAR* 배열은 N의 타입이 typename 에서 int32 로 수정했습니다.)
+
+***
+
+이제 테스트를 해보겠습니다. GameServer에 DBBind 헤더를 include 하고 이전에 테스트 했던 코들 굳이 다시 DBBind를 활용한 버전으로 테스트 해보겠습니다. 
+
+데이터를 추가하는 부분부터 해보겠습니다. 
+DBConnection 객체를 Pop으로 꺼내는 부분과 끝에 다 사용하고 다시 밀어넣는 부분은 변경점이 없으니 그대로 사용하겠습니다. 
+
+골드, 이름, 생성 날짜를 추가하는 코드였으니까 인풋이 3개 아웃풋은 없습니다.
+
+		DBBind<3, 0> dbBind(*dbCon, L"INSERT INTO [dbo].[Gold]([gold], [name], [createDate]) VALUES(?, ?, ?)");
+
+생성자의 인자로는 dbCon의 주소를 줘서 참조하도록 하고 두번째는 쿼리였습니다. 
+다음은 넣어줄 데이터입니다. 
+		
+		int32 gold = 100;
+
+		WCHAR name[100] = L"천성욱";
+
+		TIMESTAMP_STRUCT ts = { 2023, 8, 16 };
+
+지금이야 여기서 만들어 넣지만 원래는 클라이언트로부터 받아 넣을겁니다. 여기에 바인드하는 코드까지 추가합니다. 
+		
+		int32 gold = 100;
+		dbBind.BindParam(0, gold);
+
+		WCHAR name[100] = L"천성욱";
+		dbBind.BindParam(1, name);
+
+		TIMESTAMP_STRUCT ts = { 2023, 8, 16 };
+		dbBind.BindParam(2, ts);
+
+처음 데이터베이스를 사용하던 코드보다는 확실히 편해졌습니다. 
+이후 Execute를 하는데 혹시 몰라 ASSERT_CRASH 로 체크를 하지만 만약 바인드한 파라미터수가 안맞는경우는 Execute내부에서도 잡아줄겁니다. 
+
+		ASSERT_CRASH(dbBind.Execute());
+
+
+다음은 데이터를 읽는 코드를 작업해보겠습니다. 시작하면서 dbCon을 Unbind하고 있습니다. 여기부터 긁어온 데이터를 출력하는 부분 전 까지를 주석 처리하고 시작합니다. 
+
+		
+		DBBind<1, 4> dbBind(*dbCon, L"SELECT id, gold, name, createDate FROM [dbo].[Gold] WHERE gold = (?)");
+
+여기는 인풋이 1개 아웃풋이 4개 였습니다. 인풋은 100 골드를 가지고 있는 사람을 찾기 위한 값이고 아웃풋은 찾은 사람의 아이디, 골드, 이름, 생성날짜입니다. 
+
+내용물은 이렇습니다 
+
+		int32 gold = 100;
+		dbBind.BindParam(0, gold);
+
+		int32 outId = 0;
+		int32 outGold = 0;
+		WCHAR outName[100];
+		TIMESTAMP_STRUCT outDate = {};
+
+		dbBind.BindCol(0, OUT outId);
+		dbBind.BindCol(1, OUT outGold);
+		dbBind.BindCol(2, OUT outName);
+		dbBind.BindCol(3, OUT outDate);
+
+결국은 하나하나 순서대로 넣는것은 비슷하지만 그래도 귀찮은 부분들을 많이 간소화 했습니다. 더 발전 시키는건 다른 시간에 알아보도록 하겠습니다. 
