@@ -15,6 +15,7 @@
 #include "Player.h"
 #include "DBConnectionPool.h"
 #include "DBBind.h"
+#include "XmlParser.h"
 
 enum
 {
@@ -40,128 +41,64 @@ void DoWorkerJob(ServerServiceRef& service)
 
 int main()
 {
-	ASSERT_CRASH(GDBConnectionPool->Connect(1, L"Driver={ODBC Driver 18 for SQL Server};Server=(localdb)\\MSSQLLocalDB;Database=ServerDB;Trusted_Connection=Yes;"));
 
-	//Create Table
+	//
+	XmlNode root;
+	XmlParser parser;
+	if (parser.ParseFromFile(L"../ServerCore/GameDB.xml", OUT root) == false)
+		return 0;
+
+	Vector<XmlNode> tables = root.FindChildren(L"Table");
+	for (XmlNode& table : tables)
 	{
-		auto query = L"									\
-			DROP TABLE IF EXISTS[dbo].[Gold];			\
-			CREATE TABLE [dbo].[Gold]					\
-			(											\
-				[id] INT NOT NULL PRIMARY KEY IDENTITY, \
-				[gold] INT NULL,						\
-				[name] NVARCHAR(50) NULL,				\
-				[createDate] DATETIME NULL				\
-			);";
+		String name = table.GetStringAttr(L"name");
+		String desc = table.GetStringAttr(L"desc");
 
-		DBConnection* dbCon = GDBConnectionPool->Pop();
-		ASSERT_CRASH(dbCon->Execute(query));
-		
-		GDBConnectionPool->Push(dbCon);
-	}
-
-	// Add Data
-	for (int32 i = 0; i < 3; i++)
-	{
-		DBConnection* dbCon = GDBConnectionPool->Pop();
-
-		DBBind<3, 0> dbBind(*dbCon, L"INSERT INTO [dbo].[Gold]([gold], [name], [createDate]) VALUES(?, ?, ?)");
-		
-		int32 gold = 100;
-		dbBind.BindParam(0, gold);
-
-		WCHAR name[100] = L"천성욱";
-		dbBind.BindParam(1, name);
-
-		TIMESTAMP_STRUCT ts = { 2023, 8, 16 };
-		dbBind.BindParam(2, ts);
-
-		ASSERT_CRASH(dbBind.Execute());
-
-		//
-		//// 기존에 바인딩 된 정보 날림
-		//dbCon->Unbind();
-
-		//// 넘길 인자 바인딩
-		//int32 gold = 100;
-		//SQLLEN len = 0;
-
-		//WCHAR name[100] = L"천성욱";
-		//SQLLEN nameLen = 0;
-		//
-		//TIMESTAMP_STRUCT ts = {};
-		//ts.year = 2023;
-		//ts.month = 8;
-		//ts.day = 16;
-		//SQLLEN tsLen = 0;
-
-		//ASSERT_CRASH(dbCon->BindParam(1, &gold, &len));
-		//ASSERT_CRASH(dbCon->BindParam(2, name, &nameLen));
-		//ASSERT_CRASH(dbCon->BindParam(3, &ts, &tsLen));
-
-		//ASSERT_CRASH(dbCon->Execute(L"INSERT INTO [dbo].[Gold]([gold], [name], [createDate]) VALUES(?, ?, ?)"));
-		//
-
-		GDBConnectionPool->Push(dbCon);
-	}
-
-	// Read
-	{
-		DBConnection* dbCon = GDBConnectionPool->Pop();
-		
-		DBBind<1, 4> dbBind(*dbCon, L"SELECT id, gold, name, createDate FROM [dbo].[Gold] WHERE gold = (?)");
-
-		int32 gold = 100;
-		dbBind.BindParam(0, gold);
-
-		int32 outId = 0;
-		int32 outGold = 0;
-		WCHAR outName[100];
-		TIMESTAMP_STRUCT outDate = {};
-
-		dbBind.BindCol(0, OUT outId);
-		dbBind.BindCol(1, OUT outGold);
-		dbBind.BindCol(2, OUT outName);
-		dbBind.BindCol(3, OUT outDate);
-
-		ASSERT_CRASH(dbBind.Execute());
-		//
-		//dbCon->Unbind();
-
-		//// 넘길 인자 바인딩
-		//int32 gold = 100;
-		//SQLLEN len = 0;
-
-		//ASSERT_CRASH(dbCon->BindParam(1, &gold, &len));
-
-		//int32 outId = 0;
-		//SQLLEN outIdLen = 0;
-		//ASSERT_CRASH(dbCon->BindCol(1, &outId, &outIdLen));
-
-		//int32 outGold = 0;
-		//SQLLEN outGoldLen = 0;
-		//ASSERT_CRASH(dbCon->BindCol(2, &outGold, &outGoldLen));
-
-		//WCHAR outName[100];
-		//SQLLEN outNameLen = 0;
-		//ASSERT_CRASH(dbCon->BindCol(3, outName, len32(outName), &outNameLen));
-
-		//TIMESTAMP_STRUCT outDate = {};
-		//SQLLEN outDateLen = 0;
-		//ASSERT_CRASH(dbCon->BindCol(4, &outDate, &outDateLen));
-
-		//ASSERT_CRASH(dbCon->Execute(L"SELECT id, gold, name, createDate FROM [dbo].[Gold] WHERE gold = (?)"));
-
-		
-		wcout.imbue(locale("kor"));
-		while (dbCon->Fetch())
+		Vector<XmlNode> columns = table.FindChildren(L"Column");
+		for (XmlNode& column : columns)
 		{
-			wcout << "id: " << outId << " Gold: " << outGold << " Name: " << outName << endl;
-			wcout << "Date: " << outDate.year << "/" << outDate.month << "/" << outDate.day << endl;
+			String colName = column.GetStringAttr(L"name");
+			String colType = column.GetStringAttr(L"type");
+			bool nullable = !column.GetBoolAttr(L"notnull", false);
+			String identity = column.GetStringAttr(L"identity");
+			String colDefault = column.GetStringAttr(L"default");
+			// Etc...
 		}
 
-		GDBConnectionPool->Push(dbCon);
+		Vector<XmlNode> indices = table.FindChildren(L"Index");
+		for (XmlNode& index : indices)
+		{
+			String indexType = index.GetStringAttr(L"type");
+			bool primaryKey = index.FindChild(L"PrimaryKey").IsValid();
+			bool uniqueConstraint = index.FindChild(L"UniqueKey").IsValid();
+
+			Vector<XmlNode> columns = index.FindChildren(L"Column");
+			for (XmlNode& column : columns)
+			{
+				String colName = column.GetStringAttr(L"name");
+			}
+		}
 	}
+
+	Vector<XmlNode> procedures = root.FindChildren(L"Procedure");
+	for (XmlNode& procedure : procedures)
+	{
+		String name = procedure.GetStringAttr(L"name");
+		String body = procedure.FindChild(L"Body").GetStringValue();
+
+		Vector<XmlNode> params = procedure.FindChildren(L"Param");
+		for (XmlNode& param : params)
+		{
+			String paramName = param.GetStringAttr(L"name");
+			String paramType = param.GetStringAttr(L"type");
+			// TODO..
+		}
+	}
+	//
+
+	ASSERT_CRASH(GDBConnectionPool->Connect(1, L"Driver={ODBC Driver 18 for SQL Server};Server=(localdb)\\MSSQLLocalDB;Database=ServerDB;Trusted_Connection=Yes;"));
+
+
 
 	ClientPacketHandler::Init();
 
