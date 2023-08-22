@@ -1,0 +1,717 @@
+
+
+
+        ORM 
+
+
+이전시간에 했던 작업은 DB를 우리 서버에 연동하기는 했지만 그 서버를 직접 ODBC로 쿼리를 작성해 만들게 되면 아쉬웠던 점이 
+
+소스코드는 버전관리프로그램을 통해 버전을 이리지러 이동할 수 있는데 소스코드에 따라 데이터 베이스의 구조도 달라져야하지만 직접 쿼리로 관리하다보면 
+매번 테이블을 다 날리고 새로 만드는 작업을 해야합니다. 이건 안에 들어있는 데이터에 따라 매우 위험한 작업이 됩니다. 
+그래서 따로 데이터베이스의 버전 관리 프로그램비슷한걸 만들기 위해 이전 시간에는 xml을 따로 만들어 거기에 데이터 베이스 구조를 설계해놓고 그걸 또 
+우리 프로젝트에서 추출해 확인하는 곳 까지 해봤습니다. 
+
+오늘은 xml 에서 추출한 데이터를 가지고 실제 데이터 베이스에 구현하는 우리만의 ORM을 만들어 보겠습니다. 
+
+물론 간단하게 우리가 만들어둔 xml코드 그대로 테이블들을 만드는 식으로 해도 되지만 기왕이면 기존 데이터베이스와 비교를 해서 일치하는부분과 
+일치하지 않는 부분을 구별해 일치하지 않는 부분만 업데이트를 하는 방식으로 만들면 좋겠습니다. 
+
+이번 시간을 시작하기에 앞서 결과물을 cout으로 출력하던걸 다른 방법으로 색도 넣을수 있게 해보겠습니다. 
+
+ServerCore 프로젝트 아래로 Log라는 필터를 만들고 또 ConsoleLog 라는 클래스파일을 추가했습니다. 
+
+-- ConsoleLog
+
+색상을 enum으로 관리하면서 색상을 고르고 그걸 출력하는 기능입니다. 
+
+enum class Color
+{
+	BLACK,
+	WHITE,
+	RED,
+	GREEN,
+	BLUE,
+	YELLOW,
+};
+
+class ConsoleLog
+{
+	enum { BUFFER_SIZE = 4096 };
+
+public:
+	ConsoleLog();
+	~ConsoleLog();
+
+public:
+	void		WriteStdOut(Color color, const WCHAR* str, ...);
+	void		WriteStdErr(Color color, const WCHAR* str, ...);
+
+protected:
+	void		SetColor(bool stdOut, Color color);
+
+private:
+	HANDLE		_stdOut;
+	HANDLE		_stdErr;
+};
+
+변수인 _stdErr, _stdOut를 가지고 콘솔에서 색상을 표현하는겁니다. 
+
+ConsoleLog::ConsoleLog()
+{
+	_stdOut = ::GetStdHandle(STD_OUTPUT_HANDLE);
+	_stdErr = ::GetStdHandle(STD_ERROR_HANDLE);
+}
+
+이렇게 생성자에서 초기화한 핸들로 SetColor함수에서 작성할 색을 설정해줍니다.
+
+void ConsoleLog::SetColor(bool stdOut, Color color)
+{
+	static WORD SColors[]
+	{
+		0,
+		FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE,
+		FOREGROUND_RED | FOREGROUND_INTENSITY,
+		FOREGROUND_GREEN | FOREGROUND_INTENSITY,
+		FOREGROUND_BLUE | FOREGROUND_INTENSITY,
+		FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY
+	};
+
+	::SetConsoleTextAttribute(stdOut ? _stdOut : _stdErr, SColors[static_cast<int32>(color)]);
+}
+
+그리고 _stdErr 와 _stdOut을 출력해주는 함수들입니다 .
+
+void ConsoleLog::WriteStdOut(Color color, const WCHAR* format, ...)
+{
+	if (format == nullptr)
+		return;
+
+	SetColor(true, color);
+
+	va_list ap;
+	va_start(ap, format);
+	::vwprintf(format, ap);
+	va_end(ap);
+
+	fflush(stdout);
+
+	SetColor(true, Color::WHITE);
+}
+
+void ConsoleLog::WriteStdErr(Color color, const WCHAR* format, ...)
+{
+	WCHAR buffer[BUFFER_SIZE];
+
+	if (format == nullptr)
+		return;
+
+	SetColor(false, color);
+
+	va_list ap;
+	va_start(ap, format);
+	::vswprintf_s(buffer, BUFFER_SIZE, format, ap);
+	va_end(ap);
+
+	::fwprintf_s(stderr, buffer);
+	fflush(stderr);
+
+	SetColor(false, Color::WHITE);
+}
+
+가끔 이런 로그를 전담할 스레드를 하나 할당해 모든 로그를 찍어주는 방식도 있다고 하는데 우리의 경우는 그렇게 많은 로그를 찍지는 않을것이기 때문에 공용으로 아무나 사용할수 있게 해줄겁니다. 
+
+CoreGlobal에 ConsoleLog 전역객체를 추가해줍니다.
+
+
+***
+이제 DB에 대한 내용을 작업해보겠습니다. 
+이전에 만들었던 DB 필터 아래에서 작업할건네 먼저 DBModel 이라는 클래스를 추가해줍니다. 또 DBSynchronizer 라는 DB의 싱크를 맞춰줄 클래스까지 해서 
+두가지를 추가합니다. 
+
+-- DBModel
+
+이번 코드가 많습니다. 그래서 DBModel 이나 DBSynchronizer안에서 쓰일 용어가 DB 코드 이외에서도 쓰일 경우가 많기 때문에 DBModel에서 사용할 용어를 따로 매크로를 만들어 정의해 사용할겁니다.
+
+namespace DBModel
+{
+    // 내용
+}
+이런식으로 클래스 맨위에 정의 해도 되지만 CoreMacro 에서 
+
+#define NAMESPACE_BEGIN(name)	namespace name {
+#define NAMESPACE_END			}
+
+이런 매크로를 추가해줍니다. 이 매크로를 사용하려면 클래스의 맨 처음과 맨끝에 추가해 준뒤 그 사이에서 클래스를 만들어 나가면 됩니다. 
+
+이번 코드는 SQL Server를 기준으로 만들었다보니 다른 DB 제품과는 호환이 되지 않을 수 있습니다. 대표적으로 어느 부분이 그렇냐면 
+
+/*-------------
+	DataType
+--------------*/
+
+enum class DataType
+{
+	None = 0,
+	TinyInt = 48,
+	SmallInt = 52,
+	Int = 56,
+	Real = 59,
+	DateTime = 61,
+	Float = 62,
+	Bit = 104,
+	Numeric = 108,
+	BigInt = 127,
+	VarBinary = 165,
+	Varchar = 167,
+	Binary = 173,
+	NVarChar = 231,
+};
+이런 데이터 타입을 enum class 로 관리해줄건데 각각의 타입에 할당된 값들이 우리가 임의로 지정해준게 아닌 SQL Server 에서 호환되는 값들입니다. 
+
+그다음에 DB에서 사용될 모든 부품들을 클래스로 하나하나 만들고 있습니다. 
+
+먼저 Column입니다.
+
+/*-------------
+	Column
+--------------*/
+
+class Column
+{
+public:
+	String				CreateText();
+
+public:
+	String				_name;
+	int32				_columnId = 0; // DB
+	DataType			_type = DataType::None;
+	String				_typeText;
+	int32				_maxLength = 0;
+	bool				_nullable = false;
+	bool				_identity = false;
+	int64				_seedValue = 0;
+	int64				_incrementValue = 0;
+	String				_default;
+	String				_defaultConstraintName; // DB
+};
+컬럼에서 사용할 법한 정보들이 다 들어있습니다. 컬럼의 이름, DB에서 사용될 컬럼 아이디 등등 입니다. 
+지금 하려는 방식이 먼저 XmlParser로 Xml 정보들을 쫙 긁어올것이고 그다음에 DB에서 쿼리를 사용해 거기서도 구성하고 있는 모든 정보들을 긁어올겁니다. 
+거기서 서로 비교를 해줄 건데 그때 컬럼에서 서로 비교하기 위해 필요한 모든 정보를 들고 있는겁니다. 
+
+이전시간에 만든 GameDB.xml을 두고 비교하자면 Gold 테이블에서 첫번째 컬럼으로 이름이 id, 타입은 int, notnull 여부는 true 입니다. 
+그리고 경우에 따라 _identity 를 넣을 수 있는데 이 _identity는 1씩 증가하는 값으로 이번에 id 컬럼에 추가해주도록 하겠습니다. 
+
+		<Column name="id" type="int" notnull="true" identity="1,1" />
+
+_identity 는 bool타입이기 때문에 값이 있거나 없으면 되고 id 컬럼에 1,1 이라는 수를 넣어준것은 _identity 밑으로 _seedValue, _incrementValue 를 각각 1씩을 준겁니다. 
+결국 _identity, _seedValue, _incrementValue는 거의 묶인 값들입니다.
+
+그래서 이런 xml의 컬럼 데이터가 Column객체에 다 채워지면 긁어온 컬럼이 어떤 컬럼인지를 알 수 있습니다. 
+
+CreateText는 뭘 하는 함수이냐면 나중에 테이블을 만들때 테이블을 만드는 문법을 보면 
+CREATE TABLE
+(
+    // TODO
+)
+이런 식으로 테이블에 어떤 컬럼을 만들건지를 써 넣었었는데 그런 쿼리 텍스트를 생성하기 위한 함수가 CreateText입니다. 
+
+String Column::CreateText()
+{
+	return DBModel::Helpers::Format(
+		L"[%s] %s %s %s",
+		_name.c_str(),
+		_typeText.c_str(),
+		_nullable ? L"NULL" : L"NOT NULL",
+		_identity ? DBModel::Helpers::Format(L"IDENTITY(%d, %d)", _seedValue, _incrementValue).c_str() : L"");
+}
+
+_identity 을 만들어 주는 부분에서 DBModel::Helpers::Format 함수가 있습니다. 앞으로 자주 사용하게 될 함수인데 ConsoleLog에서도 사용했던 
+가변 인자를 받아서 문자열로 생성해주는 헬퍼 함수입니다. 그러니끼 C언어에서 사용하는 printf 라고 볼 수 있습니다. 
+
+String Helpers::Format(const WCHAR* format, ...)
+{
+	WCHAR buf[4096];
+
+	va_list ap;
+	va_start(ap, format);
+	::vswprintf_s(buf, 4096, format, ap);
+	va_end(ap);
+
+	return String(buf);
+}
+
+컬럼은 이렇게 만들어 준다 그런 느낌입니다. 
+
+나머지 Index, Table, Procedure 등도 마찬가지로 필요하다고 예상되는 정보들을 들고 각각 필요한 헬퍼 함수들을 가지고 있습니다.
+
+Index를 보면 
+
+/*-----------
+	Index
+------------*/
+
+enum class IndexType
+{
+	Clustered = 1,
+	NonClustered = 2
+};
+
+class Index
+{
+public:
+	String				GetUniqueName();
+	String				CreateName(const String& tableName);
+	String				GetTypeText();
+	String				GetKeyText();
+	String				CreateColumnsText();
+	bool				DependsOn(const String& columnName);
+
+public:
+	String				_name; // DB
+	int32				_indexId = 0; // DB
+	IndexType			_type = IndexType::NonClustered;
+	bool				_primaryKey = false;
+	bool				_uniqueConstraint = false;
+	Vector<ColumnRef>	_columns;
+};
+
+이 인덱스가 _primaryKey 타입인지 아닌지, Clustered 타입인지 아닌지 이 인덱스가 걸려있는 컬럼들은 누구누구 인지를 가지고 있어야 하니까 
+그대로 변수로 들고 있습니다. 함수는 이름대로 직관적인 내용입니다. 
+
+테이블도 마찬가지입니다.
+
+/*-----------
+	Table
+------------*/
+
+class Table
+{
+public:
+	ColumnRef			FindColumn(const String& columnName);
+
+public:
+	int32				_objectId = 0; // DB
+	String				_name;
+	Vector<ColumnRef>	_columns;
+	Vector<IndexRef>	_indexes;
+};
+테이블의 이름, 테이블이 가지고 있을 컬럼들 과 인덱스들 을 들고 있습니다.
+
+마지막으로 Procedure 
+
+/*----------------
+	Procedures
+-----------------*/
+
+struct Param
+{
+	String				_name;
+	String				_type;
+};
+
+class Procedure
+{
+public:
+	String				GenerateCreateQuery();
+	String				GenerateAlterQuery();
+	String				GenerateParamString();
+
+public:
+	String				_name;
+	String				_fullBody; // DB
+	String				_body; // XML
+	Vector<Param>		_parameters;  // XML
+};
+
+Procedure는 DB에서의 함수같은거라고 했습니다. 그래서 Procedure의 이름, _body는 정의부에 해당하는 INSERT, SELECT 쿼리문 같은것입니다.
+그리고 어떤 인자들을 받고 있는지를 들고 있습니다. 
+
+
+결국 이런 느낌으로 정보를 저장하면 된다 라고 할수 있겠습니다.
+
+그리도 실질적으로 이런 내용들을 DB에 저장하는걸 DBSynchronizer가 해줄겁니다. 
+
+-- DBSynchronizer
+
+실질적인 DB 테이블 생성을 맡는 만큼 코드도 제일 깁니다. 
+시작하기에 앞서 아까 CoreGlobal에 만들어준 전역객체 GConsoleLogger를 사용하려면 여기도 ConsoleLog.h를 include 해줘야 하는데 
+사실 로그를 찍는건 어디서든지 사용할법하니까 전역헤더에 추가하는걸로 하겠습니다. CorePch.h에 추가해줍니다. 
+
+DBSynchronizer의 본내용은 길지만 실 사용하는법은 아주 쉽습니다. DBSynchronizer::Synchronizer 라는 함수를 호출하면 그 안에서 각 함수들을 순서대로 호출하고 
+끝입니다. 
+ParseXmlDB 라고 해서 소스코드로 가지고 있던 xml 파일을 파싱해 데이터를 긁어오고 
+GatherDBTable, GatherDBIndexes, GatherStoreProcedure 함수로 DB에서 데이터를 가져옵니다. 
+이제 xml 과 DB 양쪽의 데이터를 가져왓으면 둘을 비교해 일치하는지 아닌지를 비교해 다르다고 하면 업데이트를 해주게 될겁니다. 
+
+Gather에서 DB의 정보들을 긁어올거라고 했는데 그것은 어떤 쿼리 문을 통해 할 수 있습니다. 이런것은 이리저리 검색을 하면서 알아낼수 있다고 합니다. 
+
+프로젝트에서 StoredProcedure 라는 뜻에서 namespace SP { } 로 범위 를 지정한 후 안에서 데이터들을 긁어올 클래스들을 정의 해주고 있습니다. 
+
+
+/*---------------------
+	StoredProcedures
+----------------------*/
+
+namespace SP
+{
+	const WCHAR* QTablesAndColumns =
+		L"	SELECT c.object_id, t.name AS tableName, c.name AS columnName, c.column_id, c.user_type_id, c.max_length,"
+		"		c.is_nullable, c.is_identity, CAST(ic.seed_value AS BIGINT) AS seedValue, CAST(ic.increment_value AS BIGINT) AS incValue,"
+		"		c.default_object_id, dc.definition as defaultDefinition, dc.name as defaultConstraintName"
+		"	FROM sys.columns AS c"
+		"	JOIN sys.tables AS t"
+		"		ON c.object_id = t.object_id"
+		"	LEFT JOIN sys.default_constraints AS dc"
+		"		ON c.default_object_id = dc.object_id"
+		"	LEFT JOIN sys.identity_columns AS ic"
+		"		ON c.object_id = ic.object_id AND c.column_id = ic.column_id"
+		"	WHERE t.type = 'U'"
+		"	ORDER BY object_id ASC, column_id ASC;";
+
+	class GetDBTables : public DBBind<0, 13>
+	{
+	public:
+		GetDBTables(DBConnection& conn) : DBBind(conn, QTablesAndColumns) {}
+
+		void Out_ObjectId(OUT int32& value) { BindCol(0, value); }
+		template<int32 N> void Out_TableName(OUT WCHAR(&value)[N]) { BindCol(1, value); }
+		template<int32 N> void Out_ColumnName(OUT WCHAR(&value)[N]) { BindCol(2, value); }
+		void Out_ColumnId(OUT int32& value) { BindCol(3, value); }
+		void Out_UserType(OUT int32& value) { BindCol(4, value); }
+		void Out_MaxLength(OUT int32& value) { BindCol(5, value); }
+		void Out_IsNullable(OUT bool& value) { BindCol(6, value); }
+		void Out_IsIdentity(OUT bool& value) { BindCol(7, value); }
+		void Out_SeedValue(OUT int64& value) { BindCol(8, value); }
+		void Out_IncrementValue(OUT int64& value) { BindCol(9, value); }
+		void Out_DefaultObjectId(OUT int32& value) { BindCol(10, value); }
+		template<int32 N> void Out_DefaultDefinition(OUT WCHAR(&value)[N]) { BindCol(11, value); }
+		template<int32 N> void Out_DefaultConstraintName(OUT WCHAR(&value)[N]) { BindCol(12, value); }
+	};
+
+	const WCHAR* QIndexes =
+		L"	SELECT i.object_id, i.name as indexName, i.index_id, i.type, i.is_primary_key,"
+		"		i.is_unique_constraint, ic.column_id, COL_NAME(ic.object_id, ic.column_id) as columnName"
+		"	FROM sys.indexes AS i"
+		"	JOIN sys.index_columns AS ic"
+		"		ON i.object_id = ic.object_id AND i.index_id = ic.index_id"
+		"	WHERE i.type > 0 AND i.object_id IN(SELECT object_id FROM sys.tables WHERE type = 'U')"
+		"	ORDER BY i.object_id ASC, i.index_id ASC;";
+
+	class GetDBIndexes : public DBBind<0, 8>
+	{
+	public:
+		GetDBIndexes(DBConnection& conn) : DBBind(conn, QIndexes) {}
+
+		void Out_ObjectId(OUT int32& value) { BindCol(0, value); }
+		template<int32 N> void Out_IndexName(OUT WCHAR(&value)[N]) { BindCol(1, value); }
+		void Out_IndexId(OUT int32& value) { BindCol(2, value); }
+		void Out_IndexType(OUT int32& value) { BindCol(3, value); }
+		void Out_IsPrimaryKey(OUT bool& value) { BindCol(4, value); }
+		void Out_IsUniqueConstraint(OUT bool& value) { BindCol(5, value); }
+		void Out_ColumnId(OUT int32& value) { BindCol(6, value); }
+		template<int32 N> void Out_ColumnName(OUT WCHAR(&value)[N]) { BindCol(7, value); }
+	};
+
+	const WCHAR* QStoredProcedures =
+		L"	SELECT name, OBJECT_DEFINITION(object_id) AS body FROM sys.procedures;";
+
+	class GetDBStoredProcedures : public DBBind<0, 2>
+	{
+	public:
+		GetDBStoredProcedures(DBConnection& conn) : DBBind(conn, QStoredProcedures) {}
+
+		template<int32 N> void Out_Name(OUT WCHAR(&value)[N]) { BindCol(0, value); }
+		void Out_Body(OUT WCHAR* value, int32 len) { BindCol(1, value, len); }
+	};
+}
+
+const WCHAR* 로 되어있는 문자열들이 DB로부터 원하는 정보들을 긁어오기 위한 쿼리입니다. 
+QTablesAndColumns 쿼리를 이용해 GetDBTables 클래스에서 DBBind를 상속 받아 컬럼을 바인드 해 가져올겁니다. 
+
+이런게 Index, Procedure를 대상으로도 각각 클래스가 있습니다. 
+
+다음은 이런 StoredProcedure 클래스들을 사용할 DBSynchronizer 클래스의 정의부를 보겠습니다. 
+DBSynchronizer를 테스트할 코드는 이점 시간 GameServer의 main 함수에서 사용했던 부분을 대체하게 됩니다. 
+
+그 부분이 DBSynchronizer::ParseXmlDB 함수로 들어 갔습니다. 
+
+void DBSynchronizer::ParseXmlDB(const WCHAR* path)
+{
+	XmlNode root;
+	XmlParser parser;
+	ASSERT_CRASH(parser.ParseFromFile(path, OUT root));
+
+	Vector<XmlNode> tables = root.FindChildren(L"Table");
+	for (XmlNode& table : tables)
+	{
+		DBModel::TableRef t = MakeShared<DBModel::Table>();
+		t->_name = table.GetStringAttr(L"name");
+
+		Vector<XmlNode> columns = table.FindChildren(L"Column");
+		for (XmlNode& column : columns)
+		{
+			DBModel::ColumnRef c = MakeShared<DBModel::Column>();
+			c->_name = column.GetStringAttr(L"name");
+			c->_typeText = column.GetStringAttr(L"type");
+			c->_type = DBModel::Helpers::String2DataType(c->_typeText.c_str(), OUT c->_maxLength);
+			ASSERT_CRASH(c->_type != DBModel::DataType::None);
+			c->_nullable = !column.GetBoolAttr(L"notnull", false);
+
+			const WCHAR* identityStr = column.GetStringAttr(L"identity");
+			if (::wcslen(identityStr) > 0)
+			{
+				std::wregex pt(L"(\\d+),(\\d+)");
+				std::wcmatch match;
+				ASSERT_CRASH(std::regex_match(identityStr, OUT match, pt));
+				c->_identity = true;
+				c->_seedValue = _wtoi(match[1].str().c_str());
+				c->_incrementValue = _wtoi(match[2].str().c_str());
+			}
+
+			c->_default = column.GetStringAttr(L"default");
+			t->_columns.push_back(c);
+		}
+
+		Vector<XmlNode> indexes = table.FindChildren(L"Index");
+		for (XmlNode& index : indexes)
+		{
+			DBModel::IndexRef i = MakeShared<DBModel::Index>();
+			const WCHAR* typeStr = index.GetStringAttr(L"type");
+			if (::_wcsicmp(typeStr, L"clustered") == 0)
+				i->_type = DBModel::IndexType::Clustered;
+			else if (::_wcsicmp(typeStr, L"nonclustered") == 0)
+				i->_type = DBModel::IndexType::NonClustered;
+			else
+				CRASH("Invalid Index Type");
+
+			i->_primaryKey = index.FindChild(L"PrimaryKey").IsValid();
+			i->_uniqueConstraint = index.FindChild(L"UniqueKey").IsValid();
+
+			Vector<XmlNode> columns = index.FindChildren(L"Column");
+			for (XmlNode& column : columns)
+			{
+				const WCHAR* nameStr = column.GetStringAttr(L"name");
+				DBModel::ColumnRef c = t->FindColumn(nameStr);
+				ASSERT_CRASH(c != nullptr);
+				i->_columns.push_back(c);
+			}
+
+			t->_indexes.push_back(i);
+		}
+
+		_xmlTables.push_back(t);
+	}
+
+	Vector<XmlNode> procedures = root.FindChildren(L"Procedure");
+	for (XmlNode& procedure : procedures)
+	{
+		DBModel::ProcedureRef p = MakeShared<DBModel::Procedure>();
+		p->_name = procedure.GetStringAttr(L"name");
+		p->_body = procedure.FindChild(L"Body").GetStringValue();
+
+		Vector<XmlNode> params = procedure.FindChildren(L"Param");
+		for (XmlNode& paramNode : params)
+		{
+			DBModel::Param param;
+			param._name = paramNode.GetStringAttr(L"name");
+			param._type = paramNode.GetStringAttr(L"type");
+			p->_parameters.push_back(param);
+		}
+
+		_xmlProcedures.push_back(p);
+	}
+
+	Vector<XmlNode> removedTables = root.FindChildren(L"RemovedTable");
+	for (XmlNode& removedTable : removedTables)
+	{
+		_xmlRemovedTables.insert(removedTable.GetStringAttr(L"name"));
+	}
+}
+
+코드가 매우 길지만 노가다 성이 짙습니다. 이전 시간에 하던 내용이 들어 있는데 
+XmlNode 객체 root 에  XmlParser.ParseFromFile로 root 노드를 가져오고 거기서 FindChildren 으로 테이블도 가져오고 또 컬럼, 인덱스, 프로시져도 가져오는 것입니다. 
+
+그리고 그 긁어온 데이터를 DBModel 객체를 만들어 저장해두다가 결국은 _xmlTables로 모이게 됩니다. 
+_xmlTables, _xmlProcedures 두가지 변수가 xml파일에서 긁어온 DB구조이고 이것과 비교할 DB에서 긁어온 DB구조는 _dbTables, _dvProcedures 로 들고 있을 예정입니다.
+
+private:
+	DBConnection& _dbConn;
+
+	Vector<DBModel::TableRef>			_xmlTables;
+	Vector<DBModel::ProcedureRef>		_xmlProcedures;
+	Set<String>							_xmlRemovedTables;
+
+	Vector<DBModel::TableRef>			_dbTables;
+	Vector<DBModel::ProcedureRef>		_dbProcedures;
+
+그외에 _xmlRemovedTables 라는 건 테이블을 삭제하는데 사용하는 변수인데 이건 사실 왠만해서는 사용하지 않을겁니다 왜냐하면 아무리 사용하지 않을 데이터라도 나중에 혹여 복원이 
+필요해질 수 있는데 테이블을 삭제해버리면 영영 사라지는 것이기 때문입니다. 그래서 지금 상태에서는 실제 테이블을 삭제하는 부분은 구현하지 않을 테지만 
+대신 필요없어진 테이블은 따로 RemoveTable 이라는 테이블에 넣어 두는식으로 할겁니다. 
+
+그래서 ParseXmlDB 는 xml 파일의 DB구조를 가져오는 함수였습니다. 
+
+마찬가지로 DB에 접근해 정보들을 긁어오는 함수가 있을건데 그것은 GatherDBTables 함수입니다.
+
+bool DBSynchronizer::GatherDBTables()
+{
+	int32 objectId;
+	WCHAR tableName[101] = { 0 };
+	WCHAR columnName[101] = { 0 };
+	int32 columnId;
+	int32 userTypeId;
+	int32 maxLength;
+	bool isNullable;
+	bool isIdentity;
+	int64 seedValue;
+	int64 incValue;
+	int32 defaultObjectId;
+	WCHAR defaultDefinition[101] = { 0 };
+	WCHAR defaultConstraintName[101] = { 0 };
+
+	SP::GetDBTables getDBTables(_dbConn);
+	getDBTables.Out_ObjectId(OUT objectId);
+	getDBTables.Out_TableName(OUT tableName);
+	getDBTables.Out_ColumnName(OUT columnName);
+	getDBTables.Out_ColumnId(OUT columnId);
+	getDBTables.Out_UserType(OUT userTypeId);
+	getDBTables.Out_MaxLength(OUT maxLength);
+	getDBTables.Out_IsNullable(OUT isNullable);
+	getDBTables.Out_IsIdentity(OUT isIdentity);
+	getDBTables.Out_SeedValue(OUT seedValue);
+	getDBTables.Out_IncrementValue(OUT incValue);
+	getDBTables.Out_DefaultObjectId(OUT defaultObjectId);
+	getDBTables.Out_DefaultDefinition(OUT defaultDefinition);
+	getDBTables.Out_DefaultConstraintName(OUT defaultConstraintName);
+
+	if (getDBTables.Execute() == false)
+		return false;
+
+	while (getDBTables.Fetch())
+	{
+		DBModel::TableRef table;
+
+		auto findTable = std::find_if(_dbTables.begin(), _dbTables.end(), [=](const DBModel::TableRef& table) { return table->_objectId == objectId; });
+		if (findTable == _dbTables.end())
+		{
+			table = MakeShared<DBModel::Table>();
+			table->_objectId = objectId;
+			table->_name = tableName;
+			_dbTables.push_back(table);
+		}
+		else
+		{
+			table = *findTable;
+		}
+
+		DBModel::ColumnRef column = MakeShared<DBModel::Column>();
+		{
+			column->_name = columnName;
+			column->_columnId = columnId;
+			column->_type = static_cast<DBModel::DataType>(userTypeId);
+			column->_typeText = DBModel::Helpers::DataType2String(column->_type);
+			column->_maxLength = (column->_type == DBModel::DataType::NVarChar ? maxLength / 2 : maxLength);
+			column->_nullable = isNullable;
+			column->_identity = isIdentity;
+			column->_seedValue = (isIdentity ? seedValue : 0);
+			column->_incrementValue = (isIdentity ? incValue : 0);
+
+			if (defaultObjectId > 0)
+			{
+				column->_default = defaultDefinition;
+				uint64 p = column->_default.find_first_not_of('(');
+				column->_default = column->_default.substr(p, column->_default.size() - p * 2);
+				column->_defaultConstraintName = defaultConstraintName;
+			}
+		}
+
+		table->_columns.push_back(column);
+	}
+
+	return true;
+}
+
+가져오려고 하는 정보들을 받을 변수들을 만들고 전부 바인드를 한 후 Execute를 실행합니다. Execute의 반환값이 false가 아닌 경우는 바로 리턴하고 아니라면 
+제대로 바인드된 것들을 하나씩 Fetch로 추출하겠다는 이야기입니다. 
+
+이렇게 GatherDBTables 함수를 만들었고 마찬가지로 Indexes, Procedures 도 만들어 줍니다. 
+
+이제 ParseXmlDB 함수와 Gather 함수들로 양쪽다 정보를 가져왔다면 둘을 1대1로 비교해보는 CompareDBModel 함수를 호출해줄겁니다. 
+CompareDBModel 안에서도 Table, Index, Procedure 끼리 각각 비교를 해주는 Compare 계열 함수를 호출하고 있습니다. 
+
+비교를 한 결과 업데이트 해야할 내용들이 생길텐데 그런 것들은 
+
+	Vector<String>						_updateQueries[UpdateStep::Max];
+
+_updateQueries에 push_back 해주고 있습니다. 각 업데이트할 내역들을 enum으로 관리하면서 
+
+	enum UpdateStep : uint8
+	{
+		DropIndex,
+		AlterColumn,
+		AddColumn,
+		CreateTable,
+		DefaultConstraint,
+		CreateIndex,
+		DropColumn,
+		DropTable,
+		StoredProcecure,
+
+		Max
+	};
+
+각 업데이트 스텝마다 쿼리 하나씩을 담아주고 있습니다. 그래서 Compare를 하면서 업데이트 할 내용들을 모아서 push_back 해주는 겁니다. 
+
+실행은 나중에 한번에 할겁니다. 
+
+실행해줄 함수인 ExecuteUpdateQueries() 를 호출합니다. 
+
+void DBSynchronizer::ExecuteUpdateQueries()
+{
+	for (int32 step = 0; step < UpdateStep::Max; step++)
+	{
+		for (String& query : _updateQueries[step])
+		{
+			_dbConn.Unbind();
+			ASSERT_CRASH(_dbConn.Execute(query.c_str()));
+		}
+	}
+}
+
+그래서 이번에 만든 DBSynchronizer 의 코드의 양은 많지만 하나하나 해석해보면 그렇게 어려운 코드는 아니고 노가다 성이 많다고 할 수 있습니다. 
+
+이번 설명도 중간 중간 생략하면서 하였기 때문에 나중에 다시 공부 해보겠습니다. 
+
+*** 
+
+이제 오늘 작업한 내용을 사용하는 사용 예제를 보겠습니다. 아까 말했다 싶이 사용하는 방법은 단순합니다. 
+
+이전 코드에서 GDBConnectionPool->Connect 하는것까지는 같습니다. 일단 DB와 연결을하고 나서 
+
+DBConnection* 를 GDBConnectionPool에서 하나 꺼내옵니다. 
+또 오늘 작업한 DBSynchronizer 객체를 생성하면서 방금 만든 DBConnection* 객체를 생성자에 넘겨줍니다. 
+그리고 Synchronizer 함수를 호출해주면 끝입니다. 
+
+	ASSERT_CRASH(GDBConnectionPool->Connect(1, L"Driver={ODBC Driver 18 for SQL Server};Server=(localdb)\\MSSQLLocalDB;Database=ServerDB;Trusted_Connection=Yes;"));
+
+	DBConnection* dbConn = GDBConnectionPool->Pop();
+	DBSynchronizer dbSync(*dbConn);
+	dbSync.Synchronize(L"GameDB.xml");
+
+아주 간단합니다. 
+
+한번 실습해보겠습니다. 
+
+실제로 DB가 생성되는지를 확인하기 위해 기존 DB를 날려주고 다시 실행해보겠습니다. 
+
+그러면 콘솔에 DB가 업데이트 되었다는 로그가 뜨면서 테이블이 생성됩니다. 거기에 프로그래밍 기능쪽에도 Procedure가 추가될겁니다. 
+
+이제 xml 파일만 관리하면서 버전관리를 하게 되면 자동으로 DB가 갱신이 되겠습니다. 예를들어서 GameDB.xml에 컬럼을하나 더 만들어 이름을 test라고 해보겠습니다. 
+
+이런식으로 ORM을 직접 만들어 관리하는 방법이 DB를 관리하기 매우 편해집니다. 
+
+***
+
+추가로 한가지만 더 한다고 하면 xml 에서 procedure를 통해 우리 DB에 필요한 구조가 추가되거나 축소된다고 했을때 자동화를 해서 StoredProcecure 부분의 클래스들을 알아서 수정해주는 것까지하면 
+진짜 완전체가 될겁니다.
+
+이번시간의 내용이 아직은 확 와닿지 않을 수 있습니다. 하지만 언젠가는 DB 버전관리에 대해 고민을 하게 될 날이 올것이고 그럴때 이 내용을 꺼내 공부하면 좋겠습니다. 
